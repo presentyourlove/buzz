@@ -63,6 +63,14 @@ class WidgetDiscoveryAccount extends BuilderlabAccountClient {
     }
     throw AccountFailure.unavailable;
   }
+
+  @override
+  Future<void> rememberCommunity(
+    String relay, {
+    required String expectedSubject,
+  }) async {
+    fixture.knownSaved.add(relay);
+  }
 }
 
 class HostedCommunitiesFixture {
@@ -73,6 +81,7 @@ class HostedCommunitiesFixture {
   late final HostedFlow flow;
   final admitted = <String>[];
   final requests = <String>[];
+  final knownSaved = <String>{};
   List<Map<String, dynamic>> rows = [];
   String? bound;
   bool rejectList = false;
@@ -125,9 +134,11 @@ class HostedCommunitiesFixture {
         }
         if (path.endsWith('/known-communities/add')) {
           final body = jsonDecode(request.body) as Map<String, dynamic>;
+          final url = body['community_url'] as String;
+          knownSaved.add(url);
           return http.Response(
             jsonEncode({
-              'community': {'community_url': body['community_url']},
+              'community': {'community_url': url},
             }),
             200,
           );

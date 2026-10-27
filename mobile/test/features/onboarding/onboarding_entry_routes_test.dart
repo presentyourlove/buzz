@@ -123,12 +123,14 @@ void main() {
       // A root-navigator choice modal must remain actionable above pushed Add.
       f.rows = [f.row('one'), f.row('two')];
       f.beforeAdmission = (name) async {
-        if (name == 'two') throw const SavedCommunityIdentityConflict();
+        if (name == 'two.communities.buzz.xyz') {
+          throw const SavedCommunityIdentityConflict();
+        }
       };
       await openEntry();
       await tester.tap(find.text('Continue with Builderlab').hitTestable());
       await tester.pumpAndSettle();
-      expect(f.admitted, ['one']);
+      expect(f.admitted, ['one.communities.buzz.xyz']);
       expect(f.flow.stage, HostedFlowStage.communityConflict);
       expect(
         find.text('Keep saved identity and skip').hitTestable(),
@@ -138,11 +140,20 @@ void main() {
       await tester.tap(find.text('Back to choices').hitTestable());
       await tester.pumpAndSettle();
       expect(find.byType(CheckboxListTile).hitTestable(), findsOneWidget);
-      expect(find.text('two').hitTestable(), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(CheckboxListTile),
+          matching: find.text('two.communities.buzz.xyz'),
+        ),
+        findsWidgets,
+      );
       f.beforeAdmission = null;
       await tester.tap(find.text('Continue').hitTestable());
       await tester.pumpAndSettle();
-      expect(f.admitted, ['one', 'two']);
+      expect(f.admitted, [
+        'one.communities.buzz.xyz',
+        'two.communities.buzz.xyz',
+      ]);
       expect(find.byType(OnboardingAppEntry), findsNothing);
       expect(find.text('Add community').hitTestable(), findsOneWidget);
       f.admitted.clear();
