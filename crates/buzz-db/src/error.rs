@@ -45,6 +45,10 @@ pub enum DbError {
     #[error("invitation owner does not match the recorded owner")]
     InviteOwnerMismatch,
 
+    /// A permanent user-deletion restriction refuses this serving write.
+    #[error("identity is restricted for user deletion")]
+    UserDeletionRestricted,
+
     /// JSON serialization or deserialization failed.
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
