@@ -35,10 +35,44 @@ pub async fn seed(scenario: &Scenario, net: &Net, stats: &Arc<Stats>) -> anyhow:
     let communities = scenario.communities();
     let started = Instant::now();
     let before = stats.snapshot();
-    let (roots, rest) = plan_posts(scenario);
-    let planned = roots.len() + rest.len();
-    let root_ids = post_all(scenario, net, stats, &communities, roots, &RootIds::new()).await;
-    post_all(scenario, net, stats, &communities, rest, &root_ids).await;
+    let (roots, history, replies_by_depth) = plan_posts(scenario);
+    let planned = roots.len()
+        + history.len()
+        + replies_by_depth.iter().map(|l| l.len()).sum::<usize>();
+    let root_ids = post_all(
+        scenario,
+        net,
+        stats,
+        &communities,
+        roots,
+        &RootIds::new(),
+        &RootIds::new(),
+    )
+    .await;
+    post_all(
+        scenario,
+        net,
+        stats,
+        &communities,
+        history,
+        &RootIds::new(),
+        &RootIds::new(),
+    )
+    .await;
+    let mut parents = root_ids.clone();
+    for depth_posts in replies_by_depth {
+        let next_parents = post_all(
+            scenario,
+            net,
+            stats,
+            &communities,
+            depth_posts,
+            &root_ids,
+            &parents,
+        )
+        .await;
+        parents = next_parents;
+    }
     let accepted = seeded(&stats.snapshot(), &before);
     eprintln!(
         "seed: {accepted} of {planned} posts accepted in {:.1}s",
@@ -71,12 +105,13 @@ async fn post_all(
     communities: &[Community],
     posts: Vec<Post>,
     roots: &RootIds,
+    parents: &RootIds,
 ) -> RootIds {
     stream::iter(posts)
         .map(|post| {
             let community = &communities[post.community];
             async move {
-                let Some((keys, event)) = post.build(scenario, roots) else {
+                let Some((keys, event)) = post.build(scenario, roots, parents) else {
                     stats.err(Op::Seed, "thread root missing");
                     return None;
                 };
@@ -84,7 +119,12 @@ async fn post_all(
                 match net.submit(&keys, community, &event, None).await {
                     Ok(()) => {
                         stats.ok(Op::Seed, t0.elapsed());
-                        Some(((post.community, post.channel, post.seq), event.id.to_hex()))
+                        let key = match post.kind {
+                            PostKind::Root => (post.community, post.channel, post.seq),
+                            PostKind::Reply { root, .. } => (post.community, post.channel, root),
+                            PostKind::History => (post.community, post.channel, post.seq),
+                        };
+                        Some((key, event.id.to_hex()))
                     }
                     Err(e) => {
                         stats.err(Op::Seed, &e.to_string());
@@ -112,18 +152,36 @@ async fn provision(scenario: &Scenario, net: &Net, host: &str, owner: &Keys) -> 
         )
     })?;
     let operator = Keys::parse(&secret)?;
+    let owner_hex = owner.public_key().to_hex();
     let body = serde_json::to_vec(&json!({
         "host": host,
-        "initial_owner_pubkey": owner.public_key().to_hex(),
+        "initial_owner_pubkey": owner_hex,
+        "create_only": true,
     }))?;
     let (status, text) = net
         .post(&operator, base, "/operator/communities", body, None)
         .await?;
-    if status.is_success() || text.contains("community already exists") {
-        Ok(())
-    } else {
-        anyhow::bail!("provision {host}: HTTP {status}: {}", truncate(&text))
+    if status.is_success() {
+        return Ok(());
     }
+    if text.contains("community already exists") {
+        let path = format!("/operator/communities?owner_pubkey={owner_hex}");
+        let (q_status, q_text) = net.get(&operator, base, &path).await?;
+        if q_status.is_success() {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&q_text) {
+                if let Some(list) = val.get("communities").and_then(|c| c.as_array()) {
+                    if list
+                        .iter()
+                        .any(|c| c.get("host").and_then(|h| h.as_str()) == Some(host))
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        anyhow::bail!("community {host} already exists but is not owned by {owner_hex}");
+    }
+    anyhow::bail!("provision {host}: HTTP {status}: {}", truncate(&text))
 }
 
 async fn create_channels(
@@ -144,7 +202,7 @@ async fn create_channels(
                 ])
                 .sign_with_keys(owner)?;
             match net.submit(owner, community, &event, None).await {
-                Err(e) if !e.to_string().contains("exist") => Err(e),
+                Err(e) if !e.to_string().contains("already exists") => Err(e),
                 _ => Ok(()),
             }
         })
@@ -165,19 +223,19 @@ struct Post {
 enum PostKind {
     History,
     Root,
-    Reply { root: usize },
+    Reply { root: usize, depth: usize },
 }
 
 /// Thread roots, then history and replies (posted once root ids are known).
 /// A root's `seq` is its index within its channel.
-fn plan_posts(scenario: &Scenario) -> (Vec<Post>, Vec<Post>) {
+fn plan_posts(scenario: &Scenario) -> (Vec<Post>, Vec<Post>, Vec<Vec<Post>>) {
     let shape = &scenario.shape;
     let mut roots = Vec::new();
-    let mut rest = Vec::new();
+    let mut history = Vec::new();
     for community in 0..shape.communities {
         for channel in 0..shape.channels_per_community {
             for seq in 0..shape.history_messages_per_channel {
-                rest.push(Post {
+                history.push(Post {
                     community,
                     channel,
                     kind: PostKind::History,
@@ -191,22 +249,36 @@ fn plan_posts(scenario: &Scenario) -> (Vec<Post>, Vec<Post>) {
                     kind: PostKind::Root,
                     seq: root,
                 });
-                for seq in 0..shape.thread_depth {
-                    rest.push(Post {
+            }
+        }
+    }
+    let mut replies_by_depth = Vec::new();
+    for depth in 0..shape.thread_depth {
+        let mut level = Vec::new();
+        for community in 0..shape.communities {
+            for channel in 0..shape.channels_per_community {
+                for root in 0..shape.thread_roots_per_channel {
+                    level.push(Post {
                         community,
                         channel,
-                        kind: PostKind::Reply { root },
-                        seq,
+                        kind: PostKind::Reply { root, depth },
+                        seq: depth,
                     });
                 }
             }
         }
+        replies_by_depth.push(level);
     }
-    (roots, rest)
+    (roots, history, replies_by_depth)
 }
 
 impl Post {
-    fn build(&self, scenario: &Scenario, roots: &RootIds) -> Option<(Keys, Event)> {
+    fn build(
+        &self,
+        scenario: &Scenario,
+        roots: &RootIds,
+        parents: &RootIds,
+    ) -> Option<(Keys, Event)> {
         let channel = identity::channel_id(&scenario.run_id, self.community, self.channel);
         // Rotate authors across humans to stay under per-pubkey rate limits.
         let humans = scenario.population.humans.max(1);
@@ -222,9 +294,15 @@ impl Post {
                 identity::keys(&scenario.run_id, Role::Owner, self.community),
                 format!("{ROOT_PREFIX} {}", self.seq),
             ),
-            PostKind::Reply { root } => {
+            PostKind::Reply { root, depth } => {
                 let root_id = roots.get(&(self.community, self.channel, root))?;
-                tags.push(tag(["e", root_id, "", "reply"]));
+                tags.push(tag(["e", root_id, "", "root"]));
+                if depth == 0 {
+                    tags.push(tag(["e", root_id, "", "reply"]));
+                } else {
+                    let parent_id = parents.get(&(self.community, self.channel, root))?;
+                    tags.push(tag(["e", parent_id, "", "reply"]));
+                }
                 (author, format!("lg-reply {}", self.seq))
             }
         };

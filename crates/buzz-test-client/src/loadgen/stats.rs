@@ -176,7 +176,13 @@ impl Stats {
 
 fn is_throttle(reason: &str) -> bool {
     let r = reason.to_ascii_lowercase();
-    r.contains("rate-limited") || r.contains("rate limit") || r.contains("429")
+    if r.contains("shared admission unavailable") {
+        return false;
+    }
+    r.contains("rate-limited: quota exceeded")
+        || r.contains("rate-limited: slow down")
+        || r.contains("rate limit")
+        || r.contains("429")
 }
 
 /// Collapses ids and numbers so equal failures aggregate under one reason.
@@ -359,7 +365,11 @@ mod tests {
         stats.ok(Op::PublishMessage, Duration::from_millis(5));
         let first = stats.snapshot();
         stats.ok(Op::PublishMessage, Duration::from_millis(500));
-        stats.err(Op::PublishMessage, "rate-limited: slow down 12345");
+        stats.err(Op::PublishMessage, "rate-limited: quota exceeded 12345");
+        stats.err(
+            Op::PublishMessage,
+            "rate-limited: shared admission unavailable",
+        );
         stats.err(Op::PublishMessage, "error: internal 98765");
         let interval = stats.snapshot().since(&first);
         let s = interval
@@ -367,12 +377,15 @@ mod tests {
             .find(|(o, _)| *o == Op::PublishMessage)
             .unwrap()
             .1;
-        assert_eq!((s.count, s.errors, s.throttled), (1, 1, 1));
+        assert_eq!((s.count, s.errors, s.throttled), (1, 2, 1));
         assert!(s.p50_ms > 400.0);
         let reasons = stats.snapshot().reasons_since(&first, 10);
         assert!(reasons
             .iter()
             .any(|(r, _)| r == "publish_message_ok: error: internal <n>"));
+        assert!(reasons
+            .iter()
+            .any(|(r, _)| r == "publish_message_ok: rate-limited: shared admission unavailable"));
     }
 
     #[test]

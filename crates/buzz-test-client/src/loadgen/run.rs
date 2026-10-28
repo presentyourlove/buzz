@@ -1,6 +1,7 @@
 //! Drives the simulated population through the scenario's ramp.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -64,6 +65,8 @@ struct Shared {
     stop: watch::Receiver<bool>,
     /// Seeded thread roots per channel id, resolved lazily by whichever client needs them first.
     roots: Mutex<HashMap<String, Arc<Vec<String>>>>,
+    in_flight_connects: AtomicUsize,
+    established_clients: AtomicUsize,
 }
 
 /// Runs every ramp step and returns the JSON report; `Err` when a step aborted.
@@ -77,6 +80,8 @@ pub async fn run(scenario: Scenario, net: Net, shard: Shard) -> Result<Value, Va
         stats: stats.clone(),
         stop,
         roots: Mutex::new(HashMap::new()),
+        in_flight_connects: AtomicUsize::new(0),
+        established_clients: AtomicUsize::new(0),
     });
     let scenario = &shared.scenario;
     let pop = &scenario.population;
@@ -128,12 +133,16 @@ pub async fn run(scenario: Scenario, net: Net, shard: Shard) -> Result<Value, Va
         let lost = tasks.iter().filter(|t| t.is_finished()).count();
         let reason = if lost > 0 {
             Some(format!("{lost} clients exited unexpectedly"))
+        } else if let Some(reason) = abort_reason(
+            &summaries,
+            scenario.abort.max_error_rate,
+            scenario.abort.max_p99_ms,
+        ) {
+            Some(reason)
+        } else if !tasks.is_empty() && shared.established_clients.load(Ordering::SeqCst) == 0 {
+            Some("zero clients connected".into())
         } else {
-            abort_reason(
-                &summaries,
-                scenario.abort.max_error_rate,
-                scenario.abort.max_p99_ms,
-            )
+            None
         };
         let report = json!({
             "step": n,
@@ -168,7 +177,7 @@ pub async fn run(scenario: Scenario, net: Net, shard: Shard) -> Result<Value, Va
         "clients_panicked": panicked,
         "clients_cancelled": cancelled,
     });
-    if aborted || panicked > 0 {
+    if aborted || panicked > 0 || cancelled > 0 {
         Err(report)
     } else {
         Ok(report)
@@ -378,13 +387,22 @@ async fn connect(
 ) -> Option<NostrWsConnection> {
     while !stopped(shared) {
         let t0 = Instant::now();
+        shared.in_flight_connects.fetch_add(1, Ordering::SeqCst);
         let attempt = tokio::select! {
-            attempt = shared.net.connect(community, keys, auth) => attempt,
-            _ = stopping(shared) => return None,
+            attempt = shared.net.connect(community, keys, auth) => {
+                shared.in_flight_connects.fetch_sub(1, Ordering::SeqCst);
+                attempt
+            }
+            _ = stopping(shared) => {
+                shared.in_flight_connects.fetch_sub(1, Ordering::SeqCst);
+                shared.stats.err(Op::WsConnect, "connection attempt abandoned on stop");
+                return None;
+            }
         };
         match attempt {
             Ok(conn) => {
                 shared.stats.ok(Op::WsConnect, t0.elapsed());
+                shared.established_clients.fetch_add(1, Ordering::SeqCst);
                 return Some(conn);
             }
             Err(e) => shared.stats.err(Op::WsConnect, &e.to_string()),
@@ -587,7 +605,9 @@ async fn human(shared: Arc<Shared>, global: usize) {
                 if rng.unit() < profile.thread_reply_fraction {
                     let roots = roots(&shared, community, &keys, channel).await;
                     if !roots.is_empty() {
-                        tags.push(tag(["e", &roots[rng.below(roots.len())], "", "reply"]));
+                        let root = &roots[rng.below(roots.len())];
+                        tags.push(tag(["e", root, "", "root"]));
+                        tags.push(tag(["e", root, "", "reply"]));
                     }
                 }
                 let event = EventBuilder::new(
@@ -1072,6 +1092,59 @@ hold_secs = 1
             .unwrap();
         assert!(errors >= 4, "{report}");
         assert_eq!(report["clients_cancelled"], 0);
+        held.abort();
+    }
+
+    #[tokio::test]
+    async fn stalled_connects_with_long_timeout_aborts_run() {
+        // A peer that accepts TCP but never answers the WebSocket upgrade.
+        // When connect_timeout_secs > hold_secs, the step must still abort because 0 clients connected.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let held = tokio::spawn(async move {
+            let mut open = Vec::new();
+            while let Ok((socket, _)) = listener.accept().await {
+                open.push(socket);
+            }
+        });
+        let scenario = Scenario::parse(&format!(
+            r#"
+run_id = "t"
+[target]
+ws_url = "ws://{addr}"
+http_url = "http://{addr}"
+connect_timeout_secs = 5.0
+[shape]
+communities = 1
+channels_per_community = 1
+[population]
+humans = 2
+agents = 0
+channels_per_member = 1
+connect_rate_per_sec = 100.0
+[[ramp]]
+users = 1.0
+hold_secs = 1
+"#
+        ))
+        .unwrap();
+        let net = Net::new(&scenario).await.unwrap();
+        let started = Instant::now();
+        let report = tokio::time::timeout(
+            Duration::from_secs(10),
+            run(scenario, net, Shard { index: 0, count: 1 }),
+        )
+        .await
+        .expect("run returns when step aborts on 0 connected clients")
+        .expect_err("a step whose clients fail to connect must abort");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let steps = report["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0]["aborted"], true);
+        assert_eq!(
+            steps[0]["abort_reason"].as_str().unwrap(),
+            "zero clients connected"
+        );
         held.abort();
     }
 }

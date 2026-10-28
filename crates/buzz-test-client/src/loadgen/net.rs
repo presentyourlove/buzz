@@ -30,7 +30,8 @@ impl Net {
                 .ok_or_else(|| anyhow::anyhow!("connect_addr {addr} did not resolve"))?;
             for community in scenario.communities() {
                 if let Some(host) = &community.host {
-                    builder = builder.resolve(host, resolved);
+                    let bare_host = host.split(':').next().unwrap_or(host);
+                    builder = builder.resolve(bare_host, resolved);
                 }
             }
         }
@@ -86,6 +87,26 @@ impl Net {
             request = request.header("x-auth-tag", serde_json::to_string(tag.as_slice())?);
         }
         let response = request.body(body).send().await?;
+        let status = response.status();
+        Ok((status, response.text().await?))
+    }
+
+    /// `GET {base}{path}` with a NIP-98 header; returns status and body.
+    pub async fn get(
+        &self,
+        keys: &Keys,
+        base: &str,
+        path: &str,
+    ) -> anyhow::Result<(reqwest::StatusCode, String)> {
+        let url = format!("{base}{path}");
+        let request = self
+            .http
+            .get(&url)
+            .header(
+                "Authorization",
+                identity::nip98_header(keys, "GET", &url, &[]),
+            );
+        let response = request.send().await?;
         let status = response.status();
         Ok((status, response.text().await?))
     }

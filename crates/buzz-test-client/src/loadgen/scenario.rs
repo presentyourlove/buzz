@@ -195,8 +195,21 @@ impl Scenario {
         if self.shape.communities == 0 || self.shape.channels_per_community == 0 {
             return Err("shape needs at least one community and one channel".into());
         }
+        if self.shape.seed_concurrency == 0 {
+            return Err("shape.seed_concurrency must be at least 1".into());
+        }
         if self.shape.communities > 1 && self.target.community_host_template.is_none() {
             return Err("more than one community needs target.community_host_template".into());
+        }
+        if self.target.connect_addr.is_some() {
+            if let Some(template) = &self.target.community_host_template {
+                if template.contains(':') {
+                    return Err(
+                        "target.community_host_template cannot include a port when connect_addr is set"
+                            .into(),
+                    );
+                }
+            }
         }
         if self.population.channels_per_member == 0
             || self.population.channels_per_member > self.shape.channels_per_community
@@ -358,11 +371,17 @@ hold_secs = 10
     #[test]
     fn invalid_shapes_are_rejected() {
         assert!(Scenario::parse(&MINIMAL.replace("communities = 1", "communities = 2")).is_err());
+        assert!(Scenario::parse(&format!("{MINIMAL}\n[shape]\nseed_concurrency = 0\n")).is_err());
         assert!(Scenario::parse(
             &MINIMAL.replace("channels_per_member = 2", "channels_per_member = 5")
         )
         .is_err());
         assert!(Scenario::parse(&MINIMAL.replace("users = 1.0", "users = 0.0")).is_err());
+        let template_with_port = MINIMAL.replace(
+            "http_url = \"http://localhost:3000\"",
+            "http_url = \"http://localhost:3000\"\nconnect_addr = \"127.0.0.1:3000\"\ncommunity_host_template = \"lg-{run}-{i}.example:8443\"",
+        );
+        assert!(Scenario::parse(&template_with_port).is_err());
     }
 
     #[test]
