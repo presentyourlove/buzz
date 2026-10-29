@@ -1116,6 +1116,7 @@ function repeatNode(files, iterations) {
 // Per-test statuses of a `dart test` JSON report (one event per line), keyed
 // `<file> › <name>`. Hidden entries are the runner's own file-loading steps.
 export function parseDartReport(text, mobileRoot = `${root}mobile/`) {
+  const suites = new Map();
   const started = new Map();
   const statuses = new Map();
   for (const line of text.split("\n")) {
@@ -1125,11 +1126,17 @@ export function parseDartReport(text, mobileRoot = `${root}mobile/`) {
     } catch {
       continue;
     }
+    if (event.type === "suite") suites.set(event.suite.id, event.suite.path);
     if (event.type === "testStart") started.set(event.test.id, event.test);
     if (event.type !== "testDone" || event.hidden) continue;
     const test = started.get(event.testID);
     if (!test) continue;
-    const file = fileURLToPath(test.url ?? "file:///").replace(mobileRoot, "");
+    // Widget tests register inside package:flutter_test; their registration URL
+    // is not a file URL. The suite identifies the actual test file.
+    const file = (
+      suites.get(test.suiteID) ??
+      fileURLToPath(test.root_url ?? test.url ?? "file:///")
+    ).replace(mobileRoot, "");
     statuses.set(
       `${file} › ${test.name}`,
       event.skipped

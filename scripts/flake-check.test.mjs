@@ -920,6 +920,7 @@ test("reports give per-test statuses per iteration", () => {
     parseDartReport(
       [
         event({ type: "start", protocolVersion: "0.1.1" }),
+        event({ type: "suite", suite: { id: 0, path: "/m/test/a_test.dart" } }),
         event({
           type: "testStart",
           test: { id: 1, name: "loading /m/test/a_test.dart", url: null },
@@ -936,7 +937,9 @@ test("reports give per-test statuses per iteration", () => {
           test: {
             id: 2,
             name: "group renders",
-            url: "file:///m/test/a_test.dart",
+            suiteID: 0,
+            url: "package:flutter_test/src/widget_tester.dart",
+            root_url: "file:///m/test/a_test.dart",
           },
         }),
         event({
@@ -944,7 +947,8 @@ test("reports give per-test statuses per iteration", () => {
           test: {
             id: 3,
             name: "group fails",
-            url: "file:///m/test/a_test.dart",
+            suiteID: 0,
+            url: "package:flutter_test/src/widget_tester.dart",
           },
         }),
         event({
