@@ -77,7 +77,10 @@ final class NativeStatusEditorViewController: UITableViewController, UITextField
     datePicker.datePickerMode = .dateAndTime
     datePicker.preferredDatePickerStyle = .compact
     datePicker.minimumDate = Date().addingTimeInterval(300)
-    let expiration = configuration["expiresAt"] as? Double ?? Date().addingTimeInterval(86400).timeIntervalSince1970
+    let rawExpiration = configuration["expiresAt"] as? Double
+    let expiration = (rawExpiration != nil && rawExpiration!.isFinite && rawExpiration! >= -8_640_000_000_000 && rawExpiration! <= 8_640_000_000_000)
+      ? rawExpiration!
+      : Date().addingTimeInterval(86400).timeIntervalSince1970
     datePicker.date = max(Date(timeIntervalSince1970: expiration), datePicker.minimumDate ?? Date())
     datePicker.accessibilityLabel = "Custom expiration"
     tableView.keyboardDismissMode = .interactive
@@ -220,11 +223,15 @@ final class NativeStatusEditorViewController: UITableViewController, UITextField
   }
 
   private func submit(clear: Bool) {
+    let rawExpiration = duration == 0 ? datePicker.date.timeIntervalSince1970
+      : Date().addingTimeInterval(TimeInterval(duration)).timeIntervalSince1970
+    let validExpiration = rawExpiration.isFinite && rawExpiration >= -8_640_000_000_000 && rawExpiration <= 8_640_000_000_000
+      ? rawExpiration
+      : Date().addingTimeInterval(86400).timeIntervalSince1970
     onSet([
       "text": statusField.text ?? "", "emoji": emojiField.text ?? "",
       "duration": duration, "clear": clear,
-      "expiresAt": duration == 0 ? datePicker.date.timeIntervalSince1970
-        : Date().addingTimeInterval(TimeInterval(duration)).timeIntervalSince1970,
+      "expiresAt": validExpiration,
     ])
   }
 

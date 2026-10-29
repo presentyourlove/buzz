@@ -85,6 +85,25 @@ final class ProfileSetupRecoveryTests: XCTestCase {
   }
 
   @MainActor
+  func testNativeStatusEditorSanitizesInvalidAndExtremeExpirations() throws {
+    for invalid in [9_000_000_000_000.0, -9_000_000_000_000.0, Double.nan, Double.infinity] {
+      var values: [[String: Any]] = []
+      let editor = NativeStatusEditorViewController(
+        configuration: ["text": "Focus", "emoji": "🎯", "duration": 0,
+                        "expiresAt": invalid,
+                        "hasExistingStatus": true],
+        onCancel: {}, onSet: { values.append($0) })
+      editor.loadViewIfNeeded()
+      let submit = try XCTUnwrap(editor.navigationItem.rightBarButtonItem)
+      XCTAssertTrue(submit.isEnabled)
+      UIApplication.shared.sendAction(try XCTUnwrap(submit.action), to: submit.target, from: submit, for: nil)
+      let submittedExpiration = try XCTUnwrap(values.last?["expiresAt"] as? Double)
+      XCTAssertTrue(submittedExpiration.isFinite)
+      XCTAssertTrue(submittedExpiration >= -8_640_000_000_000 && submittedExpiration <= 8_640_000_000_000)
+    }
+  }
+
+  @MainActor
   func testNativeProfileFieldsRetainCancelAndPreferVerticalControls() throws {
     for multiline in [false, true] {
       var cancelled = false
