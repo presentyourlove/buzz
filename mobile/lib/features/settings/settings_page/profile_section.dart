@@ -51,11 +51,6 @@ class _ProfileSection extends StatelessWidget {
           }
           final windowSize =
               View.of(context).physicalSize / View.of(context).devicePixelRatio;
-          final pane = ConversationPaneScope.maybeOf(context);
-          if (windowSize.shortestSide < 600 && pane != null) {
-            pane.open('settings-photo', profileEditPageBuilder, animate: false);
-            return;
-          }
           Widget editor(BuildContext routeContext) {
             final routeScope = DuoToolbarScope.maybeOf(routeContext);
             final routeStrip =

@@ -97,6 +97,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Profile'), findsNothing);
     expect(find.text('Display name'), findsOneWidget);
+
+    // On Duo book mode with shortest side < 600, opening Edit photo pushes
+    // over Profile rather than replacing the pane, keeping Profile in the back stack.
+    await tester.tap(find.text('Edit photo'));
+    await tester.pumpAndSettle();
+    expect(find.text('Photo editor'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Display name'), findsOneWidget);
+    expect(find.text('Edit photo'), findsOneWidget);
+
     await tester.pumpWidget(const SizedBox.shrink());
     debugDefaultTargetPlatformOverride = null;
   });
