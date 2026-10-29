@@ -201,4 +201,16 @@ void main() {
     await tester.pumpWidget(_testable(MessageContent(content: content)));
     expect(find.textContaining('TAILMARK', findRichText: true), findsWidgets);
   });
+
+  test(
+    'adversarial input with 20,000 double backticks processes in linear time',
+    () {
+      final payload = '${'``x' * 20000}\nline 1\nline 2\nline 3';
+      final stopwatch = Stopwatch()..start();
+      final result = markdownPreviewSource(payload, 2);
+      stopwatch.stop();
+      expect(result, payload);
+      expect(stopwatch.elapsedMilliseconds, lessThan(100));
+    },
+  );
 }

@@ -60,13 +60,75 @@ String markdownPreviewSource(String content, int maxLines) {
 // at a line holding nothing but the closing backticks.
 final _fenceOpen = RegExp(r'^ *```');
 final _fenceClose = RegExp(r'^\s*```$');
-final _inlineCode = RegExp(r'`(?!`)(.+?)(?<!`)`(?!`)');
 
 /// The prose lines without their inline code spans, since delimiters inside
 /// a span cannot pair with ones outside it. A backtick left over means a span
 /// this cannot place, and the caller keeps the whole message.
-String _withoutCode(List<String> prose) =>
-    prose.map((line) => line.replaceAll(_inlineCode, '')).join('\n');
+///
+/// Uses a single-pass linear delimiter scanner instead of an unanchored regex
+/// to avoid quadratic scanning on adversarial inputs with paired backticks.
+String _withoutCode(List<String> prose) {
+  final buffer = StringBuffer();
+  for (var p = 0; p < prose.length; p++) {
+    if (p > 0) buffer.write('\n');
+    final line = prose[p];
+    var i = 0;
+    final len = line.length;
+    while (i < len) {
+      if (line.codeUnitAt(i) == 96) {
+        // Count consecutive backticks.
+        var runEnd = i + 1;
+        while (runEnd < len && line.codeUnitAt(runEnd) == 96) {
+          runEnd++;
+        }
+        final runLen = runEnd - i;
+        if (runLen == 1) {
+          // A single backtick may open an inline code span. Look linearly
+          // forward for the closing single backtick.
+          var closeStart = runEnd;
+          var found = false;
+          while (closeStart < len) {
+            if (line.codeUnitAt(closeStart) == 96) {
+              var closeEnd = closeStart + 1;
+              while (closeEnd < len && line.codeUnitAt(closeEnd) == 96) {
+                closeEnd++;
+              }
+              if (closeEnd - closeStart == 1) {
+                i = closeEnd;
+                found = true;
+                break;
+              }
+              closeStart = closeEnd;
+            } else {
+              closeStart++;
+            }
+          }
+          if (found) {
+            continue;
+          }
+          // No closing single backtick on this line; append the rest and
+          // finish.
+          buffer.write(line.substring(i));
+          break;
+        } else {
+          // Multi-backtick run (e.g. ``): keep in prose for outsideCode to
+          // detect.
+          buffer.write(line.substring(i, runEnd));
+          i = runEnd;
+        }
+      } else {
+        final nextBacktick = line.indexOf('`', i);
+        if (nextBacktick == -1) {
+          buffer.write(line.substring(i));
+          break;
+        }
+        buffer.write(line.substring(i, nextBacktick));
+        i = nextBacktick;
+      }
+    }
+  }
+  return buffer.toString();
+}
 
 bool _closesInline(String text) {
   bool even(Pattern pattern) => pattern.allMatches(text).length.isEven;
