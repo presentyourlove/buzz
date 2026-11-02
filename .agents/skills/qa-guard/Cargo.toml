@@ -1,0 +1,34 @@
+[package]
+name = "qa-guard-skill"
+version = "1.0.0"
+edition = "2021"
+authors = ["Honey2"]
+description = "Git Patch 自動語法、編碼與執行預檢，杜絕補丁駁回、Mojibake 編碼問題與語法錯誤"
+license = "Apache-2.0"
+repository = "https://github.com/block/sprout"
+
+[dependencies]
+# Buzz Agent 核心依賴
+buzz-agent = { path = "../../../crates/buzz-agent" }
+buzz-core = { path = "../../../crates/buzz-core" }
+
+# Rust 標準依賴
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+regex = "1.10"
+
+[lib]
+name = "qa_guard"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+
+[profile.dev]
+opt-level = 1
+
+[profile.test]
+opt-level = 1

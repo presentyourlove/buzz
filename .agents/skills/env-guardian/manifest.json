@@ -1,0 +1,78 @@
+{
+  "name": "env-guardian",
+  "version": "1.0.0",
+  "description": "執行前環境變數與依賬缺失健檢，預防執行期錯誤，提升系統穩健度的 Rust 內建技能",
+  "author": "Honey2",
+  "tags": ["env", "guardian", "validation", "automation", "dependency", "service"],
+  "status": "draft",
+  "created": "2026-11-02",
+  "dependencies": [
+    {"name": "buzz-agent", "version": "*", "path": "../../../crates/buzz-agent"},
+    {"name": "buzz-core", "version": "*", "path": "../../../crates/buzz-core"},
+    {"name": "anyhow", "version": "1.0"},
+    {"name": "serde", "version": "1.0"},
+    {"name": "serde_json", "version": "1.0"},
+    {"name": "serde_yaml", "version": "0.9"},
+    {"name": "tokio", "version": "1.0"},
+    {"name": "hyper", "version": "0.14"},
+    {"name": "tokio-tungstenite", "version": "0.26"},
+    {"name": "thiserror", "version": "2.0"},
+    {"name": "chrono", "version": "0.4"}
+  ],
+  "skill_dir": ".agents/skills/env-guardian",
+  "source_files": [
+    "src/env_checker.rs",
+    "src/dependency_checker.rs",
+    "src/service_probe.rs",
+    "src/circuit_breaker.rs",
+    "src/health_check_runner.rs",
+    "src/report_generator.rs",
+    "src/lib.rs"
+  ],
+  "test_files": [
+    "tests/env_checker_tests.rs",
+    "tests/dependency_checker_tests.rs",
+    "tests/circuit_breaker_tests.rs"
+  ],
+  "entry_points": {
+    "primary": "load_skill",
+    "auto_hooks": ["PreToolUse"],
+    "public_api": [
+      "init_skill",
+      "load_config",
+      "EnvGuardianSkill"
+    ]
+  },
+  "rust_settings": {
+    "edition": "2021",
+    "crate_type": ["cdylib", "rlib"],
+    "opt_level": 1,
+    "lto": false,
+    "codegen_units": 16
+  },
+  "documentation": {
+    "readme": "README.md",
+    "api_docs": true,
+    "examples": true
+  },
+  "capabilities": {
+    "environment_validation": true,
+    "dependency_checking": true,
+    "service_health_probing": true,
+    "circuit_breaker": true,
+    "health_check_running": true,
+    "report_generation": true,
+    "utf8_lf_compliance": true,
+    "tool_version_check": true,
+    "service_connectivity_check": true
+  },
+  "integration_points": {
+    "session_discovery": true,
+    "load_skill_support": true,
+    "hooks_support": ["PreToolUse"],
+    "buzz_agent_core": true,
+    "cli_integration": true,
+    "subagent_start": true,
+    "session_start": true
+  }
+}

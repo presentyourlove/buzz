@@ -92,6 +92,10 @@ verifier: "Sentry (架構安全官) & Antigravity"
     - **來源路徑**：`skills/system-health-guardian`
     - **執行動作**：雙軌落庫至專案技能庫與使用者全域技能庫，內建 CPU/記憶體即時指標監控與三態熔斷器。
     - **狀態**：✅ 已驗收落庫。
+17. **5.3 建立三項核心生產級技能** (新擴展任務)
+    - **來源路徑**：`skills/daily-digest/`, `skills/qa-guard/`, `skills/env-guardian/`
+    - **執行動作**：建立核心 Rust 技能模組，滿足三步熔斷鐵律與 Sentry 架構審查要求。
+    - **狀態**：❌ 作業中 - 目前發現技能目錄存在但核心模組缺失，請立即實作。
 
 ---
 
@@ -104,6 +108,9 @@ verifier: "Sentry (架構安全官) & Antigravity"
 | `tests/regression_tests.py` | 新增實裝 | 18 項自動化回歸測試套件 |
 | `skills/obsidian-digest-sync/` | 落庫新增 | Obsidian 摘要同步技能（manifest + main） |
 | `skills/system-health-guardian/` | 落庫新增 | 健康守護與熔斷技能（manifest + main） |
+| `skills/daily-digest/` | 核心模組缺失 | Daily-Digest 核心 Rust 技能模組（需建立 digest_generator.rs, markdown_renderer.rs, vault_sync.rs, noise_filter.rs） |
+| `skills/qa-guard/` | 核心模組缺失 | QA-Guard 核心 Rust 技能模組（需建立 patch_parser.rs, code_validator.rs, syntax_checker.rs, cargo_checker.rs, report_generator.rs） |
+| `skills/env-guardian/` | 核心模組缺失 | Env-Guardian 核心 Rust 技能模組（需建立 env_checker.rs, dependency_checker.rs, health_probe.rs, circuit_breaker.rs） |
 
 ---
 
