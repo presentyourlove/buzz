@@ -334,6 +334,18 @@ just reset          # ⚠️  Wipe data + recreate
 - 交付補丁封裝：`C:\Users\user\.buzz\OUTBOX\CCGS_LIGHTWEIGHT_PROTOTYPES.patch`。
 - 官方簽核：Sentry 官方實測驗收通過 (`【安全與品質驗收通過 (QA PASSED)】`)。
 
+### 4. 自動化守護與分支治理 (Automation & Branch Hygiene)
+- **Honey2 每日進化建議書私訊直達** (`scripts/daily_evolution_dm.py`)：
+  - 每日 22:30 定時自動生成當日系統進化提案，直接推送至主理人專屬 Direct Message 私訊視窗 (`af946a63-dd43-4050-baea-65140d47fc42`)。
+  - 於 Windows 啟動區 (`Startup`) 註冊常駐守護進程，確保開機或 Buzz 啟動自動就緒。
+- **Honey2::Radar 開源專案研報精細化升級** (`scripts/tech_researcher.py`)：
+  - 私訊內容直接呈現「核心用途」、「架構定位」與「主理人/Buzz契合度」三面向完整分析，免翻查本地檔案。
+- **Sentry / Pollen 蜂群通訊與路徑防卡死調教** (`managed-agents.json`)：
+  - 注入強制 shell 工具發布指令鐵律 (`buzz messages send`) 與主倉庫實體目錄錨定，杜絕假想補丁與靜默吞字事故。
+- **無損升級與分支清潔治理**：
+  - 主幹 `main` 保持 100% 潔淨對齊官方最新上游 (`origin/main`)。
+  - 所有客製化與自研功能完整收斂維護於 `feature/custom-local-core` 特徵分支。
+
 ---
 
 <p align="center">

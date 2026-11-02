@@ -355,21 +355,70 @@ def generate_markdown_report(analyses: List[Dict[str, Any]]) -> str:
     return report_path
 
 
+def format_repo_summary_for_dm(item: Dict[str, Any]) -> str:
+    """將單一專案的三維度分析提煉為精緻且詳盡的私訊展示塊"""
+    repo = item["repo"]
+    analysis = item.get("analysis", "")
+
+    lines = [
+        f"📌 **[{repo['name']}]({repo['url']})** (★{repo['stars']} | {repo['language']})",
+        f"  *簡述*：{repo['description']}"
+    ]
+
+    parts = {"用途": "", "架構": "", "契合度": ""}
+    current_key = None
+
+    for line in analysis.split("\n"):
+        line_s = line.strip()
+        if "1. 用途" in line_s or "有咩用" in line_s:
+            current_key = "用途"
+            continue
+        elif "2. 用處" in line_s or "用喺邊" in line_s:
+            current_key = "架構"
+            continue
+        elif "3. 啱唔啱" in line_s or "契合度" in line_s:
+            current_key = "契合度"
+            continue
+        elif line_s.startswith("### ") or line_s.startswith("## "):
+            current_key = None
+            continue
+
+        if current_key and line_s:
+            if len(parts[current_key]) < 220:
+                clean_text = line_s.lstrip("-*• \t")
+                if clean_text:
+                    parts[current_key] += (" " if parts[current_key] else "") + clean_text
+
+    if parts["用途"]:
+        lines.append(f"  • **核心用途**：{parts['用途'][:160]}...")
+    if parts["架構"]:
+        lines.append(f"  • **架構定位**：{parts['架構'][:160]}...")
+    if parts["契合度"]:
+        lines.append(f"  • **主理人/Buzz契合度**：{parts['契合度'][:180]}...")
+    elif not parts["用途"]:
+        # Fallback：若格式非標準標題，取前 350 字精華摘要
+        clean_fallback = analysis.strip().replace("\n", " ")[:350]
+        lines.append(f"  • **研報精華**：{clean_fallback}...")
+
+    return "\n".join(lines)
+
+
 def send_direct_message(report_path: str, analyses: List[Dict[str, Any]]) -> bool:
-    """透過 Honey2 憑證發送 Direct Message 私訊給主理人"""
+    """透過 Honey2 憑證發送 Direct Message 私訊給主理人，呈現詳細研讀結論"""
     nsec, auth_tag = load_honey2_credentials()
     if not nsec or not auth_tag:
         print("[錯誤] 無法取得 Honey2 憑證，跳過私訊發送。")
         return False
 
     today_str = datetime.now().strftime("%Y-%m-%d")
-    titles = "\n".join([f"• **{item['repo']['name']}** (★{item['repo']['stars']}): {item['repo']['description'][:40]}..." for item in analyses])
-    
+    project_cards = [format_repo_summary_for_dm(item) for item in analyses]
+    details_block = "\n\n".join(project_cards)
+
     dm_content = (
-        f"🍯 **【Honey2::Radar 開源專案研報完成】**\n\n"
-        f"主理人您好！今日的 GitHub 開源技術研究報告已由 Sub-Agent 研讀完成：\n\n"
-        f"{titles}\n\n"
-        f"📄 **完整分析報告路徑**：\n"
+        f"🍯 **【Honey2::Radar 開源專案深度研報完成】**\n\n"
+        f"主理人您好！今日精選 {len(analyses)} 項 GitHub 熱門開源技術已研讀完畢，詳細結論如下：\n\n"
+        f"{details_block}\n\n"
+        f"📄 **完整分析報告存檔**：\n"
         f"`{report_path}`\n\n"
         f"💡 *此訊息由 Honey2 專屬通道直達發送，已自動登記至 SQLite 去重資料庫，保證不重複研讀！*"
     )
