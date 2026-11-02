@@ -1,0 +1,16 @@
+---
+name: "agent-definitions"
+description: "Agent 定义必须遵循架构模式与角色定义"
+paths:                    # glob 模式匹配
+  - "**/*.rs"
+  - "!**/*tests*.rs"
+severity: "warn"         # error | warn | info
+rules:
+  - id: "agent-role-defined"
+    pattern: "pub struct Agent"
+    message: "Agent 结构体必须定义角色字段"
+    fix: "添加 role: AgentRole 字段"
+  - id: "agent-trait-implemented"
+    pattern: "impl AgentTrait"
+    message: "Agent 必须实现 AgentTrait"
+    fix: "实现 AgentTrait trait"

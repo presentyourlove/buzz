@@ -1,0 +1,16 @@
+---
+name: "workflow-steps"
+description: "Workflow 步骤必须遵循状态机模式"
+paths:                    # glob 模式匹配
+  - "**/*.rs"
+  - "!**/*tests*.rs"
+severity: "error"         # error | warn | info
+rules:
+  - id: "workflow-state-machine"
+    pattern: "pub enum WorkflowState"
+    message: "Workflow 必须使用状态机设计"
+    fix: "实现 WorkflowState enum"
+  - id: "workflow-transition-defined"
+    pattern: "impl WorkflowState"
+    message: "状态转换必须定义清晰"
+    fix: "添加状态转换逻辑"

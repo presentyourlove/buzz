@@ -1,0 +1,88 @@
+# .agents/skills/collab-protocol/protocol.yaml
+---
+version: "1.0"
+initial_state: "PENDING_AUTHORIZATION"
+strictness_levels:
+  minimal:
+    steps: [1, 2, 3, 5, 8]  # 跳过 Sentry 审核、Pollen 实施、Sentry 复审
+    required_roles: ["owner", "fizz", "honey2"]
+  standard:
+    steps: [1, 2, 3, 4, 5, 6, 7, 8]  # 完整 7 步
+    required_roles: ["owner", "fizz", "honey2", "sentry", "pollen"]
+
+states:
+  - id: "PENDING_AUTHORIZATION"
+    description: "等待老板授权"
+    transitions:
+      - event: "authorization_received"
+        target: "DISPATCHED"
+        action: "record_authorization"
+
+  - id: "DISPATCHED"
+    description: "Fizz 已分派给 Honey2"
+    transitions:
+      - event: "plan_submitted"
+        target: "AWAITING_REVIEW"
+        action: "record_plan"
+
+  - id: "AWAITING_REVIEW"
+    description: "等待 Sentry 审核（standard 模式）或直接进入老板批示"
+    transitions:
+      - event: "review_passed"
+        target: "PENDING_APPROVAL"
+        action: "record_review"
+      - event: "review_rejected"
+        target: "REJECTED"
+        action: "record_rejection"
+      # minimal 模式跳过审核
+      - event: "minimal_skip_review"
+        target: "PENDING_APPROVAL"
+        condition: "strictness == 'minimal'"
+        action: "record_minimal_skip"
+
+  - id: "PENDING_APPROVAL"
+    description: "等待老板门禁批示"
+    transitions:
+      - event: "approved"
+        target: "IMPLEMENTING"
+        action: "record_approval"
+      - event: "rejected"
+        target: "REJECTED"
+        action: "record_rejection"
+
+  - id: "IMPLEMENTING"
+    description: "Pollen 实施中"
+    transitions:
+      - event: "implementation_submitted"
+        target: "AWAITING_ACCEPTANCE"
+        action: "record_implementation"
+
+  - id: "AWAITING_ACCEPTANCE"
+    description: "等待 Sentry 复审验收（standard 模式）或直接结案"
+    transitions:
+      - event: "acceptance_passed"
+        target: "CLOSING"
+        action: "record_acceptance"
+      - event: "acceptance_failed"
+        target: "IMPLEMENTING"
+        action: "record_acceptance_failure"
+      # minimal 模式跳过复审
+      - event: "minimal_skip_acceptance"
+        target: "CLOSING"
+        condition: "strictness == 'minimal'"
+        action: "record_minimal_skip"
+
+  - id: "CLOSING"
+    description: "Fizz 结案回报告"
+    transitions:
+      - event: "closure_reported"
+        target: "COMPLETED"
+        action: "record_closure"
+
+  - id: "COMPLETED"
+    description: "流程完成"
+    terminal: true
+
+  - id: "REJECTED"
+    description: "被驳回，需重新开始"
+    terminal: true

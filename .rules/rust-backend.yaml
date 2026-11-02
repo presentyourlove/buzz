@@ -1,0 +1,24 @@
+---
+name: "rust-backend"
+description: "Rust 后端代码必须遵循错误处理模式与编码规范"
+paths:                    # glob 模式匹配（相对项目根目录）
+  - "crates/**/*.rs"
+  - "!crates/**/tests/**"  # 排除测试文件
+severity: "error"         # error | warn | info
+rules:
+  - id: "error-handling"
+    pattern: "unwrap\(|expect\(|\.unwrap\(|\.expect\("
+    message: "禁止使用 unwrap()/expect()，请使用 ? 操作符或 Result 处理"
+    fix: "将 unwrap() 改成 ? 或 match 错误处理"
+  - id: "todo-must-have-owner"
+    pattern: "// TODO:|// FIXME:"
+    message: "TODO/FIXME 必须标注负责人：// TODO(@name): 描述"
+    fix: "添加 @负责人 标签"
+  - id: "no-panic-in-production"
+    pattern: "panic!\("
+    message: "生产代码禁止 panic!，请用 Result/Error 传递"
+    fix: "改成返回 Err(...)"
+  - id: "public-api-docs"
+    pattern: "^pub (fn|struct|enum|trait|type|const|mod)"
+    message: "Public API 必须有文档注释 ///"
+    fix: "添加 /// 文档注释"

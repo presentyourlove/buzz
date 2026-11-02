@@ -1,0 +1,16 @@
+---
+name: "test-files"
+description: "测试文件必须遵循命名规范与架构要求"
+paths:                    # glob 模式匹配
+  - "**/*tests*.rs"
+  - "**/*test*.rs"
+severity: "info"         # error | warn | info
+rules:
+  - id: "test-structure-valid"
+    pattern: "fn test_"
+    message: "测试函数必须遵循命名规范"
+    fix: "使用 test_ 前缀"
+  - id: "test-coverage-required"
+    pattern: "cargo test"
+    message: "代码必须包含测试覆盖"
+    fix: "添加 cargo test 指令"

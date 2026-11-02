@@ -287,6 +287,55 @@ just reset          # ⚠️  Wipe data + recreate
 
 ---
 
+## CCGS 輕量原型整合 (CCGS Lightweight Prototypes)
+
+本專案已正式整合 Claude-Code-Game-Studios (CCGS) 三大輕量防護與協作原型機制，並通過 Sentry 官方安全與品質實測驗收（QA PASSED）：
+
+### 1. 機制架構與核心功能
+- **M1 Hooks 驗證層** (`crates/buzz-agent/src/hooks/`)：
+  - 提供 Agent 工具呼叫前置與後置鉤子防護，實作 8 條核心規則（硬編碼阻斷、JSON 合法性驗證、設計文件存在檢查、分支保護、超大檔案寫入阻斷、實體註冊核驗、資料檔案 JSON 格式防護、技能變更測試覆蓋要求）。
+  - 已於 `crates/buzz-agent/src/lib.rs` 正式註冊 `pub mod hooks;`。
+- **M2 路徑作用域規則** (`.rules/`)：
+  - 提供 6 份 YAML 規格檔（後端 Rust、CLI 命令、配置檔案、測試檔案、代理人定義、工作流程步驟），精細定義讀寫與執行邊界。
+- **M3 協作協議狀態機** (`.agents/skills/collab-protocol/`)：
+  - 提供標準狀態轉移協議（9 種狀態、8 條合法狀態轉移與嚴格拒絕分支），附帶純 Python 原生解析驗證腳本 (`validate_transition.py` 與 `DO_VERIFY.py`)，具備零外部依賴降級容錯能力。
+
+### 2. 檔案變更清單 (File Inventory)
+- **新增檔案 (Added)**：
+  - `crates/buzz-agent/src/hooks/mod.rs`
+  - `crates/buzz-agent/src/hooks/types.rs`
+  - `crates/buzz-agent/src/hooks/rules/mod.rs`
+  - `crates/buzz-agent/src/hooks/rules/branch_protection.rs`
+  - `crates/buzz-agent/src/hooks/rules/data_file_json.rs`
+  - `crates/buzz-agent/src/hooks/rules/design_doc_check.rs`
+  - `crates/buzz-agent/src/hooks/rules/entity_registry.rs`
+  - `crates/buzz-agent/src/hooks/rules/hardcoded_block.rs`
+  - `crates/buzz-agent/src/hooks/rules/json_validation.rs`
+  - `crates/buzz-agent/src/hooks/rules/large_file_refuse.rs`
+  - `crates/buzz-agent/src/hooks/rules/skill_change_test.rs`
+  - `.rules/agent-definitions.yaml`
+  - `.rules/cli-commands.yaml`
+  - `.rules/config-files.yaml`
+  - `.rules/rust-backend.yaml`
+  - `.rules/test-files.yaml`
+  - `.rules/workflow-steps.yaml`
+  - `.agents/skills/collab-protocol/SKILL.md`
+  - `.agents/skills/collab-protocol/protocol.yaml`
+  - `.agents/skills/collab-protocol/DO_VERIFY.py`
+  - `.agents/skills/collab-protocol/scripts/validate_transition.py`
+  - `.agents/skills/collab-protocol/references/step_mapping.md`
+  - `.agents/skills/collab-protocol/references/strictness_levels.md`
+- **修改檔案 (Modified)**：
+  - `crates/buzz-agent/src/lib.rs`（導出 hooks 模組）
+  - `README.md`（新增 CCGS 機制整合紀錄）
+
+### 3. 實測與驗收狀態
+- 狀態機測試：`python .agents/skills/collab-protocol/DO_VERIFY.py` 100% 通過。
+- 交付補丁封裝：`C:\Users\user\.buzz\OUTBOX\CCGS_LIGHTWEIGHT_PROTOTYPES.patch`。
+- 官方簽核：Sentry 官方實測驗收通過 (`【安全與品質驗收通過 (QA PASSED)】`)。
+
+---
+
 <p align="center">
   <sub>Buzz 🐝</sub><br>
   <sub>Apache 2.0 · Built by <a href="https://block.xyz">Block, Inc.</a></sub>

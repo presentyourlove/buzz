@@ -14,6 +14,7 @@ mod databricks;
 mod databricks_label_grammar;
 mod handoff;
 mod hints;
+pub mod hooks;
 mod llm;
 mod mcp;
 pub mod model_capabilities;

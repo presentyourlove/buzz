@@ -1,0 +1,16 @@
+---
+name: "cli-commands"
+description: "CLI 指令必须遵循命名规范与参数验证"
+paths:                    # glob 模式匹配
+  - "crates/**/cli.rs"
+  - "!crates/**/tests/**"
+severity: "error"         # error | warn | info
+rules:
+  - id: "cli-name-format"
+    pattern: "pub fn main\(\)"
+    message: "CLI 主函数必须使用命令命名规范"
+    fix: "使用 kebab-case 命令名"
+  - id: "cli-help-required"
+    pattern: "use clap::\{"
+    message: "CLI 必须配置 help 选项"
+    fix: "添加 help = \"true\" 配置"

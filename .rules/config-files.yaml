@@ -1,0 +1,13 @@
+---
+name: "config-files"
+description: "配置文件必须遵循架构规范"
+paths:                    # glob 模式匹配
+  - "**/*.toml"
+  - "**/*.yaml"
+  - "**/*.yml"
+severity: "warn"         # error | warn | info
+rules:
+  - id: "config-validation"
+    pattern: "\[.*\]"
+    message: "配置必须包含验证逻辑"
+    fix: "添加验证函数或方法"
