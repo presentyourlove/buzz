@@ -777,7 +777,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 81);
+        assert_eq!(migrations.len(), 82);
         for (index, migration) in migrations.iter().enumerate() {
             assert_eq!(migration.version, (index + 1) as i64);
         }
@@ -785,8 +785,8 @@ mod postgres_tests {
             .sql
             .as_str()
             .contains("ADD COLUMN auto_join BOOLEAN NOT NULL DEFAULT false"));
-        assert_eq!(migrations[80].version, 81);
-        let retire_roster_fence = strip_sql_comments(migrations[80].sql.as_str());
+        assert_eq!(migrations[81].version, 82);
+        let retire_roster_fence = strip_sql_comments(migrations[81].sql.as_str());
         for statement in [
             "SET LOCAL lock_timeout = '1s';",
             "SET LOCAL statement_timeout = '5s';",
@@ -795,7 +795,7 @@ mod postgres_tests {
         ] {
             assert!(
                 retire_roster_fence.contains(statement),
-                "0081 must run {statement}"
+                "0082 must run {statement}"
             );
         }
         assert!(migrations[70]
@@ -1349,7 +1349,7 @@ mod postgres_tests {
         assert!(roster_fence.contains("snapshot_members IS DISTINCT FROM canonical_members"));
         assert!(roster_fence.contains("ERRCODE = '23514'"));
 
-        // Migration 0081 retires this fence; the desired state never installs it.
+        // Migration 0082 retires this fence; the desired state never installs it.
         assert!(!desired_schema.contains("guard_channel_roster_snapshot"));
 
         // The single-row heartbeat table is updated continuously. Prevent
