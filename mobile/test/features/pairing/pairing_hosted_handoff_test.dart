@@ -49,7 +49,7 @@ void main() {
         await container.read(pairingProvider.notifier).pair(_payload(f.keys));
         await settled.future.timeout(const Duration(seconds: 2));
         expect(legacyProbes, 0);
-        expect(f.admitted, backup ? ['paired'] : isEmpty);
+        expect(f.admitted, backup ? ['paired.communities.buzz.xyz'] : isEmpty);
         if (!backup) {
           expect(f.flow.stage, HostedFlowStage.confirmBackup);
           expect((await f.store.read())?.backup, isNull);
