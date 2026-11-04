@@ -56,6 +56,7 @@ class FakeRegistry extends BuilderlabAccountClient {
     },
   ];
   Completer<void>? catalogGate;
+  bool failCatalog = false;
   bool failListing = false;
   bool rejectRegistration = false;
   bool loseRegistration = false;
@@ -97,6 +98,7 @@ class FakeRegistry extends BuilderlabAccountClient {
     switch (path) {
       case '/v3/beekeeper/get-model-catalog':
         await catalogGate?.future;
+        if (failCatalog) throw StateError('Catalog unavailable.');
         return {'models': models};
       case '/v3/beekeeper/list-agents':
         if (failListing) throw StateError('Registry unavailable.');
@@ -155,7 +157,7 @@ class FakeRegistry extends BuilderlabAccountClient {
 
 /// Fakes only relay publication; registry logic stays real.
 class RelayFakeController extends RemoteAgentController {
-  RelayFakeController(FakeRegistry account)
+  RelayFakeController(FakeRegistry account, {super.onCreated})
     : super(
         account: account,
         keys: AccountIdentityStore(),

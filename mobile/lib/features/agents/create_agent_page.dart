@@ -1,4 +1,5 @@
 import 'dart:math';
+
 import 'agent_model_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
@@ -8,6 +9,7 @@ import '../../shared/agents/remote_agents.dart';
 import '../../shared/agents/agent_avatar_catalog.dart';
 import '../../shared/relay/relay.dart';
 import 'agent_avatar_picker.dart';
+import 'agent_creation_draft.dart';
 import '../../shared/community/community.dart';
 import '../../shared/community/community_provider.dart';
 import '../../shared/theme/theme.dart';
@@ -22,8 +24,13 @@ class CreateAgentPage extends HookConsumerWidget {
     required this.controller,
     required this.community,
     required this.onCreated,
+    this.initialDraft,
     super.key,
   });
+
+  /// Pre-fills a fresh setup (for example from a link). Ignored when an
+  /// unfinished setup is pending: that must be resumed as saved.
+  final AgentCreationDraft? initialDraft;
   final RemoteAgentController controller;
   final Community community;
   final VoidCallback onCreated;
@@ -42,23 +49,50 @@ class CreateAgentPage extends HookConsumerWidget {
       () => controller.account.account?.subject,
       const [],
     );
+    final draft = controller.pending == null ? initialDraft : null;
     final model = useState(controller.pending?['model_id'] as String?);
     final effort = useState(controller.pending?['reasoning_effort'] as String?);
+    // A fresh setup starts from the first catalog that loads (after a failed
+    // load, the one Retry fetches): the draft's model if offered, otherwise
+    // the default. A resumed setup keeps its saved choice.
+    final startApplied = useRef(controller.pending != null);
+    useEffect(() {
+      final entries = catalog.data;
+      if (startApplied.value ||
+          catalog.connectionState != ConnectionState.done ||
+          entries == null) {
+        return null;
+      }
+      startApplied.value = true;
+      final (startModel, startEffort) = startingAgentModel(
+        entries,
+        draftModel: draft?.modelId,
+        draftEffort: draft?.reasoningEffort,
+      );
+      model.value = startModel;
+      effort.value = startEffort;
+      return null;
+    }, [catalog.connectionState]);
     final name = useTextEditingController(
-      text: controller.pending?['name'] as String? ?? '',
+      text: controller.pending?['name'] as String? ?? draft?.name ?? '',
     );
     final instructions = useTextEditingController(
-      text: controller.pending?['instructions'] as String? ?? '',
+      text:
+          controller.pending?['instructions'] as String? ??
+          draft?.instructions ??
+          '',
     );
     useListenable(name);
     final error = useState<String?>(null);
     final avatarHeroTag = useMemoized(Object.new);
     final editingAvatar = useState(false);
     final avatar = useState(
-      AgentAvatarSelection.url(
-        controller.pending?['picture'] as String? ??
-            agentAvatarCatalog[Random().nextInt(agentAvatarCatalog.length)].url,
-      ),
+      draft?.avatar ??
+          AgentAvatarSelection.url(
+            controller.pending?['picture'] as String? ??
+                agentAvatarCatalog[Random().nextInt(agentAvatarCatalog.length)]
+                    .url,
+          ),
     );
     final preparing = useState(false);
     final busy = controller.busy || preparing.value;
