@@ -1,9 +1,16 @@
+import '../../helpers/controllable_pairing_socket.dart';
+import 'package:buzz/shared/widgets/buzz_toast.dart';
+import 'package:buzz/features/onboarding/hosted_reconnect_banner.dart';
+import 'package:buzz/shared/hosted/hosted_community_creation.dart';
+import 'package:buzz/shared/community/community_grid_option.dart';
 import 'package:buzz/shared/hosted/account_identity_store.dart';
+import 'package:buzz/shared/hosted/hosted_flow.dart';
 import 'package:buzz/shared/hosted/hosted_environment.dart';
 import 'package:buzz/features/pairing/pairing_provider.dart';
 import 'package:buzz/shared/deeplink/pending_deep_link_provider.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'package:nostr/nostr.dart' as nostr;
 
 import 'package:buzz/features/profile/profile_setup_page.dart';
 import 'package:buzz/features/profile/profile_setup_avatar_editor.dart';
@@ -11,6 +18,7 @@ import 'package:buzz/features/profile/profile_avatar_draft.dart';
 import 'package:buzz/shared/emoji/emoji_avatar.dart';
 import 'package:buzz/shared/widgets/playing_avatar_image.dart';
 import 'package:buzz/features/pairing/pairing_page.dart';
+import 'package:buzz/hosted_app_gate.dart';
 import 'package:buzz/onboarding_app_entry.dart';
 import 'package:buzz/shared/auth/auth.dart';
 import 'package:buzz/shared/hosted/builderlab_account.dart';
@@ -20,13 +28,26 @@ import 'package:buzz/shared/relay/relay_session.dart';
 import 'package:buzz/shared/relay/relay_provider.dart';
 import 'package:buzz/shared/relay/media_image.dart';
 import 'package:buzz/shared/utils/string_utils.dart';
+import 'package:buzz/shared/widgets/mobile_tab_footer_backdrop.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
 import '../../helpers/hosted_journey_fixture.dart';
 
 void main() {
+  // Bottom banners over Home must stay above its floating tab bar, which the
+  // fixture's stand-in home does not draw.
+  void expectAboveTabBar(WidgetTester tester, String label) {
+    final screen = tester.getSize(find.byType(HostedAppGate)).height;
+    expect(
+      tester.getRect(find.text(label)).bottom,
+      lessThanOrEqualTo(screen - mobileTabBarHeight - mobileTabBarBottomGap),
+    );
+  }
+
   void journey(
     String name,
     Future<void> Function(WidgetTester, HostedJourneyFixture) run, {
@@ -57,6 +78,107 @@ void main() {
     );
   }
 
+  for (final selfHosted in [false, true]) {
+    journey(
+      'finishing ${selfHosted ? "self-hosted" : "hosted"} Add restores picker memberships and keeps the new destination',
+      (tester, f) async {
+        await f.initialize();
+        f.offerProfile = false;
+        f.rows.addAll([f.row('one'), f.row('two')]);
+        await f.mount(tester, openEntry: false);
+        await f.flow.signInAccount();
+        await f.settle(tester);
+        expect(find.text('Select a community'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('community-switcher-add')));
+        await f.settle(tester);
+        expect(find.text('Add a community'), findsOneWidget);
+        expect(f.probes, isEmpty);
+        final discoveries = f.sent('/known-communities/list').length;
+        f.secondRelayFailures = 1;
+        if (selfHosted) {
+          await f.tap(tester, 'Enter a community link');
+          await tester.enterText(
+            find.byKey(const Key('community-link-input')).hitTestable(),
+            'my-community.example',
+          );
+          await f.tap(tester, 'Continue');
+          await f.tap(tester, 'Saved identity');
+        } else {
+          await f.link(tester, 'three');
+          await tester.tap(find.byType(CheckboxListTile));
+          await f.settle(tester);
+          await f.tap(tester, 'Accept and join');
+        }
+        expect(f.flow.stage, HostedFlowStage.blocked);
+        expect(find.text('Try again').hitTestable(), findsOneWidget);
+        expect(find.text('Community home').hitTestable(), findsNothing);
+        final newRelay = selfHosted
+            ? 'wss://my-community.example'
+            : 'wss://three.communities.buzz.xyz';
+        final partial = await f.storage.loadAll();
+        expect(
+          partial.map((c) => c.relayUrl),
+          containsAll([newRelay, 'wss://one.communities.buzz.xyz']),
+        );
+        final added = partial.singleWhere((c) => c.relayUrl == newRelay);
+        expect(await f.storage.loadActiveId(), added.id);
+        await f.tap(tester, 'Try again');
+        expect(f.flow.stage, HostedFlowStage.complete);
+        expect(
+          (await f.storage.loadAll()).map((c) => c.relayUrl),
+          unorderedEquals([
+            newRelay,
+            'wss://one.communities.buzz.xyz',
+            'wss://two.communities.buzz.xyz',
+          ]),
+        );
+        expect(await f.storage.loadActiveId(), added.id);
+        expect(f.probes.where((c) => c.relayUrl == newRelay), hasLength(1));
+        expect(
+          f.probes.where((c) => c.relayUrl == 'wss://one.communities.buzz.xyz'),
+          hasLength(1),
+        );
+        expect(f.sent('/known-communities/list'), hasLength(discoveries));
+        expect(find.byType(OnboardingAppEntry), findsNothing);
+        expect(find.text('Community home').hitTestable(), findsOneWidget);
+      },
+    );
+  }
+
+  journey('welcome cancels browser sign-in and can retry', (tester, f) async {
+    await f.initialize(localIdentity: false, signedIn: false);
+    f.bound = null;
+    f.offerProfile = false;
+    await f.mount(tester, addingCommunity: false);
+    Future<void> cancelled() async {
+      for (var i = 0; i < 100 && f.flow.stage != HostedFlowStage.idle; i++) {
+        await Future<void>.delayed(Duration.zero);
+        await tester.pump();
+      }
+      expect(f.flow.stage, HostedFlowStage.idle);
+      await f.settle(tester);
+      expect(find.text('or sign in with email').hitTestable(), findsOneWidget);
+    }
+
+    final abandonedBrowser = Completer<void>();
+    f.beforeBrowserReturn = () => abandonedBrowser.future;
+    await f.tap(tester, 'or sign in with email');
+    expect(find.text('Cancel sign-in').hitTestable(), findsOneWidget);
+    await f.tap(tester, 'Cancel sign-in');
+    abandonedBrowser.complete();
+    await cancelled();
+    expect(f.flow.account.account, isNull);
+    f.beforeBrowserReturn = () async {
+      throw PlatformException(code: 'cancelled');
+    };
+    await f.tap(tester, 'or sign in with email');
+    await cancelled();
+    f.beforeBrowserReturn = null;
+    await f.tap(tester, 'or sign in with email');
+    await f.settle(tester);
+    expect(find.text('Create my Buzz identity').hitTestable(), findsOneWidget);
+  });
+
   for (final importing in [false, true]) {
     journey(
       'new account ${importing ? 'imports' : 'creates'} and keeps its identity on retry',
@@ -65,7 +187,35 @@ void main() {
         f.bound = null;
         f.offerProfile = false;
         await f.mount(tester);
-        await f.tap(tester, 'Continue with Builderlab');
+        // iOS 16 stops before any identity generation, binding or admission.
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          const MethodChannel('buzz/hosted_hpke'),
+          (_) async => false,
+        );
+        try {
+          await f.flow.signInAccount();
+          expect(f.flow.problem, HostedFlowProblem.unsupportedPlatform);
+          expect(await f.store.read(), isNull);
+          expect(f.bound, isNull);
+          expect(f.probes, isEmpty);
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          const MethodChannel('buzz/hosted_hpke'),
+          (call) async => call.method == 'isSupported'
+              ? true
+              : {
+                  'enc': Uint8List.fromList([4, ...List.filled(64, 2)]),
+                  'ciphertext': Uint8List(48),
+                },
+        );
+        // Account restoration may resume independently of the Add choices.
+        await f.flow.signInAccount();
+        await f.settle(tester);
+        expect(f.flow.stage, HostedFlowStage.setupIdentity);
+        expect(f.probes, isEmpty);
         expect(find.text('Create my Buzz identity'), findsOneWidget);
         expect(find.text('Import existing identity'), findsOneWidget);
         expect(await f.store.read(), isNull);
@@ -114,7 +264,11 @@ void main() {
     await f.initialize(localIdentity: false);
     f.offerProfile = false;
     await f.mount(tester);
-    await f.tap(tester, 'Continue with Builderlab');
+    // Account restoration may resume independently of the Add choices.
+    await f.flow.signInAccount();
+    await f.settle(tester);
+    expect(f.flow.stage, HostedFlowStage.setupIdentity);
+    expect(f.probes, isEmpty);
     expect(find.text('Create my Buzz identity'), findsNothing);
     expect(find.text('Import existing identity'), findsOneWidget);
     await f.tap(tester, 'Import existing identity');
@@ -140,21 +294,25 @@ void main() {
     expect(f.requests.where((r) => r.url.path.endsWith('/recovery')), isEmpty);
   });
 
-  journey('system Back leaves community creation', (tester, f) async {
+  journey('system Back leaves community link entry', (tester, f) async {
     await f.initialize();
     await f.mount(tester);
-    await f.tap(tester, 'Create a community');
+    await f.tap(tester, 'Enter a community link');
     expect(
-      tester.widget<PairingPage>(find.byType(PairingPage)).creatingCommunity,
+      tester
+          .widget<PairingPage>(find.byType(PairingPage))
+          .enteringCommunityLink,
       isTrue,
     );
     await tester.binding.handlePopRoute();
     await f.settle(tester);
     expect(
-      tester.widget<PairingPage>(find.byType(PairingPage)).creatingCommunity,
+      tester
+          .widget<PairingPage>(find.byType(PairingPage))
+          .enteringCommunityLink,
       isFalse,
     );
-    expect(find.text('Create a community').hitTestable(), findsOneWidget);
+    expect(find.text('Enter a community link').hitTestable(), findsOneWidget);
   });
 
   journey('retiring profile setup removes both profile and avatar routes', (
@@ -164,7 +322,21 @@ void main() {
     await f.initialize();
     f.rows.add(f.row('one'));
     await f.mount(tester);
-    await f.tap(tester, 'Continue with Builderlab');
+    // Account restoration may resume independently of the Add choices.
+    await f.flow.signInAccount();
+    await f.settle(tester);
+    expect(f.flow.stage, HostedFlowStage.chooseCommunities);
+    expect(f.probes, isEmpty);
+    await tester.tap(find.byType(CommunityGridOption).first);
+    await f.settle(tester);
+    await tester.enterText(
+      find.byType(TextField).hitTestable(),
+      'Draft Person',
+    );
+    expect(find.byTooltip('Add profile photo'), findsNothing);
+    await f.tap(tester, 'Continue');
+    expect(find.text('Choose your avatar'), findsOneWidget);
+    expect(f.profileWrites, isEmpty);
     await tester.tap(find.byTooltip('Add profile photo'));
     await f.settle(tester);
     expect(find.byType(ProfileSetupAvatarEditor), findsOneWidget);
@@ -173,44 +345,150 @@ void main() {
       find.byType(ProfileSetupAvatarEditor, skipOffstage: false),
       findsNothing,
     );
-    expect(find.text('Set up your profile', skipOffstage: false), findsNothing);
+    expect(find.text('Choose your avatar', skipOffstage: false), findsNothing);
     expect(f.profileWrites, isEmpty);
   });
 
-  journey('fallback profile previews the accepted draft before saving', (
-    tester,
-    f,
-  ) async {
-    await f.initialize();
-    f.rows.add(f.row('one'));
-    await f.mount(tester);
-    await f.tap(tester, 'Continue with Builderlab');
-    await tester.tap(find.byTooltip('Add profile photo'));
-    await f.settle(tester);
-    final url = emojiAvatarDataUrl('🐝', 0xFFFFE75C);
-    Navigator.of(
-      tester.element(find.byType(ProfileSetupAvatarEditor)),
-    ).pop(ProfileUrlAvatarDraft(url));
-    await f.settle(tester);
-    expect(
-      tester
-          .widget<PlayingAvatarImage>(find.byType(PlayingAvatarImage))
-          .imageUrl,
-      url,
+  for (final skipAvatar in [false, true]) {
+    journey(
+      'fallback profile preserves drafts and recovers save failures (skip: $skipAvatar)',
+      (tester, f) async {
+        await f.initialize();
+        f.rows.add(f.row('one'));
+        await f.mount(tester);
+        // Account restoration may resume independently of the Add choices.
+        await f.flow.signInAccount();
+        await f.settle(tester);
+        expect(f.flow.stage, HostedFlowStage.chooseCommunities);
+        expect(f.probes, isEmpty);
+        await tester.tap(find.byType(CommunityGridOption).first);
+        await f.settle(tester);
+        await tester.enterText(
+          find.byType(TextField).hitTestable(),
+          'Draft Person',
+        );
+        expect(find.byTooltip('Add profile photo'), findsNothing);
+        await f.tap(tester, 'Continue');
+        expect(find.text('Choose your avatar'), findsOneWidget);
+        expect(f.profileWrites, isEmpty);
+        await tester.tap(find.byTooltip('Add profile photo'));
+        await f.settle(tester);
+        final url = emojiAvatarDataUrl('🐝', 0xFFFFE75C);
+        Navigator.of(
+          tester.element(find.byType(ProfileSetupAvatarEditor)),
+        ).pop(ProfileUrlAvatarDraft(url));
+        await f.settle(tester);
+        expect(
+          tester
+              .widget<PlayingAvatarImage>(find.byType(PlayingAvatarImage))
+              .imageUrl,
+          url,
+        );
+        await tester.tap(find.byTooltip('Back'));
+        await f.settle(tester);
+        expect(find.text('Choose a display name'), findsOneWidget);
+        expect(
+          tester
+              .widget<TextField>(find.byType(TextField).hitTestable())
+              .controller!
+              .text,
+          'Draft Person',
+        );
+        await f.tap(tester, 'Continue');
+        expect(find.byTooltip('Edit profile photo'), findsOneWidget);
+        f.profileSaveFailures = 1;
+        await f.tap(tester, 'Continue');
+        expect(f.profileWrites, isEmpty);
+        expect(find.text('Not now'), findsOneWidget);
+        expect(find.byTooltip('Edit profile photo'), findsOneWidget);
+        await f.tap(tester, skipAvatar ? 'Skip' : 'Continue');
+        expect(f.profileWrites, ['Draft Person']);
+        expect(f.profileAvatars, skipAvatar ? isEmpty : [url]);
+      },
     );
-    await tester.enterText(
-      find.byType(TextField).hitTestable(),
-      'Draft Person',
-    );
-    await f.tap(tester, 'Continue');
-    expect(f.profileWrites, ['Draft Person']);
-    expect(f.profileAvatars, [url]);
-  });
+  }
 
   journey(
-    'QR credentials enter without an account when domain is not required',
+    'QR credentials preserve an existing hosted identity or enter an opt-out community',
     (tester, f) async {
-      if (HostedEnvironment.requiresAuth('paired.communities.buzz.xyz')) return;
+      if (HostedEnvironment.requiresAuth('paired.communities.buzz.xyz')) {
+        await f.initialize();
+        final original = Community.create(
+          name: 'One',
+          relayUrl: 'https://one.communities.buzz.xyz',
+          pubkey: f.keys.public,
+          nsec: f.keys.nsec,
+        );
+        await f.storage.save(original);
+        await f.storage.saveActiveId(original.id);
+        late ControllablePairingSocket socket;
+        await f.mount(
+          tester,
+          pairingSocketFactory:
+              ({
+                required wsUrl,
+                required ephemeralPrivkey,
+                required onMessage,
+                required onDisconnected,
+              }) {
+                return socket = ControllablePairingSocket(
+                  ephemeralPrivkey: ephemeralPrivkey,
+                  onMessage: onMessage,
+                  onDisconnected: onDisconnected,
+                );
+              },
+        );
+        final transferred = nostr.Keys('2'.padLeft(64, '0'));
+        const sessionSecret =
+            'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
+        final notifier = f.container.read(pairingProvider.notifier);
+        await notifier.pair(
+          'nostrpair://${transferred.public}?secret=$sessionSecret&relay=wss%3A%2F%2Fpairing.buzz.xyz&v=1',
+        );
+        notifier.setProtectSensitiveActions(false);
+        notifier.confirmSas();
+        socket.sendSourceMessage(
+          sourceSecret: transferred.secret,
+          sessionSecretHex: sessionSecret,
+          message: {'type': 'sas-confirm'},
+          includeTranscriptHash: true,
+        );
+        await f.settle(tester);
+        socket.sendSourceMessage(
+          sourceSecret: transferred.secret,
+          sessionSecretHex: sessionSecret,
+          message: {
+            'type': 'payload',
+            'payload_type': 'credentials',
+            'payload': jsonEncode({
+              'relayUrl': 'https://paired.communities.buzz.xyz',
+              'nsec': transferred.nsec,
+              'pubkey': transferred.public,
+            }),
+          },
+        );
+        await f.settle(tester);
+        const message =
+            'This device uses a different identity. Your saved identity has been kept.';
+        expect(find.text(message).hitTestable(), findsOneWidget);
+        expect(find.text('Scan a QR code').hitTestable(), findsOneWidget);
+        final announcement = find.ancestor(
+          of: find.text(message),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is Semantics && widget.properties.liveRegion == true,
+          ),
+        );
+        expect(announcement, findsOneWidget);
+        final saved = (await f.storage.loadAll()).single;
+        expect(saved.pubkey, f.keys.public);
+        expect(saved.nsec, f.keys.nsec);
+        expect((await f.store.read())?.pubkey, f.keys.public);
+        await tester.tap(find.byTooltip('Back').hitTestable());
+        await f.settle(tester);
+        expect(find.text('Community home').hitTestable(), findsOneWidget);
+        return;
+      }
       // Seed a previous account session: an opt-out build must not restore it.
       await f.initialize(localIdentity: false);
       f.requests.clear();
@@ -233,7 +511,8 @@ void main() {
           findsOneWidget,
         );
         expect(f.activeFlow, isNull);
-        await f.tap(tester, 'Back');
+        await tester.tap(find.byTooltip('Back').hitTestable());
+        await f.settle(tester);
         expect(f.requests, isEmpty);
       }
       final notifier = f.container.read(pairingProvider.notifier);
@@ -255,7 +534,94 @@ void main() {
       expect(f.sent('/exchange'), isEmpty);
       expect(f.sent('/current'), isEmpty);
       expect(f.sent('/nsec-backups/status'), isEmpty);
-      expect(find.text('Sign in to Builderlab to reconnect'), findsNothing);
+      expect(find.text('Reconnect to Builderlab'), findsNothing);
+    },
+    requiresBuilderlab: false,
+  );
+
+  journey(
+    'a refused organization account changes to another without the hosted one',
+    (tester, f) async {
+      f.relayAuthEnabled = true;
+      f.organizationEnabled = true;
+      await f.initialize();
+      // Signed in to the organization as an account bound to another key.
+      f.organizationSubject = 'other-member';
+      f.organizationBound = f.secondKeys.public;
+      await f.signInOrganization();
+      final community = Community.create(
+        name: 'Block',
+        relayUrl: 'wss://${HostedJourneyFixture.organizationRelayHost}',
+        pubkey: f.keys.public,
+        nsec: f.keys.nsec,
+      );
+      await f.storage.save(community);
+      await f.storage.saveActiveId(community.id);
+      await f.mount(tester, openEntry: false);
+      final sessionSubscription = f.container.listen(
+        relaySessionProvider,
+        (_, _) {},
+      );
+      addTearDown(sessionSubscription.close);
+      await f.settle(tester);
+      const refused =
+          'Your organization account cannot use this community with this key.';
+      expect(find.text(refused), findsOneWidget);
+      expectAboveTabBar(tester, 'Use a different account');
+      expect(f.sent('/identity/assertions'), isEmpty);
+
+      // Retry keeps the refused account and fails the same way.
+      await f.tap(tester, 'Retry');
+      expect(find.text(refused), findsOneWidget);
+      expect(f.organizationBrowserStarts, 0);
+
+      f.organizationSubject = 'journey-owner';
+      f.organizationBound = f.keys.public;
+      final hosted = f.container.read(builderlabAccountProvider);
+      final hostedCredential = await const FlutterSecureStorage().read(
+        key:
+            'buzz_hosted_session_'
+            '${hosted.accountOrigin.host.replaceAll('.', '_')}_v1',
+      );
+      expect(hostedCredential, isNotNull);
+      final connects = f.socketHeaders.length;
+      await f.tap(tester, 'Use a different account');
+      await f.settle(tester);
+      expect(f.organizationBrowserStarts, 1);
+      expect(
+        f.container.read(organizationAccountProvider)!.account!.subject,
+        'journey-owner',
+      );
+      expect(find.text(refused), findsNothing);
+      expect(find.text('Use a different account'), findsNothing);
+      // The real relay session reconnects with the new account's assertion.
+      expect(f.socketHeaders.length, greaterThan(connects));
+      expect(
+        f.socketHeaders.last['Nostr-Federated-Identity'],
+        'Bearer organization-assertion',
+      );
+      expect(
+        f.container.read(relaySessionProvider).status,
+        SessionStatus.connected,
+      );
+      // Only the organization session changed.
+      expect(
+        await const FlutterSecureStorage().read(
+          key:
+              'buzz_hosted_session_'
+              '${hosted.accountOrigin.host.replaceAll('.', '_')}_v1',
+        ),
+        hostedCredential,
+      );
+      expect(
+        f.requests.where(
+          (r) =>
+              r.url.origin != HostedJourneyFixture.organizationOrigin.origin &&
+              r.url.path.endsWith('/identity/assertions'),
+        ),
+        isEmpty,
+      );
+      expect((await f.storage.loadAll()).single.nsec, community.nsec);
     },
     requiresBuilderlab: false,
   );
@@ -283,30 +649,52 @@ void main() {
       final session = f.container.read(relaySessionProvider.notifier);
       await f.settle(tester);
       if (!HostedEnvironment.requiresAuth(Uri.parse(community.relayUrl).host)) {
-        expect(find.text('Sign in to Builderlab to reconnect'), findsNothing);
+        expect(find.text('Reconnect to Builderlab'), findsNothing);
         expect(f.socketHeaders, isNotEmpty);
         expect(f.socketHeaders, everyElement(isEmpty));
         expect(f.sent('/assertions'), isEmpty);
         expect(f.container.read(relayConfigProvider).nsec, community.nsec);
         return;
       }
-      expect(find.text('Sign in to Builderlab to reconnect'), findsOneWidget);
+      expect(find.text('Reconnect to Builderlab'), findsOneWidget);
       expect(f.socketHeaders, isEmpty);
 
+      final feedbackContext = tester.element(
+        find.byType(HostedReconnectBanner),
+      );
+      showBuzzToast(feedbackContext, 'Copied');
+      await f.settle(tester);
+      expect(find.text('Copied'), findsOneWidget);
+      expect(find.text('Reconnect to Builderlab'), findsNothing);
+      expect(find.text('Sign in'), findsNothing);
+      var retried = false;
+      showBuzzToast(
+        feedbackContext,
+        'Couldn’t save changes',
+        onRetry: () {
+          retried = true;
+        },
+      );
+      await f.settle(tester);
+      expect(find.text('Copied'), findsNothing);
+      expect(find.text('Reconnect to Builderlab'), findsNothing);
+      await f.tap(tester, 'Retry');
+      expect(retried, isTrue);
+      expect(find.text('Reconnect to Builderlab'), findsOneWidget);
       final browser = Completer<void>();
       f.beforeBrowserReturn = () => browser.future;
       await f.tap(tester, 'Sign in');
       await f.tap(tester, 'Cancel sign-in');
       browser.complete();
       await f.settle(tester);
-      expect(find.text('Sign in to Builderlab to reconnect'), findsOneWidget);
+      expect(find.text('Reconnect to Builderlab'), findsOneWidget);
       expect(f.socketHeaders, isEmpty);
 
       f.beforeBrowserReturn = null;
       await f.tap(tester, 'Sign in');
       await f.settle(tester);
       expect(f.socketHeaders, isNotEmpty);
-      expect(find.text('Sign in to Builderlab to reconnect'), findsNothing);
+      expect(find.text('Reconnect to Builderlab'), findsNothing);
       await session.queryRelay(const []);
       expect(f.sent('/query'), hasLength(1));
       final proofRequest = f.sent('/identity/assertions').single;
@@ -362,7 +750,7 @@ void main() {
         throwsA(AccountFailure.signedOut),
       );
       await f.settle(tester);
-      expect(find.text('Sign in to Builderlab to reconnect'), findsOneWidget);
+      expect(find.text('Reconnect to Builderlab'), findsOneWidget);
       final beforeWrongAccount = f.sent('/identity/assertions').length;
       f.bound = f.secondKeys.public;
       f.subject = 'wrong-owner';
@@ -459,125 +847,160 @@ void main() {
     requiresBuilderlab: false,
   );
 
-  journey(
-    'fresh account signs in, backs up, accepts invite and retries starters before home',
-    (tester, f) async {
-      await f.initialize(
-        localIdentity: false,
-        cloudChoice: true,
-        signedIn: false,
-      );
-      f.starterFailures = 2;
-      final browserReturn = Completer<void>();
-      f.beforeBrowserReturn = () => browserReturn.future;
-      final enrollmentReached = Completer<void>();
-      final enrollmentReturn = Completer<void>();
-      f.beforeEnrollmentReturn = () {
-        enrollmentReached.complete();
-        return enrollmentReturn.future;
-      };
-      await f.mount(tester);
-      await f.link(tester, 'one');
-      try {
+  for (final savedIncomplete in [false, true]) {
+    journey(
+      '${savedIncomplete ? 'incomplete saved' : 'fresh'} account signs in, backs up, accepts invite and retries starters before home',
+      (tester, f) async {
+        await f.initialize(
+          localIdentity: false,
+          cloudChoice: true,
+          signedIn: savedIncomplete,
+        );
+        f.needsAccountSetup = savedIncomplete;
+        f.starterFailures = 2;
+        final browserReturn = Completer<void>();
+        f.beforeBrowserReturn = () async {
+          await browserReturn.future;
+          f.needsAccountSetup = false;
+        };
+        final enrollmentReached = Completer<void>();
+        final enrollmentReturn = Completer<void>();
+        f.beforeEnrollmentReturn = () {
+          enrollmentReached.complete();
+          return enrollmentReturn.future;
+        };
+        await f.mount(tester);
+        await f.link(tester, 'one');
+        try {
+          expect(
+            find.text('Enter a community link').hitTestable(),
+            findsOneWidget,
+          );
+          expect(find.text('Scan a QR code').hitTestable(), findsOneWidget);
+          expect(f.browserUrls.single.path, '/auth/native');
+          expect(f.browserUrls.single.origin, HostedEnvironment.origin.origin);
+          expect(
+            await f.flow.browser.retainedIntent(),
+            containsPair('code', 'invite-one'),
+          );
+          expect(f.sent('/exchange'), savedIncomplete ? hasLength(1) : isEmpty);
+          expect(f.sent('/api/invites/claim'), isEmpty);
+          expect(find.text('Start login again'), findsNothing);
+          expect(find.text('Complete sign-in in your browser.'), findsNothing);
+        } finally {
+          browserReturn.complete();
+        }
+        await f.settle(tester);
+        await tester.tap(find.text('Create my Buzz identity'));
+        await enrollmentReached.future.timeout(const Duration(seconds: 5));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        try {
+          expect(find.byTooltip('Back').hitTestable(), findsNothing);
+          // External teardown still fences pending enrollment.
+          await f.flow.leave();
+          await tester.pump();
+        } finally {
+          enrollmentReturn.complete();
+        }
+        await f.settle(tester);
+        expect(f.sent('/nsec-backups'), isEmpty);
+        final retainedKey = (await f.store.read())!.pubkey;
+        f.beforeEnrollmentReturn = null;
+        // A dispatched upload can succeed after cancellation. Its receipt must
+        // still be durable; resuming must not replay an acknowledged backup.
+        f.beforeUploadReturn = () => f.flow.leave();
+        await f.link(tester, 'one');
+        expect((await f.store.read())!.backup, isNotNull);
+        f.beforeUploadReturn = null;
+        // Production legal documents exceed the ordinary 64 KiB account limit.
+        f.policyResponses.add(
+          http.Response(
+            jsonEncode({
+              'policy': {
+                'version': 'one.communities.buzz.xyz',
+                'age_attestation_required': true,
+                'terms_markdown': 'Be kind to this community.',
+                'privacy_markdown': 'Public privacy notice. ' * 5000,
+              },
+            }),
+            200,
+          ),
+        );
+        await f.link(tester, 'one');
+        expect((await f.store.read())!.pubkey, retainedKey);
+        expect(f.browserStarts, 1);
+        final generated = (await f.store.read())!;
+        expect(generated.pubkey, f.bound);
+        expect(generated.backup, isNotNull);
+        expect(f.sent('/verify'), hasLength(1));
+        expect(f.sent('/nsec-backups'), hasLength(1));
+        final accept = find.widgetWithText(FilledButton, 'Accept and join');
+        expect(tester.widget<FilledButton>(accept).onPressed, isNull);
+        expect(f.sent('/claim'), isEmpty);
+        expect(await f.storage.loadAll(), isEmpty);
+        await f.tap(tester, 'Terms of service');
+        expect(find.text('Be kind to this community.'), findsOneWidget);
+        await tester.tap(find.byType(CheckboxListTile));
+        await f.settle(tester);
+        await f.tap(tester, 'Accept and join');
+        expect(find.text('Try again').hitTestable(), findsOneWidget);
+        final pending = (await f.storage.loadAll()).single;
+        expect(pending.starterSetupIncomplete, isTrue);
+        expect(pending.pubkey, generated.pubkey);
+        expect(f.sent('/claim'), hasLength(1));
         expect(
-          find.text('Enter a community link').hitTestable(),
+          jsonDecode(f.sent('/claim').single.body)['policy_receipt'],
+          'synthetic-policy-receipt',
+        );
+        expect(
+          jsonDecode(f.sent('/accept-policy').single.body)['age_confirmed'],
+          isTrue,
+        );
+        // Reopen the saved invite after its claim was consumed. Starter recovery
+        // must retain the durable marker and must not claim it again.
+        await f.link(tester, 'one');
+        expect(
+          (await f.storage.loadAll()).single.starterSetupIncomplete,
+          isTrue,
+        );
+        expect(find.text('Try again').hitTestable(), findsOneWidget);
+        await f.tap(tester, 'Try again');
+        expect(
+          find.byType(ProfileSetupPage, skipOffstage: false),
           findsOneWidget,
         );
-        expect(find.text('Scan a QR code').hitTestable(), findsOneWidget);
-        expect(find.text('Start login again'), findsNothing);
-        expect(find.text('Complete sign-in in your browser.'), findsNothing);
-      } finally {
-        browserReturn.complete();
-      }
-      await f.settle(tester);
-      await tester.tap(find.text('Create my Buzz identity'));
-      await enrollmentReached.future.timeout(const Duration(seconds: 5));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      try {
-        await tester.tap(find.text('Leave setup').hitTestable());
-        await tester.pump();
-      } finally {
-        enrollmentReturn.complete();
-      }
-      await f.settle(tester);
-      expect(f.sent('/nsec-backups'), isEmpty);
-      final retainedKey = (await f.store.read())!.pubkey;
-      f.beforeEnrollmentReturn = null;
-      // A dispatched upload can succeed after cancellation. Its receipt must
-      // still be durable; resuming must not replay an acknowledged backup.
-      f.beforeUploadReturn = () => f.flow.leave();
-      await f.link(tester, 'one');
-      expect((await f.store.read())!.backup, isNotNull);
-      f.beforeUploadReturn = null;
-      await f.link(tester, 'one');
-      expect((await f.store.read())!.pubkey, retainedKey);
-      expect(f.browserStarts, 1);
-      final generated = (await f.store.read())!;
-      expect(generated.pubkey, f.bound);
-      expect(generated.backup, isNotNull);
-      expect(f.sent('/verify'), hasLength(1));
-      expect(f.sent('/nsec-backups'), hasLength(1));
-      final accept = find.widgetWithText(FilledButton, 'Accept and join');
-      expect(tester.widget<FilledButton>(accept).onPressed, isNull);
-      expect(f.sent('/claim'), isEmpty);
-      expect(await f.storage.loadAll(), isEmpty);
-      await f.tap(tester, 'Terms of service');
-      expect(find.text('Be kind to this community.'), findsOneWidget);
-      await tester.tap(find.byType(CheckboxListTile));
-      await f.settle(tester);
-      await f.tap(tester, 'Accept and join');
-      expect(find.text('Try again').hitTestable(), findsOneWidget);
-      final pending = (await f.storage.loadAll()).single;
-      expect(pending.starterSetupIncomplete, isTrue);
-      expect(pending.pubkey, generated.pubkey);
-      expect(f.sent('/claim'), hasLength(1));
-      expect(
-        jsonDecode(f.sent('/claim').single.body)['policy_receipt'],
-        'synthetic-policy-receipt',
-      );
-      expect(
-        jsonDecode(f.sent('/accept-policy').single.body)['age_confirmed'],
-        isTrue,
-      );
-      // Reopen the saved invite after its claim was consumed. Starter recovery
-      // must retain the durable marker and must not claim it again.
-      await f.link(tester, 'one');
-      expect((await f.storage.loadAll()).single.starterSetupIncomplete, isTrue);
-      expect(find.text('Try again').hitTestable(), findsOneWidget);
-      await f.tap(tester, 'Try again');
-      expect(
-        find.byType(ProfileSetupPage, skipOffstage: false),
-        findsOneWidget,
-      );
-      expect(
-        find.ancestor(
-          of: find.byType(TextField).hitTestable(),
-          matching: find.byType(BottomSheet),
-        ),
-        findsOneWidget,
-      );
-      expect(f.sent('/claim'), hasLength(1));
-      expect(f.recoveryScopes, hasLength(3));
-      expect(
-        f.recoveryScopes.every((scope) => scope.nsec == pending.nsec),
-        isTrue,
-      );
-      await tester.enterText(
-        find.byType(TextField).hitTestable(),
-        'Journey Person',
-      );
-      await f.tap(tester, 'Continue');
-      expect(f.profileWrites, ['Journey Person']);
-      final saved = (await f.storage.loadAll()).single;
-      expect(saved.id, pending.id);
-      expect(saved.starterSetupIncomplete, isFalse);
-      expect(await f.storage.loadActiveId(), saved.id);
-      expect(find.byType(OnboardingAppEntry), findsNothing);
-      expect(find.text('Community home').hitTestable(), findsOneWidget);
-    },
-    requiresAuthDomain: true,
-  );
+        expect(
+          find.ancestor(
+            of: find.byType(TextField).hitTestable(),
+            matching: find.byType(BottomSheet),
+          ),
+          findsNothing,
+        );
+        expect(f.sent('/claim'), hasLength(1));
+        expect(f.recoveryScopes, hasLength(3));
+        expect(
+          f.recoveryScopes.every((scope) => scope.nsec == pending.nsec),
+          isTrue,
+        );
+        await tester.enterText(
+          find.byType(TextField).hitTestable(),
+          'Journey Person',
+        );
+        await f.tap(tester, 'Continue');
+        expect(f.profileWrites, isEmpty);
+        await f.tap(tester, 'Skip');
+        expect(f.profileWrites, ['Journey Person']);
+        final saved = (await f.storage.loadAll()).single;
+        expect(saved.id, pending.id);
+        expect(saved.starterSetupIncomplete, isFalse);
+        expect(await f.storage.loadActiveId(), saved.id);
+        expect(find.byType(OnboardingAppEntry), findsNothing);
+        expect(find.text('Community home').hitTestable(), findsOneWidget);
+      },
+      requiresAuthDomain: true,
+    );
+  }
 
   for (final boundAccount in [false, true]) {
     journey(
@@ -590,7 +1013,14 @@ void main() {
         f.subject = 'new-owner';
         f.bound = boundAccount ? f.secondKeys.public : null;
         if (boundAccount) f.cloudKeys.add(f.secondKeys);
-        await f.tap(tester, 'Continue with Builderlab');
+        // Account restoration may resume independently of the Add choices.
+        await f.flow.signInAccount();
+        await f.settle(tester);
+        expect(
+          f.flow.stage,
+          boundAccount ? HostedFlowStage.idle : HostedFlowStage.chooseIdentity,
+        );
+        expect(f.probes, isEmpty);
         if (!boundAccount) {
           expect(find.text('Saved identity'), findsOneWidget);
           expect(f.sent('/verify'), isEmpty);
@@ -626,7 +1056,11 @@ void main() {
       await f.storage.save(legacy);
       await f.storage.saveActiveId(legacy.id);
       await f.mount(tester);
-      await f.tap(tester, 'Continue with Builderlab');
+      // Account restoration may resume independently of the Add choices.
+      await f.flow.signInAccount();
+      await f.settle(tester);
+      expect(f.flow.stage, HostedFlowStage.chooseIdentity);
+      expect(f.probes, isEmpty);
       expect(find.text('Use Builderlab identity'), findsNWidgets(2));
       await f.tap(tester, fullNpub(f.secondKeys.public)!);
       expect((await f.store.read())!.pubkey, f.secondKeys.public);
@@ -641,25 +1075,28 @@ void main() {
         findsNothing,
       );
       f.rejectList = false;
-      await f.tap(tester, 'Continue with Builderlab');
-      expect(
-        find.text(
-          'No communities available to add. Scan a QR code or use an invite link.',
-        ),
-        findsOneWidget,
-      );
+      await f.tap(tester, 'Try again');
+      expect(f.flow.stage, HostedFlowStage.idle);
+      expect(f.probes, isEmpty);
+      expect(find.text('Signed in to BuilderLab'), findsOneWidget);
       expect(find.text('Scan a QR code'), findsOneWidget);
       expect(find.text('Use pairing code'), findsNothing);
       f.rows.addAll([f.row('one'), f.row('two')]);
-      await f.tap(tester, 'Continue with Builderlab');
-      // Joined communities are added automatically after choosing the identity.
+      // Account restoration may resume independently of the Add choices.
+      await f.flow.signInAccount();
+      await f.settle(tester);
+      expect(f.flow.stage, HostedFlowStage.chooseCommunities);
+      expect(f.probes, isEmpty);
+      await tester.tap(find.byType(CommunityGridOption).first);
+      await f.settle(tester);
+      // Continue explicitly admits the selected communities.
       expect(find.byType(CheckboxListTile).hitTestable(), findsNothing);
       expect(
         find.byType(ProfileSetupPage, skipOffstage: false),
         findsOneWidget,
       );
       final firstSaved = (await f.storage.loadAll()).firstWhere(
-        (c) => c.name == 'one.communities.buzz.xyz',
+        (c) => c.relayUrl == 'wss://one.communities.buzz.xyz',
       );
       Navigator.of(
         tester.element(find.byType(ProfileSetupPage, skipOffstage: false)),
@@ -683,16 +1120,18 @@ void main() {
         isTrue,
       );
       expect(
-        saved.singleWhere((c) => c.name == 'one.communities.buzz.xyz').id,
+        saved
+            .singleWhere((c) => c.relayUrl == 'wss://one.communities.buzz.xyz')
+            .id,
         firstSaved.id,
       );
       expect(await f.storage.loadActiveId(), firstSaved.id);
       expect(
-        f.probes.where((c) => c.name == 'one.communities.buzz.xyz'),
+        f.probes.where((c) => c.relayUrl == 'wss://one.communities.buzz.xyz'),
         hasLength(1),
       );
       expect(
-        f.probes.where((c) => c.name == 'two.communities.buzz.xyz'),
+        f.probes.where((c) => c.relayUrl == 'wss://two.communities.buzz.xyz'),
         hasLength(2),
       );
       expect(find.byType(OnboardingAppEntry), findsNothing);
@@ -704,24 +1143,66 @@ void main() {
       'new device recovers and preserves existing/unreadable profile ($unreadableProfile)',
       (tester, f) async {
         await f.initialize(localIdentity: false);
-        f.cloudKeys.addAll([f.secondKeys, f.keys]);
-        f.rows.add(f.row('one'));
+        // Exercise both an already-bound recovery and recovery that must bind
+        // its confirmed backup, without requiring native sealing in either case.
+        if (unreadableProfile) {
+          f.bound = null;
+          f.cloudKeys.add(f.keys);
+        } else {
+          f.cloudKeys.addAll([f.secondKeys, f.keys]);
+        }
+        f.rows.addAll([f.row('one'), f.row('two')]);
         f.offerProfile = false;
         f.profileUnavailable = unreadableProfile;
         await f.mount(tester);
-        await f.tap(tester, 'Continue with Builderlab');
-        // One discovered community is admitted automatically.
+        // Account restoration may resume independently of the Add choices.
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          const MethodChannel('buzz/hosted_hpke'),
+          (call) async {
+            expect(
+              call.method,
+              'isSupported',
+              reason: 'Recovery must not seal a new backup',
+            );
+            return false;
+          },
+        );
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        try {
+          await f.flow.signInAccount();
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+        await f.settle(tester);
+        expect(f.flow.stage, HostedFlowStage.chooseCommunities);
+        expect(f.probes, isEmpty);
+        await tester.tap(find.byType(CommunityGridOption).last);
+        await f.settle(tester);
+        // All memberships are restored; the second is the chosen destination.
         expect(f.profileWrites, isEmpty);
         expect(
           find.byType(ProfileSetupPage, skipOffstage: false),
           findsNothing,
         );
-        final saved = (await f.storage.loadAll()).single;
+        final communities = await f.storage.loadAll();
+        expect(communities, hasLength(2));
+        expect(
+          communities.map((c) => c.relayUrl),
+          containsAll([
+            'wss://one.communities.buzz.xyz',
+            'wss://two.communities.buzz.xyz',
+          ]),
+        );
+        final saved = communities.singleWhere(
+          (c) => c.relayUrl == 'wss://two.communities.buzz.xyz',
+        );
         expect(saved.nsec, f.keys.nsec);
         expect(saved.pubkey, f.keys.public);
         expect((await f.store.read())!.pubkey, f.keys.public);
         expect(f.sent('/recovery'), hasLength(1));
-        expect(f.sent('/challenge'), isEmpty);
+        expect(f.sent('/challenge'), hasLength(unreadableProfile ? 1 : 0));
+        expect(f.sent('/nsec-backups'), isEmpty);
+        expect(f.sent('/enrollment'), isEmpty);
         expect(await f.storage.loadActiveId(), saved.id);
         expect(find.byType(OnboardingAppEntry), findsNothing);
       },
@@ -797,10 +1278,10 @@ void main() {
       await f.tap(tester, 'Continue');
       // A refused key must not pin the URL against an explicit allowed choice.
       f.refusedSelfHostedPubkey = f.keys.public;
-      await f.tap(tester, fullNpub(f.keys.public)!);
+      await f.tap(tester, shortPubkey(f.keys.public));
       expect(await f.storage.loadAll(), isEmpty);
       expect(find.textContaining('Could not join.'), findsOneWidget);
-      await f.tap(tester, fullNpub(f.secondKeys.public)!);
+      await f.tap(tester, shortPubkey(f.secondKeys.public));
       expect((await f.storage.loadAll()).single.nsec, f.secondKeys.nsec);
       expect(
         (await AccountIdentityStore().forPairing(f.keys.public).read())!.pubkey,
@@ -814,16 +1295,26 @@ void main() {
   );
 
   journey(
-    'signed-in invite survives restart and leaving consent abandons only setup',
+    'saved pending account retains invite across retry without reopening setup',
     (tester, f) async {
       await f.initialize();
+      // /me reports stored details as pending even when legacy screening
+      // standing still says MISSING + NOT_SCREENED.
+      f.screeningPending = true;
+      // If setup is incorrectly reopened, allow its callback to finish so the
+      // no-browser assertion fails instead of cycling until the test times out.
+      f.beforeBrowserReturn = () async => f.screeningPending = false;
       await f.mount(tester);
       await f.link(tester, 'one');
+      expect(f.browserStarts, 0);
+      expect(f.sent('/claim'), isEmpty);
+      expect(await f.storage.loadAll(), isEmpty);
       expect(find.text('Accept and join').hitTestable(), findsOneWidget);
       await f.restart(tester);
       await f.tap(tester, 'Start login again');
       expect(find.text('Accept and join').hitTestable(), findsOneWidget);
       expect(f.browserStarts, 0);
+      f.screeningPending = false;
       expect(
         f.sent('/api/join-policy').last.url.host,
         'one.communities.buzz.xyz',
@@ -907,9 +1398,9 @@ void main() {
       await f.initialize();
       f.loseCreateResponse = true;
       await f.mount(tester);
-      await f.tap(tester, 'Create a community');
-      await tester.enterText(find.byType(TextField).hitTestable(), 'new-home');
-      await f.tap(tester, 'Continue');
+      // Creation is entered elsewhere; retain its restart/persistence journey.
+      await f.flow.start(HostedCreateCommunity('new-home'));
+      await f.settle(tester);
       expect(find.text('Try again').hitTestable(), findsOneWidget);
       expect(f.owned, hasLength(1));
       expect(await f.storage.loadAll(), isEmpty);
@@ -921,6 +1412,7 @@ void main() {
       );
       await tester.enterText(find.byType(TextField).hitTestable(), 'Creator');
       await f.tap(tester, 'Continue');
+      await f.tap(tester, 'Skip');
       final saved = (await f.storage.loadAll()).single;
       expect(saved.relayUrl, 'wss://new-home.communities.buzz.xyz');
       expect(saved.nsec, f.keys.nsec);
@@ -980,7 +1472,8 @@ void main() {
         // Owner mismatch requires the correct identity, not an automatic
         // retry. Explicitly abandon setup, then reopen the same link after
         // the server-side owner conflict has been corrected.
-        await f.tap(tester, 'Leave setup');
+        await tester.tap(find.byTooltip('Back').hitTestable());
+        await f.settle(tester);
         expect((await f.store.read())!.pubkey, f.keys.public);
         await f.link(tester, 'one');
       }

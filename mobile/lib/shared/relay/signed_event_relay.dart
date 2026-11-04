@@ -24,7 +24,7 @@ class SignedEventRelay {
     if (nsec == null || nsec.isEmpty) return null;
     final privkeyHex = nostr.Nip19.decode(payload: nsec).data;
     if (privkeyHex.isEmpty) return null;
-    return nostr.Keys(privkeyHex).public;
+    return derivePublicKeyHex(privkeyHex);
   }
 
   /// Sign and submit an event. Returns the relay's OK response as a [NostrEvent]
@@ -57,6 +57,8 @@ class SignedEventRelay {
     );
 
     final nostrEvent = NostrEvent.fromJson(event.toMap());
+    // Durable callers must finish journaling the exact signed bytes before
+    // the relay can accept an event whose acknowledgement might be lost.
     await onSigned?.call(nostrEvent);
     validateDelivery?.call();
     return _session.publish(nostrEvent);

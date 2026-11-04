@@ -20,8 +20,10 @@ import 'relay_client.dart';
 import 'relay_closed_policy.dart';
 import 'relay_http_query_client.dart';
 import 'relay_provider.dart';
+import 'relay_query_response.dart';
 import 'relay_rate_limit_gate.dart';
 import 'relay_reconnect_policy.dart';
+import 'read_state_snapshot.dart';
 import 'relay_session_types.dart';
 import 'relay_socket.dart';
 import 'package:buzz/shared/crypto/event_signing.dart';
@@ -30,6 +32,7 @@ export 'relay_session_types.dart';
 
 part 'relay_session_auth.dart';
 part 'relay_session_subscriptions.dart';
+part 'relay_session_snapshot.dart';
 
 class RelaySessionNotifier extends Notifier<SessionState> {
   RelaySessionNotifier({
@@ -42,6 +45,8 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     Future<void> Function(Duration) replayDelay = Future.delayed,
     RelayTimerFactory reconnectTimerFactory = Timer.new,
     Random? random,
+    RelayQueryDecoder queryDecoder = decodeRelayQueryResponse,
+    ReadStateSnapshotDecoder snapshotDecoder = decodeReadStateSnapshot,
   }) : _httpQueryClient = RelayHttpQueryClient(
          client: httpClient,
          clientFactory: httpClientFactory,
@@ -52,7 +57,9 @@ class RelaySessionNotifier extends Notifier<SessionState> {
        _retryTimerFactory = retryTimerFactory,
        _replayDelay = replayDelay,
        _reconnectTimerFactory = reconnectTimerFactory,
-       _random = random ?? Random();
+       _random = random ?? Random(),
+       _queryDecoder = queryDecoder,
+       _snapshotDecoder = snapshotDecoder;
 
   final RelayHttpQueryClient _httpQueryClient;
   final RelaySocketFactory _socketFactory;
@@ -62,6 +69,8 @@ class RelaySessionNotifier extends Notifier<SessionState> {
   final Future<void> Function(Duration) _replayDelay;
   final RelayTimerFactory _reconnectTimerFactory;
   final Random _random;
+  final RelayQueryDecoder _queryDecoder;
+  final ReadStateSnapshotDecoder _snapshotDecoder;
 
   static const _baseReconnectDelayMs = relayReconnectBaseDelayMs;
   static const _maxReconnectDelayMs = relayReconnectMaxDelayMs;
@@ -138,6 +147,15 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     filters.map((filter) => filter.toJson()).toList(),
     timeout: timeout,
   );
+
+  RelayConfig get _snapshotConfig => ref.read(relayConfigProvider);
+  HostedRelayAuth get _snapshotAuth => ref.read(hostedRelayAuthProvider);
+
+  /// Fetches a complete, validated own-author kind-30078 snapshot.
+  /// Throws if discovery, completeness, scope or event validation fails.
+  Future<List<NostrEvent>> fetchReadStateSnapshot({
+    Duration timeout = const Duration(seconds: 8),
+  }) => _fetchReadStateSnapshot(timeout: timeout);
 
   /// Finds people by profile name, for typeahead surfaces.
   ///
@@ -232,29 +250,34 @@ class RelaySessionNotifier extends Notifier<SessionState> {
             active() && !_disposed && generation == _contextGeneration,
       ),
     );
-    if (_disposed || _ageRestricted || generation != _contextGeneration) {
+    bool retired() =>
+        _disposed || _ageRestricted || generation != _contextGeneration;
+    if (retired()) {
       throw StateError('Relay query belongs to a retired session');
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      _activateRateLimitGateFromHttpError(response.body);
-      throw RelayException(response.statusCode, response.body);
+      final body = relayResponseText(
+        response.bodyBytes,
+        response.headers['content-type'],
+      );
+      _activateRateLimitGateFromHttpError(body);
+      throw RelayException(response.statusCode, body);
     }
-    final decoded = jsonDecode(response.body);
-    if (decoded is! List) {
-      throw const FormatException('relay returned malformed query response');
-    }
+    // Decoding runs off the UI isolate, so the session can retire meanwhile.
+    // A retired session reports that, not whatever its bytes decoded to.
+    final List<NostrEvent> events;
     try {
-      return [
-        for (final eventJson in decoded)
-          if (eventJson is Map<String, dynamic>)
-            NostrEvent.fromJson(eventJson)
-          else
-            throw const FormatException('relay returned malformed query event'),
-      ];
-    } catch (error) {
-      if (error is FormatException) rethrow;
-      throw FormatException('relay returned malformed query event: $error');
+      events = await _queryDecoder(response);
+    } catch (_) {
+      if (retired()) {
+        throw StateError('Relay query belongs to a retired session');
+      }
+      rethrow;
     }
+    if (retired()) {
+      throw StateError('Relay query belongs to a retired session');
+    }
+    return events;
   }
 
   void _activateRateLimitGateFromHttpError(String body) {
@@ -376,6 +399,18 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     }
 
     return () => _unsubscribe(subId);
+  }
+
+  /// Capture a fence for work whose authority must not cross a reconnect.
+  /// Invoke it after awaited work and immediately before publication.
+  void Function() captureConnectionFence() {
+    final generation = _connectionGeneration;
+    final context = _contextGeneration;
+    return () {
+      if (!_isActiveConnection(generation) || context != _contextGeneration) {
+        throw StateError('Relay connection changed; fresh snapshot required');
+      }
+    };
   }
 
   Future<NostrEvent> publish(

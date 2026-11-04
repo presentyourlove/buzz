@@ -3,7 +3,7 @@ import UIKit
 import CoreText
 
 /// Profile draft presentation; persistence and the existing avatar editor stay in Dart.
-final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationControllerDelegate {
+final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationControllerDelegate, UIViewControllerTransitioningDelegate {
   private let channel: FlutterMethodChannel
   private var navigation: UINavigationController?
   private var pending: FlutterResult?
@@ -81,6 +81,7 @@ final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationContr
       }
       let nav = UINavigationController(rootViewController: controller)
       nav.modalPresentationStyle = .overFullScreen
+      nav.transitioningDelegate = self
       nav.overrideUserInterfaceStyle = args["dark"] as? Bool == true ? .dark : .light
       self.pending = result; self.session = session; self.navigation = nav
       controller.loadViewIfNeeded()
@@ -184,6 +185,7 @@ final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationContr
     engine.registrar(forPlugin: "BuzzNativeSkinToneControl")?.register(NativeSkinToneControlFactory(messenger: messenger), withId: "buzz/native_skin_tone_control")
     let editor = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
     avatarController = editor
+    engine.registrar(forPlugin: "BuzzToastLayer")?.register(ToastLayerFactory(), withId: "buzz/toast_layer")
     engine.registrar(forPlugin: "BuzzIosNavigationBar")?.register(IosNavigationBarFactory(messenger: messenger, parent: editor), withId: "buzz/ios_navigation_bar")
     editor.isViewOpaque = false
     editor.view.backgroundColor = .clear
@@ -257,6 +259,50 @@ final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationContr
     result?(action)
   }
   func presentationControllerDidDismiss(_ presentationController: UIPresentationController) { complete("skip") }
+
+  func animationController(forPresented presented: UIViewController, presenting: UIViewController,
+                           source: UIViewController) -> UIViewControllerAnimatedTransitioning? {
+    ProfileSetupPageTransition(presenting: true)
+  }
+
+  func animationController(forDismissed dismissed: UIViewController) -> UIViewControllerAnimatedTransitioning? {
+    ProfileSetupPageTransition(presenting: false)
+  }
+}
+
+/// Matches the horizontal forward/backward motion of the Flutter onboarding pages.
+private final class ProfileSetupPageTransition: NSObject, UIViewControllerAnimatedTransitioning {
+  let presenting: Bool
+  init(presenting: Bool) { self.presenting = presenting }
+
+  func transitionDuration(using context: UIViewControllerContextTransitioning?) -> TimeInterval { 0.25 }
+
+  func animateTransition(using context: UIViewControllerContextTransitioning) {
+    let key: UITransitionContextViewControllerKey = presenting ? .to : .from
+    guard let controller = context.viewController(forKey: key) else {
+      context.completeTransition(false)
+      return
+    }
+    guard let view = context.view(forKey: presenting ? .to : .from) ?? controller.view else {
+      context.completeTransition(false)
+      return
+    }
+    let distance = context.containerView.bounds.width
+    if presenting {
+      view.frame = context.finalFrame(for: controller)
+      context.containerView.addSubview(view)
+      view.transform = CGAffineTransform(translationX: distance, y: 0)
+    }
+    UIView.animate(withDuration: transitionDuration(using: context), delay: 0,
+                   options: [.curveEaseOut, .beginFromCurrentState]) {
+      view.transform = self.presenting ? .identity : CGAffineTransform(translationX: distance, y: 0)
+    } completion: { _ in
+      let completed = !context.transitionWasCancelled
+      if !self.presenting && completed { view.removeFromSuperview() }
+      view.transform = .identity
+      context.completeTransition(completed)
+    }
+  }
 }
 
 private final class NativeProfileSetupController: UIViewController, UITextFieldDelegate {
@@ -296,13 +342,23 @@ private final class NativeProfileSetupController: UIViewController, UITextFieldD
     view.tintColor = UIColor(red: CGFloat((argb >> 16) & 255) / 255, green: CGFloat((argb >> 8) & 255) / 255, blue: CGFloat(argb & 255) / 255, alpha: 1)
     let stack = UIStackView(); stack.axis = .vertical; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
     let scroll = UIScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
+    NavigationTopEdge.configure(scroll, item: navigationItem)
+    if #available(iOS 15.0, *) { setContentScrollView(scroll) }
     view.addSubview(scroll); scroll.addSubview(stack)
+    // Content keeps its original keyboard-aware height while the scroll view
+    // extends beneath navigation for the system soft edge.
+    let contentViewport = UILayoutGuide()
+    view.addLayoutGuide(contentViewport)
     NSLayoutConstraint.activate([
-      scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor), scroll.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+      contentViewport.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+      contentViewport.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+      contentViewport.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      contentViewport.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      scroll.topAnchor.constraint(equalTo: view.topAnchor), scroll.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
       scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      stack.heightAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.heightAnchor, constant: -40),
-      stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 20), stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -20),
-      stack.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: 20), stack.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -20)
+      stack.heightAnchor.constraint(greaterThanOrEqualTo: contentViewport.heightAnchor, constant: -48),
+      stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 24), stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -24),
+      stack.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: 24), stack.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -24)
     ])
     let avatarMinimumHeight = avatarRow.heightAnchor.constraint(greaterThanOrEqualToConstant: avatarSize)
     avatarMinimumHeight.priority = .defaultHigh
@@ -341,8 +397,8 @@ private final class NativeProfileSetupController: UIViewController, UITextFieldD
     explanationRow.addArrangedSubview(explanation)
     explanationRow.isLayoutMarginsRelativeArrangement = true
     stack.addArrangedSubview(explanationRow)
-    // Match Grid.xxs between onboarding titles and subtitles.
-    stack.setCustomSpacing(8, after: heading)
+    // Match the shared onboarding title/subtitle spacing.
+    stack.setCustomSpacing(16, after: heading)
     stack.addArrangedSubview(name)
     status.numberOfLines = 0; status.textColor = .systemRed; status.font = .preferredFont(forTextStyle: .footnote); status.isHidden = true; stack.addArrangedSubview(status)
     stack.addArrangedSubview(avatarRow)
@@ -367,6 +423,41 @@ private final class NativeProfileSetupController: UIViewController, UITextFieldD
     stack.setCustomSpacing(8, after: submit)
     showStep(avatar: false, announce: false)
   }
+  // Same Inter metrics as OnboardingTypography in Flutter.
+  private static let interFontName: String? = {
+    guard let frameworks = Bundle.main.privateFrameworksURL,
+      let provider = CGDataProvider(url: frameworks.appendingPathComponent("App.framework/flutter_assets/assets/fonts/InterVariable.ttf") as CFURL),
+      let font = CGFont(provider), let name = font.postScriptName else { return nil }
+    CTFontManagerRegisterGraphicsFont(font, nil)
+    return name as String
+  }()
+
+  private func updateHeadingTypography() {
+    for (label, size, lineHeight, tracking, style) in [
+      (heading, CGFloat(30), CGFloat(36), CGFloat(-1), UIFont.TextStyle.largeTitle),
+      (explanation, CGFloat(16), CGFloat(24), CGFloat(-0.25), UIFont.TextStyle.body)
+    ] {
+      let metrics = UIFontMetrics(forTextStyle: style)
+      let base = Self.interFontName.flatMap { UIFont(name: $0, size: size) }
+        ?? UIFont.systemFont(ofSize: size, weight: .regular)
+      let font = metrics.scaledFont(for: base, compatibleWith: traitCollection)
+      let paragraph = NSMutableParagraphStyle()
+      paragraph.minimumLineHeight = metrics.scaledValue(for: lineHeight, compatibleWith: traitCollection)
+      label.font = font
+      label.attributedText = NSAttributedString(string: label.text ?? "", attributes: [
+        .font: font, .paragraphStyle: paragraph,
+        .kern: tracking * font.pointSize / size
+      ])
+    }
+  }
+
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+      updateHeadingTypography()
+    }
+  }
+
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
     focusNameIfNeeded()
@@ -381,13 +472,7 @@ private final class NativeProfileSetupController: UIViewController, UITextFieldD
     explanation.text = avatar
       ? "Let’s choose an avatar so people know it’s you."
       : "Your display name is how people see you in Buzz. You can change it any time."
-    // Mobile bodyLarge subtitle: 16/20, regular, subtle.
-    let paragraph = NSMutableParagraphStyle()
-    paragraph.minimumLineHeight = UIFontMetrics(forTextStyle: .subheadline).scaledValue(for: 20)
-    explanation.attributedText = NSAttributedString(string: explanation.text ?? "", attributes: [
-      .paragraphStyle: paragraph,
-      .kern: 0
-    ])
+    updateHeadingTypography()
     explanationRow.directionalLayoutMargins = .zero
     name.isHidden = avatar
     avatarRow.isHidden = !avatar

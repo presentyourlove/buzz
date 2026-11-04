@@ -59,8 +59,10 @@ class WidgetDiscoveryAccount extends BuilderlabAccountClient {
   @override
   Future<Map<String, dynamic>> post(
     String path,
-    Map<String, dynamic> body,
-  ) async {
+    Map<String, dynamic> body, {
+    String? expectedSubject,
+  }) async {
+    fixture.requests.add(path);
     if (path.endsWith('/current')) {
       if (fixture.rejectCurrent) throw AccountFailure.denied;
       return {
@@ -81,6 +83,8 @@ class HostedCommunitiesFixture {
   late BuilderlabAccountClient account;
   late final HostedFlow flow;
   final admitted = <String>[];
+  String? openedCommunity;
+  Future<void> Function()? beforeOpen;
   final remembered = <String>[];
   final requests = <String>[];
   List<Map<String, dynamic>> rows = [];
@@ -116,7 +120,11 @@ class HostedCommunitiesFixture {
         if (path.endsWith('/me')) {
           if (expired) return http.Response('{}', 401);
           return http.Response(
-            jsonEncode({'subject': subject, 'expires_at': expiry}),
+            jsonEncode({
+              'subject': subject,
+              'email': 'owner@example.com',
+              'expires_at': expiry,
+            }),
             200,
           );
         }
@@ -171,10 +179,15 @@ class HostedCommunitiesFixture {
         opened = uri;
         return true;
       },
+      openLandingCommunity: (link, subject, pubkey, current) async {
+        await beforeOpen?.call();
+        if (current()) openedCommunity = link.relayUrl;
+      },
       enterCommunity: (link, subject, pubkey, current) async {
-        final target = link as AddCommunityDeepLink;
-        await beforeAdmission?.call(target.name);
-        if (current()) admitted.add(target.name);
+        // Record the relay host: names are display labels.
+        final host = Uri.parse((link as AddCommunityDeepLink).relayUrl).host;
+        await beforeAdmission?.call(host);
+        if (current()) admitted.add(host);
       },
     );
   }

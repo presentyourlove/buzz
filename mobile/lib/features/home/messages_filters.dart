@@ -11,12 +11,10 @@ class MessagesFilters extends StatelessWidget {
     super.key,
     required this.selected,
     required this.onSelected,
-    this.hasUnreadSolo = false,
     this.useNativeGlass = true,
   });
   final String selected;
   final ValueChanged<String> onSelected;
-  final bool hasUnreadSolo;
   final bool useNativeGlass;
 
   @override
@@ -35,7 +33,7 @@ class MessagesFilters extends StatelessWidget {
       barVerticalPadding: Grid.half,
       items: [
         const FilterChipItem(id: 'All', label: 'All'),
-        FilterChipItem(id: 'Solo', label: 'Solo', hasUnread: hasUnreadSolo),
+        const FilterChipItem(id: 'Solo', label: 'Solo'),
         const FilterChipItem(id: 'Team', label: 'Team'),
       ],
     ),

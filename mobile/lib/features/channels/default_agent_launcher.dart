@@ -1,3 +1,5 @@
+import 'package:buzz/shared/widgets/feedback_snackbar.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -15,6 +17,8 @@ import '../../shared/widgets/agent_navigation_icon.dart';
 import '../../shared/widgets/avatar_image.dart';
 import '../../shared/widgets/buzz_loading_indicator.dart';
 import '../../shared/widgets/preset_agent_avatar.dart';
+import '../../shared/widgets/navigation_button_surface.dart';
+import 'empty_bestie_avatar.dart';
 import 'channel.dart';
 import 'default_agent_voice_control.dart';
 import 'default_agent_voice_draft.dart';
@@ -169,10 +173,11 @@ class DefaultAgentLauncher extends HookConsumerWidget {
       } catch (error) {
         if (recording != null) rethrow;
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          ScaffoldMessenger.of(context).showFeedbackSnackBar(
             SnackBar(
               content: Text('Could not open the agent conversation. $error'),
             ),
+            kind: ToastKind.error,
           );
         }
       } finally {
@@ -193,7 +198,9 @@ class DefaultAgentLauncher extends HookConsumerWidget {
               ),
             )
           : pubkey == null
-          ? const AgentNavigationIcon(size: 24)
+          ? preference.isLoading || preference.hasError
+              ? const AgentNavigationIcon(size: 24)
+              : const EmptyBestieAvatar()
           : usesInsetAgentArtwork(profile?.avatarUrl)
           ? PresetAgentAvatar(
               imageUrl: profile!.avatarUrl!,
@@ -209,11 +216,16 @@ class DefaultAgentLauncher extends HookConsumerWidget {
             ),
     );
     if (savedRecipients.hasError) {
-      return IconButton(
-        tooltip: 'Retry saved voice notes',
-        onPressed: () =>
-            ref.invalidate(pendingAgentVoiceRecipientsProvider(scopeIdentity)),
-        icon: const Icon(Icons.refresh),
+      return NavigationButtonSurface(
+        child: SizedBox.square(
+          dimension: 56,
+          child: IconButton(
+            tooltip: 'Retry saved voice notes',
+            onPressed: () =>
+                ref.invalidate(pendingAgentVoiceRecipientsProvider(scopeIdentity)),
+            icon: const Icon(Icons.refresh),
+          ),
+        ),
       );
     }
     return DefaultAgentVoiceControl(

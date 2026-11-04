@@ -7,7 +7,9 @@ use serde_json::{json, Value};
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderMap;
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    client_async, connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream,
+};
 use tracing::debug;
 
 use crate::error::WsClientError;
@@ -85,12 +87,40 @@ impl NostrWsConnection {
 
         debug!("connected to relay at {url}");
 
-        Ok(Self {
+        Ok(Self::from_stream(ws, url))
+    }
+
+    /// [`Self::connect`], but opens a plaintext TCP connection to `addr`
+    /// (`host:port`) instead of resolving the URL's host.
+    ///
+    /// The URL still supplies the `Host` header and NIP-42 relay tag, even when
+    /// it is `wss://`, so a client inside the relay's cluster can reach a
+    /// community through the relay's plaintext service address and still
+    /// authenticate for the community's public URL.
+    pub async fn connect_to_addr(url: &str, addr: &str) -> Result<Self, WsClientError> {
+        let parsed = url
+            .parse::<url::Url>()
+            .map_err(|e| WsClientError::Url(e.to_string()))?;
+        let request = parsed.as_str().into_client_request()?;
+        let tcp = tokio::net::TcpStream::connect(addr)
+            .await
+            .map_err(|e| WsClientError::WebSocket(e.into()))?;
+        let (ws, _response) = client_async(request, MaybeTlsStream::Plain(tcp))
+            .await
+            .map_err(WsClientError::WebSocket)?;
+
+        debug!("connected to relay at {url} via {addr}");
+
+        Ok(Self::from_stream(ws, url))
+    }
+
+    fn from_stream(ws: WsStream, url: &str) -> Self {
+        Self {
             ws,
             buffer: VecDeque::new(),
             pending_challenge: None,
             relay_url: url.to_string(),
-        })
+        }
     }
 
     /// Performs NIP-42 authentication using `keys` against the connected relay.
