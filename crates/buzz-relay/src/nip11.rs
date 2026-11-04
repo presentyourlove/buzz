@@ -286,8 +286,12 @@ impl RelayInfo {
             artifacts: serde_json::json!({
                 "version": 1, "revision_kind": 45010, "removal_kind": 45011,
                 "query": "/query", "count": "/count",
-                "modes": ["current", "history"],
-                "websocket_query_extensions": false,
+                "modes": ["current", "history", "head"],
+                "sync": {
+                    "version": 1,
+                    "max_events": buzz_core::artifact_sync::MAX_SYNC_EVENTS,
+                },
+                "websocket_query_extensions": true,
                 "max_tags": buzz_core::artifact::MAX_TAGS,
                 "max_tag_name_bytes": buzz_core::artifact::MAX_TAG_NAME_BYTES,
                 "max_tag_value_bytes": buzz_core::artifact::MAX_TAG_VALUE_BYTES,
@@ -391,7 +395,13 @@ pub(crate) async fn nip11_document(state: &crate::state::AppState, raw_host: &st
         admin_api.as_deref(),
         state.config.klipy.as_ref().map(|_| "klipy"),
     );
-    if let Ok(tenant) = crate::tenant::bind_community(&state.db, raw_host).await {
+    info.artifacts["incremental"] = crate::api::artifact_sync::capability();
+    if let Ok(tenant) = crate::tenant::bind_community(state, raw_host).await {
+        if let Some(profile) = crate::verified_profiles::discovery(state, &tenant).await {
+            if let Some(fi) = info.federated_identity.as_mut() {
+                fi["public_profile"] = profile;
+            }
+        }
         if state.config.buzz_v1_enabled {
             use buzz_db::personal_read::{ELIGIBLE_KINDS, MAX_CHANNELS, MAX_INTENTS};
             info.buzz_v1 = Some(BuzzV1Descriptor {
@@ -411,7 +421,7 @@ pub(crate) async fn nip11_document(state: &crate::state::AppState, raw_host: &st
         }));
     }
     let tenant_host = if state.config.push_enabled {
-        crate::tenant::bind_community(&state.db, raw_host)
+        crate::tenant::bind_community(state, raw_host)
             .await
             .ok()
             .map(|tenant| tenant.host().to_owned())
@@ -443,9 +453,7 @@ pub(crate) async fn nip11_document(state: &crate::state::AppState, raw_host: &st
 /// `None` (no `icon` field): NIP-11 is intentionally served to unmapped hosts
 /// too, and an icon lookup failure must not break that.
 async fn workspace_icon_for_host(state: &crate::state::AppState, raw_host: &str) -> Option<String> {
-    let tenant = crate::tenant::bind_community(&state.db, raw_host)
-        .await
-        .ok()?;
+    let tenant = crate::tenant::bind_community(state, raw_host).await.ok()?;
     state
         .db
         .get_community_icon(tenant.community())
@@ -524,8 +532,10 @@ mod tests {
     #[tokio::test]
     async fn shadow_serves_the_same_nip11_document_as_enforce() {
         use buzz_auth::NipFiMode;
-        let base =
-            crate::state::tests::test_state_with_database_url("postgres://127.0.0.1:1/none").await;
+        let base = crate::state::tests::test_state_with_unreachable_database_url(
+            "postgres://127.0.0.1:1/none",
+        )
+        .await;
         let mut docs = Vec::new();
         for mode in [NipFiMode::Off, NipFiMode::Enforce, NipFiMode::Shadow] {
             let mut state = (*base).clone();
