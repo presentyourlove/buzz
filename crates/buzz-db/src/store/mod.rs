@@ -101,7 +101,13 @@ mod legacy_channel_types_postgres_tests;
 mod unlisted_channels_postgres_tests;
 
 #[cfg(test)]
+mod channel_name_postgres_tests;
+
+#[cfg(test)]
 mod admission_postgres_tests;
+
+/// Durable NIP-FI verified-profile projection state.
+pub mod verified_profiles;
 
 #[cfg(test)]
 mod user_deletion_lock_order_postgres_tests;

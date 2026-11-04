@@ -153,7 +153,7 @@ async fn persist_command_event(
             )
             .await
             .map_err(|e| {
-                IngestError::Internal(format!("error: replace parameterized event: {e}"))
+                IngestError::Internal(format!("error: replace parameterized event: {}", e.kind()))
             })?;
 
         return match result.status {
@@ -186,7 +186,7 @@ async fn persist_command_event(
         .await
         .map_err(|e| {
             super::ingest::event_write_error(&e)
-                .unwrap_or_else(|| IngestError::Internal(format!("error: insert event: {e}")))
+                .unwrap_or_else(|| IngestError::Internal(format!("error: insert event: {}", e.kind())))
         })?;
     if was_inserted {
         Ok(PersistResult::Inserted(tx))
