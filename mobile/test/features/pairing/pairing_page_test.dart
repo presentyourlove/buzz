@@ -14,6 +14,7 @@ import 'package:buzz/features/pairing/pairing_provider.dart';
 import 'package:buzz/shared/community/community.dart';
 import 'package:buzz/shared/security/sensitive_action_authorizer.dart';
 import 'package:buzz/shared/theme/theme.dart';
+import 'package:buzz/shared/widgets/frosted_app_bar.dart';
 import 'package:buzz/shared/widgets/buzz_loading_indicator.dart';
 
 import '../../helpers/widget_helpers.dart';
@@ -381,21 +382,16 @@ void main() {
       expect(notifier.denied, isTrue);
     });
 
-    testWidgets('keeps only Back on the clear add-community header', (
-      tester,
-    ) async {
+    testWidgets('uses the shared frosted add-community header', (tester) async {
       await tester.pumpWidget(
         WidgetHelpers.testable(child: const PairingPage(addingCommunity: true)),
       );
-
-      expect(find.byType(AppBar), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
+      expect(find.byType(FrostedAppBar), findsOneWidget);
       expect(find.text('Add Community'), findsNothing);
-      final appBar = tester.widget<AppBar>(find.byType(AppBar));
-      expect(appBar.backgroundColor, Colors.transparent);
-      expect(appBar.surfaceTintColor, Colors.transparent);
-      expect(appBar.elevation, 0);
-      expect(appBar.scrolledUnderElevation, 0);
-      expect(find.byIcon(BuzzIcons.arrowLeft), findsOneWidget);
+      final appBar = tester.widget<FrostedAppBar>(find.byType(FrostedAppBar));
+      expect(appBar.alwaysFrosted, isTrue);
+      expect(find.byTooltip('Back'), findsOneWidget);
     });
 
     testWidgets('uses the native navigation bar on iOS', (tester) async {
@@ -490,7 +486,7 @@ void main() {
       expect(find.text('Connect'), findsNothing);
     });
 
-    testWidgets('pairing actions are disabled when connecting', (tester) async {
+    testWidgets('connection progress replaces pairing actions', (tester) async {
       await tester.pumpWidget(
         WidgetHelpers.testable(
           overrides: [
@@ -501,13 +497,44 @@ void main() {
       );
       await tester.pump();
 
-      final scanButton = tester.widget<FilledButton>(find.byType(FilledButton));
-      final pairingCodeButton = tester.widget<TextButton>(
-        find.widgetWithText(TextButton, 'Use pairing code'),
+      expect(
+        find.byKey(const Key('pairing-community-loading')),
+        findsOneWidget,
       );
+      expect(find.text('Scan a QR code'), findsNothing);
+      expect(find.text('Use pairing code'), findsNothing);
+    });
 
-      expect(scanButton.onPressed, isNull);
-      expect(pairingCodeButton.onPressed, isNull);
+    testWidgets('connection Cancel closes the identity recovery route', (
+      tester,
+    ) async {
+      final navigator = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            pairingProvider.overrideWith(() => _ConnectingPairingNotifier()),
+          ],
+          child: MaterialApp(
+            navigatorKey: navigator,
+            theme: AppTheme.light(),
+            home: const Scaffold(body: Text('Settings')),
+          ),
+        ),
+      );
+      navigator.currentState!.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const PairingPage(
+            addingCommunity: true,
+            identityRecoveryOnly: true,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.byType(PairingPage), findsNothing);
+      expect(find.text('Settings'), findsOneWidget);
     });
 
     testWidgets('recovery entry rejects ordinary nostrpair codes', (

@@ -39,6 +39,7 @@ class ChannelMessagesNotifier extends Notifier<AsyncValue<List<NostrEvent>>> {
   void Function()? _unsubscribe;
   bool _reachedOldest = false;
   bool _initInFlight = false;
+  Future<bool>? _olderInFlight;
   bool _usingChannelWindow = false;
   NostrEvent? _legacyHistoryCursor;
   bool _initialWindowQueryInFlight = false;
@@ -111,6 +112,10 @@ class ChannelMessagesNotifier extends Notifier<AsyncValue<List<NostrEvent>>> {
   /// This distinguishes a genuinely loaded empty channel from the synthetic
   /// empty value returned while the relay is not yet connected.
   bool get hasLoadedMessages => _lastKnownMessages != null;
+
+  /// Whether a loaded timeline is resubscribing and fetching its newest
+  /// history, as after a reconnect, to become current again.
+  bool get isCatchingUp => _initInFlight && hasLoadedMessages;
 
   Map<String, ChannelWindowThreadSummary> get threadSummaries => {
     for (final entry in _baseThreadSummaries.entries)
@@ -258,6 +263,9 @@ class ChannelMessagesNotifier extends Notifier<AsyncValue<List<NostrEvent>>> {
       _lastKnownMessages = merged;
       _reconcileRetainedSummaryPayloads(merged);
       _reconcileRetainedAggregates(historyVersion);
+      // Clear before publishing so the rebuild it triggers is no longer
+      // catching up.
+      _initInFlight = false;
       state = AsyncData(merged);
       _summaryRefreshes.resume();
       unawaited(_fillNotices());
@@ -268,9 +276,14 @@ class ChannelMessagesNotifier extends Notifier<AsyncValue<List<NostrEvent>>> {
         debugPrint(
           '[ChannelMessagesNotifier] history sync failed for $channelId: $e',
         );
+        _initInFlight = false;
         state = AsyncData(fallbackMessages);
+        // The fallback is usually the list already on screen, which Riverpod
+        // treats as unchanged. Notify anyway so the page sees catch-up end.
+        ref.notifyListeners();
         return;
       }
+      _initInFlight = false;
       state = AsyncError(e, st);
     } finally {
       if (_isCurrentInit(initVersion)) {
@@ -1004,7 +1017,10 @@ class ChannelMessagesNotifier extends Notifier<AsyncValue<List<NostrEvent>>> {
   AsyncValue<List<NostrEvent>> get _historyState => state;
   set _historyState(AsyncValue<List<NostrEvent>> value) => state = value;
 
-  Future<bool> fetchOlder() => _fetchOlder();
+  /// Concurrent callers share one in-flight page; pages continue one cursor.
+  Future<bool> fetchOlder() => _olderInFlight ??= _fetchOlder().whenComplete(
+    () => _olderInFlight = null,
+  );
 }
 
 int _currentUnixSeconds() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
