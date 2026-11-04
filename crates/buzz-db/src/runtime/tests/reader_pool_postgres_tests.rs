@@ -3,24 +3,15 @@
 //! reader).
 
 use super::*;
-use std::time::Instant;
 
 /// A `Db` whose writer and lazy reader both point at one scratch database,
 /// with the fence open so routed reads attempt the reader.
-async fn same_db_reader(prefix: &str, read_max: u32) -> (PgPool, Db, String, String) {
-    let admin = PgPool::connect(&admin_url().await)
-        .await
-        .expect("connect admin");
-    let (seed, wname) = create_scratch_db(&admin, prefix).await;
+async fn same_db_reader(prefix: &str, read_max: u32) -> (Db, ScratchDb) {
+    let (seed, scratch) = ScratchDb::migrated(&admin_url().await, prefix).await;
     seed.close().await;
-    let scratch_url = {
-        let base = admin_url().await;
-        let idx = base.rfind('/').expect("db url has a path segment");
-        format!("{}/{}", &base[..idx], wname)
-    };
     let mut db = Db::new(&DbConfig {
-        database_url: scratch_url.clone(),
-        read_database_url: Some(scratch_url.clone()),
+        database_url: scratch.url().to_owned(),
+        read_database_url: Some(scratch.url().to_owned()),
         max_connections: 4,
         read_max_connections: Some(read_max),
         ..DbConfig::default()
@@ -29,23 +20,7 @@ async fn same_db_reader(prefix: &str, read_max: u32) -> (PgPool, Db, String, Str
     .expect("connect Db with lazy reader");
     db.fence().force_open_for_tests(chrono::Utc::now());
     db.set_replica_read_max_age_for_tests(Some(Duration::from_secs(30)));
-    (admin, db, wname, scratch_url)
-}
-
-/// Poll until the reader pool holds exactly `target` connections, all idle.
-/// Returned and floor-maintenance connections land asynchronously, from
-/// tasks sqlx spawns on drop.
-async fn await_idle_floor(read_pool: &PgPool, target: u32) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while read_pool.size() != target || read_pool.num_idle() != target as usize {
-        assert!(
-            Instant::now() < deadline,
-            "reader pool never settled at {target} idle; size={} idle={}",
-            read_pool.size(),
-            read_pool.num_idle()
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    (db, scratch)
 }
 
 /// Counters keyed by `(name, decision, reason)` labels, drained: each
@@ -102,7 +77,7 @@ fn release_closes(snapshotter: &Snapshotter) -> std::collections::HashMap<String
 #[tokio::test]
 #[ignore = "requires Postgres"]
 async fn reader_boot_ping_warms_pool_to_min_connections() {
-    let (admin, db, wname, _) = same_db_reader("warm_r", 15).await;
+    let (db, _scratch) = same_db_reader("warm_r", 15).await;
     let read_pool = db.read_pool.clone().expect("reader pool configured");
     let target = Db::reader_min_connections(15);
     assert_eq!(
@@ -122,8 +97,6 @@ async fn reader_boot_ping_warms_pool_to_min_connections() {
     // maintenance does not keep dialing.
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(read_pool.size(), target, "warm-up must stop at the floor");
-
-    drop_scratch_db(&admin, db.pool.clone(), &wname).await;
 }
 
 /// After the boot ping the background warm pass opens the reader pool to its
@@ -134,7 +107,7 @@ async fn reader_boot_ping_warms_pool_to_min_connections() {
 #[ignore = "requires Postgres"]
 async fn reader_boot_ping_warms_pool_to_max_in_background() {
     let max = 15;
-    let (admin, mut db, wname, scratch_url) = same_db_reader("warm_max", max).await;
+    let (mut db, scratch) = same_db_reader("warm_max", max).await;
     // The production reader acquire budget (150ms) lets a dial on a loaded
     // test host miss; this test is about the warm pass reaching the ceiling,
     // so give each dial room.
@@ -142,7 +115,7 @@ async fn reader_boot_ping_warms_pool_to_max_in_background() {
         Db::read_pool_options(max)
             .acquire_timeout(Duration::from_secs(5))
             .connect_lazy_with(Db::reader_connect_options(
-                scratch_url.parse().expect("parse scratch url"),
+                scratch.url().parse().expect("parse scratch url"),
             )),
     );
     let read_pool = db.read_pool.clone().expect("reader pool configured");
@@ -166,8 +139,6 @@ async fn reader_boot_ping_warms_pool_to_max_in_background() {
         max as usize,
         "warmed connections stay idle"
     );
-
-    drop_scratch_db(&admin, db.pool.clone(), &wname).await;
 }
 
 /// At the production acquire budget, a reader that admits only some dials
@@ -181,19 +152,12 @@ async fn reader_boot_ping_warms_pool_to_max_in_background() {
 #[ignore = "requires Postgres"]
 async fn reader_warm_at_production_budget_ends_partial_when_dials_stall() {
     let max = 15;
-    let admin = PgPool::connect(&admin_url().await)
-        .await
-        .expect("connect admin");
-    let (writer, wname) = create_scratch_db(&admin, "warm_stall").await;
+    let (writer, scratch) = ScratchDb::migrated(&admin_url().await, "warm_stall").await;
     let writer_options = writer.connect_options();
     let (host, port) = (writer_options.get_host(), writer_options.get_port());
     let proxy = crate::test_support::PausingProxy::spawn(host.to_owned(), port).await;
     proxy.stall_from(3);
-    let scratch_url = {
-        let base = admin_url().await;
-        let idx = base.rfind('/').expect("db url has a path segment");
-        format!("{}/{}", &base[..idx], wname)
-    };
+    let scratch_url = scratch.url();
     let proxied_url = scratch_url.replacen(
         &format!("{host}:{port}"),
         &format!("127.0.0.1:{}", proxy.port),
@@ -225,7 +189,6 @@ async fn reader_warm_at_production_budget_ends_partial_when_dials_stall() {
     assert_eq!(proxy.sessions(), 10, "nothing re-dials after the pass");
 
     read_pool.close().await;
-    drop_scratch_db(&admin, writer, &wname).await;
 }
 
 /// A warm reader connection whose server stops answering (here: the
@@ -236,12 +199,12 @@ async fn reader_warm_at_production_budget_ends_partial_when_dials_stall() {
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires Postgres"]
 async fn routed_read_proof_times_out_to_writer_on_unresponsive_reader() {
-    let (admin, db, wname, scratch_url) = same_db_reader("proof_to", 5).await;
+    let (db, scratch) = same_db_reader("proof_to", 5).await;
     let read_pool = db.read_pool.clone().expect("reader pool configured");
     db.read_pool_boot_ping_for_tests().await;
     await_idle_floor(&read_pool, Db::reader_min_connections(5)).await;
 
-    let mut locker = sqlx::PgConnection::connect(&scratch_url)
+    let mut locker = sqlx::PgConnection::connect(scratch.url())
         .await
         .expect("connect locker");
     sqlx::query("BEGIN").execute(&mut locker).await.unwrap();
@@ -282,7 +245,6 @@ async fn routed_read_proof_times_out_to_writer_on_unresponsive_reader() {
 
     sqlx::query("ROLLBACK").execute(&mut locker).await.unwrap();
     locker.close().await.ok();
-    drop_scratch_db(&admin, db.pool.clone(), &wname).await;
 }
 
 /// With no pre-acquire ping, a warm reader connection killed server-side is
@@ -291,7 +253,10 @@ async fn routed_read_proof_times_out_to_writer_on_unresponsive_reader() {
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires Postgres"]
 async fn terminated_warm_reader_connection_fails_closed_to_writer() {
-    let (admin, db, wname, _) = same_db_reader("term_r", 5).await;
+    let admin = PgPool::connect(&admin_url().await)
+        .await
+        .expect("connect admin");
+    let (db, _scratch) = same_db_reader("term_r", 5).await;
     let read_pool = db.read_pool.clone().expect("reader pool configured");
     db.read_pool_boot_ping_for_tests().await;
     await_idle_floor(&read_pool, 1).await;
@@ -328,8 +293,6 @@ async fn terminated_warm_reader_connection_fails_closed_to_writer() {
         Some(&1),
         "dead warm connection must fall back as writer/reader_validation_error; got {reasons:?}"
     );
-
-    drop_scratch_db(&admin, db.pool.clone(), &wname).await;
 }
 
 /// A proof that times out while its `BEGIN` is still in flight must not
@@ -347,9 +310,10 @@ async fn proof_timeout_mid_begin_leaves_no_reader_transaction_open() {
     let admin = PgPool::connect(&admin_url().await)
         .await
         .expect("connect admin");
-    let (writer, wname) = create_scratch_db(&admin, "proof_tx").await;
+    let (writer, scratch) = ScratchDb::migrated(&admin_url().await, "proof_tx").await;
     sqlx::query(sqlx::AssertSqlSafe(format!(
-        "ALTER DATABASE \"{wname}\" SET default_transaction_isolation = 'repeatable read'"
+        "ALTER DATABASE \"{}\" SET default_transaction_isolation = 'repeatable read'",
+        scratch.name()
     )))
     .execute(&admin)
     .await
@@ -398,7 +362,7 @@ async fn proof_timeout_mid_begin_leaves_no_reader_transaction_open() {
             "SELECT count(*) FROM pg_stat_activity \
              WHERE datname = $1 AND state = 'idle in transaction'",
         )
-        .bind(&wname)
+        .bind(scratch.name())
         .fetch_one(&admin)
         .await
         .expect("read pg_stat_activity");
@@ -420,7 +384,6 @@ async fn proof_timeout_mid_begin_leaves_no_reader_transaction_open() {
     );
 
     read_pool.close().await;
-    drop_scratch_db(&admin, writer, &wname).await;
 }
 
 /// A reader failover whose old sockets stop answering without closing must
@@ -432,10 +395,7 @@ async fn proof_timeout_mid_begin_leaves_no_reader_transaction_open() {
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "requires Postgres"]
 async fn stalled_reader_sessions_release_their_slots_for_new_connections() {
-    let admin = PgPool::connect(&admin_url().await)
-        .await
-        .expect("connect admin");
-    let (writer, wname) = create_scratch_db(&admin, "stall_r").await;
+    let (writer, _writer_db) = ScratchDb::migrated(&admin_url().await, "stall_r").await;
     let writer_options = writer.connect_options();
     let proxy = crate::test_support::PausingProxy::spawn(
         writer_options.get_host().to_owned(),
@@ -453,7 +413,20 @@ async fn stalled_reader_sessions_release_their_slots_for_new_connections() {
     await_idle_floor(&read_pool, 1).await;
     {
         let first = read_pool.acquire().await.expect("first warm connection");
-        let second = read_pool.acquire().await.expect("second warm connection");
+        // The floor maintenance stops at one, so the second slot is a cold
+        // dial inside the 150ms acquire budget, which a loaded runner can
+        // outlast. Warm-up is not under test; the stall below is.
+        let second = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match read_pool.acquire().await {
+                    Err(sqlx::Error::PoolTimedOut) => continue,
+                    connection => break connection,
+                }
+            }
+        })
+        .await
+        .expect("second reader connects within 5s")
+        .expect("second warm connection");
         drop((first, second));
     }
     await_idle_floor(&read_pool, 2).await;
@@ -522,5 +495,4 @@ async fn stalled_reader_sessions_release_their_slots_for_new_connections() {
     );
     drop(_guard);
     read_pool.close().await;
-    drop_scratch_db(&admin, writer, &wname).await;
 }
