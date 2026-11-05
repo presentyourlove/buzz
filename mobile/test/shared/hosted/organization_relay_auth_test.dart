@@ -239,6 +239,29 @@ void main() {
       },
     );
 
+    test('the issuer chooses the lifetime of an unexpired assertion', () async {
+      await saveSession();
+      for (final (lifetime, accepted) in [
+        (300, true),
+        (86400, true),
+        (0, false),
+        (-60, false),
+      ]) {
+        assertionLifetimeSeconds = lifetime;
+        final auth = relayAuth(organizationClient());
+        if (accepted) {
+          expect(await auth.headers(relay), {
+            'Nostr-Federated-Identity': 'Bearer org-token',
+          });
+        } else {
+          await expectLater(
+            auth.headers(relay),
+            throwsA(AccountFailure.invalidResponse),
+          );
+        }
+      }
+    });
+
     test('a key bound to the same member is accepted', () async {
       await saveSession();
       boundIdentity = {'pubkey_hex': keys.public};
