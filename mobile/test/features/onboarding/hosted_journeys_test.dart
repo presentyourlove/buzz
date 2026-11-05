@@ -18,6 +18,7 @@ import 'package:buzz/features/profile/profile_avatar_draft.dart';
 import 'package:buzz/shared/emoji/emoji_avatar.dart';
 import 'package:buzz/shared/widgets/playing_avatar_image.dart';
 import 'package:buzz/features/pairing/pairing_page.dart';
+import 'package:buzz/hosted_app_gate.dart';
 import 'package:buzz/onboarding_app_entry.dart';
 import 'package:buzz/shared/auth/auth.dart';
 import 'package:buzz/shared/hosted/builderlab_account.dart';
@@ -27,6 +28,7 @@ import 'package:buzz/shared/relay/relay_session.dart';
 import 'package:buzz/shared/relay/relay_provider.dart';
 import 'package:buzz/shared/relay/media_image.dart';
 import 'package:buzz/shared/utils/string_utils.dart';
+import 'package:buzz/shared/widgets/mobile_tab_footer_backdrop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -36,6 +38,16 @@ import 'package:http/http.dart' as http;
 import '../../helpers/hosted_journey_fixture.dart';
 
 void main() {
+  // Bottom banners over Home must stay above its floating tab bar, which the
+  // fixture's stand-in home does not draw.
+  void expectAboveTabBar(WidgetTester tester, String label) {
+    final screen = tester.getSize(find.byType(HostedAppGate)).height;
+    expect(
+      tester.getRect(find.text(label)).bottom,
+      lessThanOrEqualTo(screen - mobileTabBarHeight - mobileTabBarBottomGap),
+    );
+  }
+
   void journey(
     String name,
     Future<void> Function(WidgetTester, HostedJourneyFixture) run, {
@@ -528,6 +540,93 @@ void main() {
   );
 
   journey(
+    'a refused organization account changes to another without the hosted one',
+    (tester, f) async {
+      f.relayAuthEnabled = true;
+      f.organizationEnabled = true;
+      await f.initialize();
+      // Signed in to the organization as an account bound to another key.
+      f.organizationSubject = 'other-member';
+      f.organizationBound = f.secondKeys.public;
+      await f.signInOrganization();
+      final community = Community.create(
+        name: 'Block',
+        relayUrl: 'wss://${HostedJourneyFixture.organizationRelayHost}',
+        pubkey: f.keys.public,
+        nsec: f.keys.nsec,
+      );
+      await f.storage.save(community);
+      await f.storage.saveActiveId(community.id);
+      await f.mount(tester, openEntry: false);
+      final sessionSubscription = f.container.listen(
+        relaySessionProvider,
+        (_, _) {},
+      );
+      addTearDown(sessionSubscription.close);
+      await f.settle(tester);
+      const refused =
+          'Your organization account cannot use this community with this key.';
+      expect(find.text(refused), findsOneWidget);
+      expectAboveTabBar(tester, 'Use a different account');
+      expect(f.sent('/identity/assertions'), isEmpty);
+
+      // Retry keeps the refused account and fails the same way.
+      await f.tap(tester, 'Retry');
+      expect(find.text(refused), findsOneWidget);
+      expect(f.organizationBrowserStarts, 0);
+
+      f.organizationSubject = 'journey-owner';
+      f.organizationBound = f.keys.public;
+      final hosted = f.container.read(builderlabAccountProvider);
+      final hostedCredential = await const FlutterSecureStorage().read(
+        key:
+            'buzz_hosted_session_'
+            '${hosted.accountOrigin.host.replaceAll('.', '_')}_v1',
+      );
+      expect(hostedCredential, isNotNull);
+      final connects = f.socketHeaders.length;
+      await f.tap(tester, 'Use a different account');
+      await f.settle(tester);
+      expect(f.organizationBrowserStarts, 1);
+      expect(
+        f.container.read(organizationAccountProvider)!.account!.subject,
+        'journey-owner',
+      );
+      expect(find.text(refused), findsNothing);
+      expect(find.text('Use a different account'), findsNothing);
+      // The real relay session reconnects with the new account's assertion.
+      expect(f.socketHeaders.length, greaterThan(connects));
+      expect(
+        f.socketHeaders.last['Nostr-Federated-Identity'],
+        'Bearer organization-assertion',
+      );
+      expect(
+        f.container.read(relaySessionProvider).status,
+        SessionStatus.connected,
+      );
+      // Only the organization session changed.
+      expect(
+        await const FlutterSecureStorage().read(
+          key:
+              'buzz_hosted_session_'
+              '${hosted.accountOrigin.host.replaceAll('.', '_')}_v1',
+        ),
+        hostedCredential,
+      );
+      expect(
+        f.requests.where(
+          (r) =>
+              r.url.origin != HostedJourneyFixture.organizationOrigin.origin &&
+              r.url.path.endsWith('/identity/assertions'),
+        ),
+        isEmpty,
+      );
+      expect((await f.storage.loadAll()).single.nsec, community.nsec);
+    },
+    requiresBuilderlab: false,
+  );
+
+  journey(
     'saved community signs in again without changing identity or onboarding',
     (tester, f) async {
       f.relayAuthEnabled = true;
@@ -748,143 +847,160 @@ void main() {
     requiresBuilderlab: false,
   );
 
-  journey(
-    'fresh account signs in, backs up, accepts invite and retries starters before home',
-    (tester, f) async {
-      await f.initialize(
-        localIdentity: false,
-        cloudChoice: true,
-        signedIn: false,
-      );
-      f.starterFailures = 2;
-      final browserReturn = Completer<void>();
-      f.beforeBrowserReturn = () => browserReturn.future;
-      final enrollmentReached = Completer<void>();
-      final enrollmentReturn = Completer<void>();
-      f.beforeEnrollmentReturn = () {
-        enrollmentReached.complete();
-        return enrollmentReturn.future;
-      };
-      await f.mount(tester);
-      await f.link(tester, 'one');
-      try {
+  for (final savedIncomplete in [false, true]) {
+    journey(
+      '${savedIncomplete ? 'incomplete saved' : 'fresh'} account signs in, backs up, accepts invite and retries starters before home',
+      (tester, f) async {
+        await f.initialize(
+          localIdentity: false,
+          cloudChoice: true,
+          signedIn: savedIncomplete,
+        );
+        f.needsAccountSetup = savedIncomplete;
+        f.starterFailures = 2;
+        final browserReturn = Completer<void>();
+        f.beforeBrowserReturn = () async {
+          await browserReturn.future;
+          f.needsAccountSetup = false;
+        };
+        final enrollmentReached = Completer<void>();
+        final enrollmentReturn = Completer<void>();
+        f.beforeEnrollmentReturn = () {
+          enrollmentReached.complete();
+          return enrollmentReturn.future;
+        };
+        await f.mount(tester);
+        await f.link(tester, 'one');
+        try {
+          expect(
+            find.text('Enter a community link').hitTestable(),
+            findsOneWidget,
+          );
+          expect(find.text('Scan a QR code').hitTestable(), findsOneWidget);
+          expect(f.browserUrls.single.path, '/auth/native');
+          expect(f.browserUrls.single.origin, HostedEnvironment.origin.origin);
+          expect(
+            await f.flow.browser.retainedIntent(),
+            containsPair('code', 'invite-one'),
+          );
+          expect(f.sent('/exchange'), savedIncomplete ? hasLength(1) : isEmpty);
+          expect(f.sent('/api/invites/claim'), isEmpty);
+          expect(find.text('Start login again'), findsNothing);
+          expect(find.text('Complete sign-in in your browser.'), findsNothing);
+        } finally {
+          browserReturn.complete();
+        }
+        await f.settle(tester);
+        await tester.tap(find.text('Create my Buzz identity'));
+        await enrollmentReached.future.timeout(const Duration(seconds: 5));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        try {
+          expect(find.byTooltip('Back').hitTestable(), findsNothing);
+          // External teardown still fences pending enrollment.
+          await f.flow.leave();
+          await tester.pump();
+        } finally {
+          enrollmentReturn.complete();
+        }
+        await f.settle(tester);
+        expect(f.sent('/nsec-backups'), isEmpty);
+        final retainedKey = (await f.store.read())!.pubkey;
+        f.beforeEnrollmentReturn = null;
+        // A dispatched upload can succeed after cancellation. Its receipt must
+        // still be durable; resuming must not replay an acknowledged backup.
+        f.beforeUploadReturn = () => f.flow.leave();
+        await f.link(tester, 'one');
+        expect((await f.store.read())!.backup, isNotNull);
+        f.beforeUploadReturn = null;
+        // Production legal documents exceed the ordinary 64 KiB account limit.
+        f.policyResponses.add(
+          http.Response(
+            jsonEncode({
+              'policy': {
+                'version': 'one.communities.buzz.xyz',
+                'age_attestation_required': true,
+                'terms_markdown': 'Be kind to this community.',
+                'privacy_markdown': 'Public privacy notice. ' * 5000,
+              },
+            }),
+            200,
+          ),
+        );
+        await f.link(tester, 'one');
+        expect((await f.store.read())!.pubkey, retainedKey);
+        expect(f.browserStarts, 1);
+        final generated = (await f.store.read())!;
+        expect(generated.pubkey, f.bound);
+        expect(generated.backup, isNotNull);
+        expect(f.sent('/verify'), hasLength(1));
+        expect(f.sent('/nsec-backups'), hasLength(1));
+        final accept = find.widgetWithText(FilledButton, 'Accept and join');
+        expect(tester.widget<FilledButton>(accept).onPressed, isNull);
+        expect(f.sent('/claim'), isEmpty);
+        expect(await f.storage.loadAll(), isEmpty);
+        await f.tap(tester, 'Terms of service');
+        expect(find.text('Be kind to this community.'), findsOneWidget);
+        await tester.tap(find.byType(CheckboxListTile));
+        await f.settle(tester);
+        await f.tap(tester, 'Accept and join');
+        expect(find.text('Try again').hitTestable(), findsOneWidget);
+        final pending = (await f.storage.loadAll()).single;
+        expect(pending.starterSetupIncomplete, isTrue);
+        expect(pending.pubkey, generated.pubkey);
+        expect(f.sent('/claim'), hasLength(1));
         expect(
-          find.text('Enter a community link').hitTestable(),
+          jsonDecode(f.sent('/claim').single.body)['policy_receipt'],
+          'synthetic-policy-receipt',
+        );
+        expect(
+          jsonDecode(f.sent('/accept-policy').single.body)['age_confirmed'],
+          isTrue,
+        );
+        // Reopen the saved invite after its claim was consumed. Starter recovery
+        // must retain the durable marker and must not claim it again.
+        await f.link(tester, 'one');
+        expect(
+          (await f.storage.loadAll()).single.starterSetupIncomplete,
+          isTrue,
+        );
+        expect(find.text('Try again').hitTestable(), findsOneWidget);
+        await f.tap(tester, 'Try again');
+        expect(
+          find.byType(ProfileSetupPage, skipOffstage: false),
           findsOneWidget,
         );
-        expect(find.text('Scan a QR code').hitTestable(), findsOneWidget);
-        expect(find.text('Start login again'), findsNothing);
-        expect(find.text('Complete sign-in in your browser.'), findsNothing);
-      } finally {
-        browserReturn.complete();
-      }
-      await f.settle(tester);
-      await tester.tap(find.text('Create my Buzz identity'));
-      await enrollmentReached.future.timeout(const Duration(seconds: 5));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      try {
-        expect(find.byTooltip('Back').hitTestable(), findsNothing);
-        // External teardown still fences pending enrollment.
-        await f.flow.leave();
-        await tester.pump();
-      } finally {
-        enrollmentReturn.complete();
-      }
-      await f.settle(tester);
-      expect(f.sent('/nsec-backups'), isEmpty);
-      final retainedKey = (await f.store.read())!.pubkey;
-      f.beforeEnrollmentReturn = null;
-      // A dispatched upload can succeed after cancellation. Its receipt must
-      // still be durable; resuming must not replay an acknowledged backup.
-      f.beforeUploadReturn = () => f.flow.leave();
-      await f.link(tester, 'one');
-      expect((await f.store.read())!.backup, isNotNull);
-      f.beforeUploadReturn = null;
-      // Production legal documents exceed the ordinary 64 KiB account limit.
-      f.policyResponses.add(
-        http.Response(
-          jsonEncode({
-            'policy': {
-              'version': 'one.communities.buzz.xyz',
-              'age_attestation_required': true,
-              'terms_markdown': 'Be kind to this community.',
-              'privacy_markdown': 'Public privacy notice. ' * 5000,
-            },
-          }),
-          200,
-        ),
-      );
-      await f.link(tester, 'one');
-      expect((await f.store.read())!.pubkey, retainedKey);
-      expect(f.browserStarts, 1);
-      final generated = (await f.store.read())!;
-      expect(generated.pubkey, f.bound);
-      expect(generated.backup, isNotNull);
-      expect(f.sent('/verify'), hasLength(1));
-      expect(f.sent('/nsec-backups'), hasLength(1));
-      final accept = find.widgetWithText(FilledButton, 'Accept and join');
-      expect(tester.widget<FilledButton>(accept).onPressed, isNull);
-      expect(f.sent('/claim'), isEmpty);
-      expect(await f.storage.loadAll(), isEmpty);
-      await f.tap(tester, 'Terms of service');
-      expect(find.text('Be kind to this community.'), findsOneWidget);
-      await tester.tap(find.byType(CheckboxListTile));
-      await f.settle(tester);
-      await f.tap(tester, 'Accept and join');
-      expect(find.text('Try again').hitTestable(), findsOneWidget);
-      final pending = (await f.storage.loadAll()).single;
-      expect(pending.starterSetupIncomplete, isTrue);
-      expect(pending.pubkey, generated.pubkey);
-      expect(f.sent('/claim'), hasLength(1));
-      expect(
-        jsonDecode(f.sent('/claim').single.body)['policy_receipt'],
-        'synthetic-policy-receipt',
-      );
-      expect(
-        jsonDecode(f.sent('/accept-policy').single.body)['age_confirmed'],
-        isTrue,
-      );
-      // Reopen the saved invite after its claim was consumed. Starter recovery
-      // must retain the durable marker and must not claim it again.
-      await f.link(tester, 'one');
-      expect((await f.storage.loadAll()).single.starterSetupIncomplete, isTrue);
-      expect(find.text('Try again').hitTestable(), findsOneWidget);
-      await f.tap(tester, 'Try again');
-      expect(
-        find.byType(ProfileSetupPage, skipOffstage: false),
-        findsOneWidget,
-      );
-      expect(
-        find.ancestor(
-          of: find.byType(TextField).hitTestable(),
-          matching: find.byType(BottomSheet),
-        ),
-        findsNothing,
-      );
-      expect(f.sent('/claim'), hasLength(1));
-      expect(f.recoveryScopes, hasLength(3));
-      expect(
-        f.recoveryScopes.every((scope) => scope.nsec == pending.nsec),
-        isTrue,
-      );
-      await tester.enterText(
-        find.byType(TextField).hitTestable(),
-        'Journey Person',
-      );
-      await f.tap(tester, 'Continue');
-      expect(f.profileWrites, isEmpty);
-      await f.tap(tester, 'Skip');
-      expect(f.profileWrites, ['Journey Person']);
-      final saved = (await f.storage.loadAll()).single;
-      expect(saved.id, pending.id);
-      expect(saved.starterSetupIncomplete, isFalse);
-      expect(await f.storage.loadActiveId(), saved.id);
-      expect(find.byType(OnboardingAppEntry), findsNothing);
-      expect(find.text('Community home').hitTestable(), findsOneWidget);
-    },
-    requiresAuthDomain: true,
-  );
+        expect(
+          find.ancestor(
+            of: find.byType(TextField).hitTestable(),
+            matching: find.byType(BottomSheet),
+          ),
+          findsNothing,
+        );
+        expect(f.sent('/claim'), hasLength(1));
+        expect(f.recoveryScopes, hasLength(3));
+        expect(
+          f.recoveryScopes.every((scope) => scope.nsec == pending.nsec),
+          isTrue,
+        );
+        await tester.enterText(
+          find.byType(TextField).hitTestable(),
+          'Journey Person',
+        );
+        await f.tap(tester, 'Continue');
+        expect(f.profileWrites, isEmpty);
+        await f.tap(tester, 'Skip');
+        expect(f.profileWrites, ['Journey Person']);
+        final saved = (await f.storage.loadAll()).single;
+        expect(saved.id, pending.id);
+        expect(saved.starterSetupIncomplete, isFalse);
+        expect(await f.storage.loadActiveId(), saved.id);
+        expect(find.byType(OnboardingAppEntry), findsNothing);
+        expect(find.text('Community home').hitTestable(), findsOneWidget);
+      },
+      requiresAuthDomain: true,
+    );
+  }
 
   for (final boundAccount in [false, true]) {
     journey(
@@ -962,12 +1078,7 @@ void main() {
       await f.tap(tester, 'Try again');
       expect(f.flow.stage, HostedFlowStage.idle);
       expect(f.probes, isEmpty);
-      expect(
-        find.text(
-          'No communities available to add. Scan a QR code or use an invite link.',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text('Signed in to BuilderLab'), findsOneWidget);
       expect(find.text('Scan a QR code'), findsOneWidget);
       expect(find.text('Use pairing code'), findsNothing);
       f.rows.addAll([f.row('one'), f.row('two')]);
@@ -985,7 +1096,7 @@ void main() {
         findsOneWidget,
       );
       final firstSaved = (await f.storage.loadAll()).firstWhere(
-        (c) => c.name == 'one.communities.buzz.xyz',
+        (c) => c.relayUrl == 'wss://one.communities.buzz.xyz',
       );
       Navigator.of(
         tester.element(find.byType(ProfileSetupPage, skipOffstage: false)),
@@ -1009,16 +1120,18 @@ void main() {
         isTrue,
       );
       expect(
-        saved.singleWhere((c) => c.name == 'one.communities.buzz.xyz').id,
+        saved
+            .singleWhere((c) => c.relayUrl == 'wss://one.communities.buzz.xyz')
+            .id,
         firstSaved.id,
       );
       expect(await f.storage.loadActiveId(), firstSaved.id);
       expect(
-        f.probes.where((c) => c.name == 'one.communities.buzz.xyz'),
+        f.probes.where((c) => c.relayUrl == 'wss://one.communities.buzz.xyz'),
         hasLength(1),
       );
       expect(
-        f.probes.where((c) => c.name == 'two.communities.buzz.xyz'),
+        f.probes.where((c) => c.relayUrl == 'wss://two.communities.buzz.xyz'),
         hasLength(2),
       );
       expect(find.byType(OnboardingAppEntry), findsNothing);
@@ -1074,11 +1187,14 @@ void main() {
         final communities = await f.storage.loadAll();
         expect(communities, hasLength(2));
         expect(
-          communities.map((c) => c.name),
-          containsAll(['one.communities.buzz.xyz', 'two.communities.buzz.xyz']),
+          communities.map((c) => c.relayUrl),
+          containsAll([
+            'wss://one.communities.buzz.xyz',
+            'wss://two.communities.buzz.xyz',
+          ]),
         );
         final saved = communities.singleWhere(
-          (c) => c.name == 'two.communities.buzz.xyz',
+          (c) => c.relayUrl == 'wss://two.communities.buzz.xyz',
         );
         expect(saved.nsec, f.keys.nsec);
         expect(saved.pubkey, f.keys.public);
@@ -1179,16 +1295,26 @@ void main() {
   );
 
   journey(
-    'signed-in invite survives restart and leaving consent abandons only setup',
+    'saved pending account retains invite across retry without reopening setup',
     (tester, f) async {
       await f.initialize();
+      // /me reports stored details as pending even when legacy screening
+      // standing still says MISSING + NOT_SCREENED.
+      f.screeningPending = true;
+      // If setup is incorrectly reopened, allow its callback to finish so the
+      // no-browser assertion fails instead of cycling until the test times out.
+      f.beforeBrowserReturn = () async => f.screeningPending = false;
       await f.mount(tester);
       await f.link(tester, 'one');
+      expect(f.browserStarts, 0);
+      expect(f.sent('/claim'), isEmpty);
+      expect(await f.storage.loadAll(), isEmpty);
       expect(find.text('Accept and join').hitTestable(), findsOneWidget);
       await f.restart(tester);
       await f.tap(tester, 'Start login again');
       expect(find.text('Accept and join').hitTestable(), findsOneWidget);
       expect(f.browserStarts, 0);
+      f.screeningPending = false;
       expect(
         f.sent('/api/join-policy').last.url.host,
         'one.communities.buzz.xyz',

@@ -26,7 +26,6 @@ class HomePage extends HookConsumerWidget {
     required this.defaultAgentBuilder,
     this.communityInvitePageBuilder,
     this.mePageBuilder,
-    this.profilePageBuilder,
     this.communityAppearancePageBuilder,
     super.key,
   });
@@ -34,7 +33,6 @@ class HomePage extends HookConsumerWidget {
   final WidgetBuilder settingsPageBuilder;
   final ValueChanged<BuildContext> onAgents;
   final WidgetBuilder defaultAgentBuilder;
-  final WidgetBuilder? profilePageBuilder;
 
   /// Builds a sliver inventory and publishes its two creation actions.
   final Widget Function(
@@ -97,7 +95,7 @@ class HomePage extends HookConsumerWidget {
       messagesActionsBuilder: (openSwitcher, avatarKey) {
         final moreActions = [
           (
-            label: 'Switch workspace',
+            label: 'Switch community',
             symbol: 'arrow.left.arrow.right',
             onPressed: openSwitcher,
           ),
@@ -107,17 +105,17 @@ class HomePage extends HookConsumerWidget {
               symbol: 'person.badge.plus',
               onPressed: () => openPage(communityInvitePageBuilder!),
             ),
+          (
+            label: 'Agents',
+            symbol: 'agent',
+            onPressed: () => onAgents(context),
+          ),
           if (communityAppearancePageBuilder != null)
             (
               label: 'Appearance',
               symbol: 'circle.lefthalf.filled',
               onPressed: () => openPage(communityAppearancePageBuilder!),
             ),
-          (
-            label: 'Agents',
-            symbol: 'person.2',
-            onPressed: () => onAgents(context),
-          ),
           (label: 'Settings', symbol: 'gearshape', onPressed: openSettings),
         ];
         return [
@@ -177,10 +175,7 @@ class HomePage extends HookConsumerWidget {
         communitySurfaceProgress.value = progress;
       },
     );
-    final bottom =
-        MediaQuery.viewPaddingOf(context).bottom > mobileTabBarBottomGap
-        ? MediaQuery.viewPaddingOf(context).bottom
-        : mobileTabBarBottomGap;
+    final bottom = mobileTabBarBottom(context);
     return Scaffold(
       resizeToAvoidBottomInset: false,
       // Register the floating controls with Scaffold so snackbars clear them.
@@ -204,7 +199,7 @@ class HomePage extends HookConsumerWidget {
                       ),
                       (
                         label: 'New workspace',
-                        symbol: 'folder.badge.plus',
+                        symbol: 'workspace',
                         onPressed: newWorkspace.value,
                       ),
                       (

@@ -269,7 +269,7 @@ async fn admit(
     rx: &mut mpsc::Receiver<WsMessage>,
     state: &AppState,
 ) -> bool {
-    let admitted = enforce_ws_admission(msg, conn, state).await;
+    let admitted = enforce_ws_admission(msg, conn, state).await.is_ok();
     if !admitted {
         assert_quota_frame(&read_frame(rx), msg, 60);
     }
@@ -293,22 +293,22 @@ async fn ephemeral_events_leave_human_and_agent_message_budgets_untouched() {
     for stored_kind in [0, 1, 9, 19999, 30000, 40002] {
         let (conn, mut rx) = connection();
         for kind in ephemeral_kinds {
-            assert!(enforce_ws_admission(&event(kind), &conn, &state).await);
+            assert!(enforce_ws_admission(&event(kind), &conn, &state).await.is_ok());
         }
         assert_eq!(counter(&state, &conn, LimitType::Messages).await, None);
         assert_eq!(counter(&state, &conn, LimitType::WsEvents).await, Some(5));
         for expected in 1..=2 {
-            assert!(enforce_ws_admission(&event(stored_kind), &conn, &state).await);
+            assert!(enforce_ws_admission(&event(stored_kind), &conn, &state).await.is_ok());
             assert_eq!(
                 counter(&state, &conn, LimitType::Messages).await,
                 Some(expected)
             );
         }
         let rejected = event(stored_kind);
-        assert!(!enforce_ws_admission(&rejected, &conn, &state).await);
+        assert!(enforce_ws_admission(&rejected, &conn, &state).await.is_err());
         assert_quota_frame(&read_frame(&mut rx), &rejected, 60);
         for kind in ephemeral_kinds {
-            assert!(enforce_ws_admission(&event(kind), &conn, &state).await);
+            assert!(enforce_ws_admission(&event(kind), &conn, &state).await.is_ok());
         }
         assert_eq!(counter(&state, &conn, LimitType::Messages).await, Some(3));
         assert!(rx.try_recv().is_err());
@@ -318,22 +318,22 @@ async fn ephemeral_events_leave_human_and_agent_message_budgets_untouched() {
         let owner = Keys::generate().public_key();
         let (conn, mut rx) = agent_connection(&state, owner);
         for kind in ephemeral_kinds {
-            assert!(enforce_ws_admission(&event(kind), &conn, &state).await);
+            assert!(enforce_ws_admission(&event(kind), &conn, &state).await.is_ok());
         }
         assert_eq!(owner_spent(&state, &conn, &owner).await, None);
         assert_eq!(counter(&state, &conn, LimitType::WsEvents).await, Some(5));
         for expected in 1..=3 {
-            assert!(enforce_ws_admission(&event(stored_kind), &conn, &state).await);
+            assert!(enforce_ws_admission(&event(stored_kind), &conn, &state).await.is_ok());
             assert_eq!(
                 channel_spent(&state, &conn, &owner, None).await,
                 Some(expected)
             );
         }
         let rejected = event(stored_kind);
-        assert!(!enforce_ws_admission(&rejected, &conn, &state).await);
+        assert!(enforce_ws_admission(&rejected, &conn, &state).await.is_err());
         assert_quota_frame(&read_frame(&mut rx), &rejected, 60);
         for kind in ephemeral_kinds {
-            assert!(enforce_ws_admission(&event(kind), &conn, &state).await);
+            assert!(enforce_ws_admission(&event(kind), &conn, &state).await.is_ok());
         }
         assert_eq!(channel_spent(&state, &conn, &owner, None).await, Some(3));
         assert_eq!(owner_spent(&state, &conn, &owner).await, Some(3));
@@ -594,7 +594,7 @@ async fn concurrent_admission_across_relay_instances_never_overspends() {
         async move {
             let mut admitted = 0;
             for attempt in attempts {
-                admitted += usize::from(attempt.await.unwrap());
+                admitted += usize::from(attempt.await.unwrap().is_ok());
             }
             admitted
         }
@@ -634,11 +634,11 @@ async fn ws_flood_budget_is_shared_by_ephemeral_stored_req_and_count() {
         req.clone(),
         count.clone(),
     ] {
-        assert!(enforce_ws_admission(&msg, &conn, &state).await);
+        assert!(enforce_ws_admission(&msg, &conn, &state).await.is_ok());
     }
     assert_eq!(counter(&state, &conn, LimitType::Messages).await, Some(1));
     for msg in [event(24200), event(9), req, count] {
-        assert!(!enforce_ws_admission(&msg, &conn, &state).await);
+        assert!(enforce_ws_admission(&msg, &conn, &state).await.is_err());
         assert_quota_frame(&read_frame(&mut rx), &msg, 5);
     }
     assert_eq!(counter(&state, &conn, LimitType::Messages).await, Some(1));
@@ -952,7 +952,7 @@ async fn ephemeral_and_http_admission_still_fail_closed_when_redis_is_unavailabl
     let _guard = metrics::set_default_local_recorder(&recorder);
     let (conn, mut rx) = connection();
     let msg = event(20002);
-    assert!(!enforce_ws_admission(&msg, &conn, &state).await);
+    assert!(enforce_ws_admission(&msg, &conn, &state).await.is_err());
     let ClientMessage::Event(event) = msg else {
         unreachable!()
     };
@@ -1080,7 +1080,7 @@ async fn ws_agent_event_admission_fails_closed_when_the_owner_check_fails() {
         .await
         .unwrap();
 
-    assert!(!enforce_ws_admission(&event(9), &conn, &state).await);
+    assert!(enforce_ws_admission(&event(9), &conn, &state).await.is_err());
     assert_eq!(
         read_frame(&mut rx)[3],
         "rate-limited: shared admission unavailable"
