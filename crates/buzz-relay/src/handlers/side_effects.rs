@@ -159,6 +159,43 @@ pub(crate) async fn apply_kick_live_side_effects(
             return Err(e.into());
         }
     }
+
+    // The removal is committed: refresh the channel's discovery roster, then
+    // tell the kicked member, as a kind:9001 removal does. The notice tells a
+    // client to re-read that roster, so a failed refresh returns before it and
+    // the moderation driver retries the action. A channel deleted since the
+    // kick has no roster to refresh: that is convergence, once its discovery
+    // is gone. A recovery re-drive repeats both; the refresh is replaceable
+    // and a repeated notice is a harmless hint. A failed notice is logged and
+    // does not undo the kick.
+    if let Err(e) = emit_group_discovery_events(tenant, state, channel_id).await {
+        if !matches!(
+            e.downcast_ref::<buzz_db::DbError>(),
+            Some(buzz_db::DbError::ChannelNotFound(_))
+        ) {
+            return Err(e);
+        }
+        state
+            .db
+            .soft_delete_discovery_events(
+                tenant.community(),
+                channel_id,
+                state.relay_keypair.public_key().as_bytes(),
+            )
+            .await?;
+    }
+    if let Err(e) = emit_membership_notification(
+        tenant,
+        state,
+        channel_id,
+        target_pubkey,
+        state.relay_keypair.public_key().as_bytes(),
+        KIND_MEMBER_REMOVED_NOTIFICATION,
+    )
+    .await
+    {
+        warn!(channel = %channel_id, error = %e, "membership notification emission failed");
+    }
     Ok(())
 }
 
@@ -362,6 +399,7 @@ pub async fn handle_side_effects(
         9001 => Err(anyhow::anyhow!("kind:9001 requires atomic persistence")),
         // kind:9002 belongs to the atomic persistence path in ingest.
         9002 => Err(anyhow::anyhow!("kind:9002 requires atomic persistence")),
+        // kind:9005 belongs to the atomic persistence path in ingest.
         9005 => Err(anyhow::anyhow!("kind:9005 requires atomic persistence")),
         9007 => handle_create_group(tenant, event, state).await,
         9008 => handle_delete_group(tenant, event, state).await,
@@ -1026,7 +1064,7 @@ pub async fn emit_system_message(
             buzz_db::ArchiveGate::Exempt,
         )
         .await
-        .map_err(|e| anyhow::anyhow!("system message insert failed: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("system message insert failed: {}", e.kind()))?;
 
     fan_out_system_message(tenant, state, channel_id, &event).await;
     Ok(())
@@ -1183,6 +1221,87 @@ async fn publish_live_thread_summary(
         .await;
 }
 
+/// Test-only barrier at the point a membership notice is sent: a test parks
+/// the producer there, reads what a client would read on receipt, then lets
+/// it continue. It can also pin the notices' clock. Keyed by recipient so
+/// parallel tests do not interfere.
+#[cfg(test)]
+pub(crate) mod notice_barrier {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use tokio::sync::{mpsc, oneshot};
+
+    use uuid::Uuid;
+
+    /// A parked notice: its channel, and the handle that lets it continue.
+    pub(crate) type Parked = (Uuid, oneshot::Sender<()>);
+    type Waiters = Mutex<HashMap<Vec<u8>, mpsc::UnboundedSender<Parked>>>;
+
+    fn waiters() -> &'static Waiters {
+        static WAITERS: OnceLock<Waiters> = OnceLock::new();
+        WAITERS.get_or_init(Default::default)
+    }
+
+    /// Parks every notice to one recipient while held; dropping it removes
+    /// the recipient's waiter and clock pin.
+    pub(crate) struct Barrier {
+        recipient: Vec<u8>,
+        parked: mpsc::UnboundedReceiver<Parked>,
+    }
+
+    impl Barrier {
+        /// The next notice to reach the barrier, with its release handle.
+        pub(crate) async fn next(&mut self) -> Option<Parked> {
+            self.parked.recv().await
+        }
+
+        /// Sign every later notice to the recipient at `created_at`, as if all
+        /// were sent in the same second.
+        pub(crate) fn pin_created_at(&self, created_at: u64) {
+            pins()
+                .lock()
+                .unwrap()
+                .insert(self.recipient.clone(), created_at);
+        }
+    }
+
+    impl Drop for Barrier {
+        fn drop(&mut self) {
+            waiters().lock().unwrap().remove(&self.recipient);
+            pins().lock().unwrap().remove(&self.recipient);
+        }
+    }
+
+    /// Park every notice to `recipient` until the returned barrier drops.
+    pub(crate) fn install(recipient: &[u8]) -> Barrier {
+        let (tx, parked) = mpsc::unbounded_channel();
+        waiters().lock().unwrap().insert(recipient.to_vec(), tx);
+        Barrier {
+            recipient: recipient.to_vec(),
+            parked,
+        }
+    }
+
+    fn pins() -> &'static Mutex<HashMap<Vec<u8>, u64>> {
+        static PINS: OnceLock<Mutex<HashMap<Vec<u8>, u64>>> = OnceLock::new();
+        PINS.get_or_init(Default::default)
+    }
+
+    pub(super) fn pinned_created_at(recipient: &[u8]) -> Option<u64> {
+        pins().lock().unwrap().get(recipient).copied()
+    }
+
+    pub(super) async fn reached(channel_id: Uuid, recipient: &[u8]) {
+        let waiter = waiters().lock().unwrap().get(recipient).cloned();
+        if let Some(waiter) = waiter {
+            let (release, released) = oneshot::channel();
+            if waiter.send((channel_id, release)).is_ok() {
+                let _ = released.await;
+            }
+        }
+    }
+}
+
 /// Emit a relay-signed membership notification event stored globally (channel_id = None).
 ///
 /// kind:44100 = member added, kind:44101 = member removed. Every notice
@@ -1200,6 +1319,30 @@ pub async fn emit_membership_notification(
     target_pubkey: &[u8],
     actor_pubkey: &[u8],
     notification_kind: u32,
+) -> anyhow::Result<()> {
+    emit_membership_notification_tagged(
+        tenant,
+        state,
+        channel_id,
+        target_pubkey,
+        actor_pubkey,
+        notification_kind,
+        &[],
+    )
+    .await
+}
+
+/// [`emit_membership_notification`] with `extra_tags` after the standard
+/// ones. A tag that differs per cause, such as a moderation source, keeps two
+/// notices in the same second from sharing one event id.
+pub(crate) async fn emit_membership_notification_tagged(
+    tenant: &TenantContext,
+    state: &Arc<AppState>,
+    channel_id: Uuid,
+    target_pubkey: &[u8],
+    actor_pubkey: &[u8],
+    notification_kind: u32,
+    extra_tags: &[Tag],
 ) -> anyhow::Result<()> {
     // No channel row means no type to tag. Send nothing rather than an
     // untagged notice, which every client would treat as a legacy type.
@@ -1219,12 +1362,14 @@ pub async fn emit_membership_notification(
         target_pubkey,
         actor_pubkey,
         notification_kind,
+        extra_tags,
     )
     .await
 }
 
 /// [`emit_membership_notification`] for a caller that already read the
 /// channel's type, such as a kind:9000 notifying several people.
+#[allow(clippy::too_many_arguments)]
 async fn emit_typed_membership_notification(
     tenant: &TenantContext,
     state: &Arc<AppState>,
@@ -1233,6 +1378,7 @@ async fn emit_typed_membership_notification(
     target_pubkey: &[u8],
     actor_pubkey: &[u8],
     notification_kind: u32,
+    extra_tags: &[Tag],
 ) -> anyhow::Result<()> {
     let target_hex = hex::encode(target_pubkey);
     let actor_hex = hex::encode(actor_pubkey);
@@ -1262,8 +1408,18 @@ async fn emit_typed_membership_notification(
 
     let type_tag = Tag::parse([buzz_core::filter::NOTICE_CHANNEL_TYPE_TAG, channel_type])
         .map_err(|e| anyhow::anyhow!("failed to build channel type tag: {e}"))?;
-    let event = EventBuilder::new(Kind::Custom(notification_kind as u16), content)
+    #[cfg(test)]
+    notice_barrier::reached(channel_id, target_pubkey).await;
+
+    let builder = EventBuilder::new(Kind::Custom(notification_kind as u16), content)
         .tags([p_tag, h_tag, type_tag])
+        .tags(extra_tags.iter().cloned());
+    #[cfg(test)]
+    let builder = match notice_barrier::pinned_created_at(target_pubkey) {
+        Some(at) => builder.custom_created_at(nostr::Timestamp::from(at)),
+        None => builder,
+    };
+    let event = builder
         .sign_with_keys(&state.relay_keypair)
         .map_err(|e| anyhow::anyhow!("failed to sign membership notification: {e}"))?;
 
@@ -1276,7 +1432,8 @@ async fn emit_typed_membership_notification(
             None,
             buzz_db::ArchiveGate::Exempt,
         )
-        .await?;
+        .await
+        .map_err(|e| anyhow::anyhow!("membership notification insert failed: {}", e.kind()))?;
     if !was_inserted {
         return Ok(());
     }
@@ -1433,7 +1590,8 @@ async fn emit_addressable_discovery_event(
             Some(channel_id),
             buzz_db::ArchiveGate::Exempt,
         )
-        .await?;
+        .await
+        .map_err(|e| anyhow::anyhow!("channel state write failed: {}", e.kind()))?;
     if was_inserted {
         let kind_u32 = event_kind_u32(&stored.event);
         dispatch_persistent_event(tenant, state, &stored, kind_u32, relay_pubkey_hex, None).await;
@@ -2087,6 +2245,7 @@ pub(crate) async fn persist_put_user(
                 &target.pubkey,
                 &actor_bytes,
                 KIND_MEMBER_ADDED_NOTIFICATION,
+                &[],
             )
             .await
             {
@@ -2708,6 +2867,7 @@ pub(crate) async fn persist_delete_event(
     info!(target_event = %hex::encode(&target_id), "NIP-29 DELETE_EVENT processed");
     Ok((write.stored, true))
 }
+}
 
 async fn handle_create_group(
     tenant: &TenantContext,
@@ -2865,6 +3025,9 @@ async fn handle_create_group(
     Ok(())
 }
 
+/// Concurrent 44101 notices a channel delete sends to its members.
+const DELETE_NOTICE_CONCURRENCY: usize = 8;
+
 /// Store a kind:9008 and soft-delete its channel in one commit. A refusal
 /// decided under the channel's locks stores nothing, so the client is told.
 pub(crate) async fn persist_delete_group(
@@ -2900,6 +3063,30 @@ async fn handle_delete_group(
         extract_h_tag_channel(event).ok_or_else(|| anyhow::anyhow!("missing h tag"))?;
     let actor_bytes = event.pubkey.to_bytes().to_vec();
 
+    let deleted_channel_info: Option<(String, Vec<Vec<u8>>)> = async {
+        let channel_type: String = sqlx::query_scalar(
+            "SELECT channel_type::text FROM channels WHERE community_id = $1 AND id = $2",
+        )
+        .bind(tenant.community().as_uuid())
+        .bind(channel_id)
+        .fetch_optional(state.db.pool())
+        .await
+        .ok()
+        .flatten()?;
+        let members: Vec<Vec<u8>> = sqlx::query_scalar(
+            "SELECT pubkey FROM channel_members \
+             WHERE community_id = $1 AND channel_id = $2 AND removed_at IS NULL \
+             ORDER BY joined_at ASC",
+        )
+        .bind(tenant.community().as_uuid())
+        .bind(channel_id)
+        .fetch_all(state.db.pool())
+        .await
+        .ok()?;
+        Some((channel_type, members))
+    }
+    .await;
+
     // Clean up NIP-29 discovery events for the deleted group.
     if let Err(e) = state
         .db
@@ -2916,6 +3103,36 @@ async fn handle_delete_group(
     // Deleted channel: clear both membership and accessible-channels caches.
     // Stale is_member=true entries would bypass the DB's deleted_at guard.
     state.invalidate_channel_deleted(tenant);
+
+    // Notify every member only after the delete and discovery cleanup, so a
+    // client that re-reads on the notice no longer sees the channel. The
+    // notices run off the request path, bounded like `handle_req`'s filter
+    // reads, so a large channel neither holds the OK nor depends on the
+    // system message below.
+    if let Some((channel_type, members)) = deleted_channel_info {
+        let (tenant, state, actor_bytes) = (tenant.clone(), state.clone(), actor_bytes.clone());
+        tokio::spawn(async move {
+            use futures_util::stream::{self, StreamExt};
+            stream::iter(&members)
+                .for_each_concurrent(DELETE_NOTICE_CONCURRENCY, |member| async {
+                    if let Err(e) = emit_typed_membership_notification(
+                        &tenant,
+                        &state,
+                        channel_id,
+                        &channel_type,
+                        member,
+                        &actor_bytes,
+                        KIND_MEMBER_REMOVED_NOTIFICATION,
+                        &[],
+                    )
+                    .await
+                    {
+                        warn!(channel = %channel_id, error = %e, "membership notification emission failed");
+                    }
+                })
+                .await;
+        });
+    }
 
     let actor_hex = hex::encode(&actor_bytes);
     emit_system_message(
@@ -3331,7 +3548,8 @@ pub(crate) async fn persist_workflow_deletion(
         .ok_or_else(|| anyhow::anyhow!("missing workflow coordinate"))?;
     let mut parts = coordinate.splitn(3, ':');
     let _kind = parts.next();
-    let owner = hex::decode(parts.next().unwrap_or_default())?;
+    let owner = hex::decode(parts.next().unwrap_or_default())
+        .map_err(|_| anyhow::anyhow!("invalid workflow coordinate"))?;
     let d_tag = parts
         .next()
         .ok_or_else(|| anyhow::anyhow!("invalid workflow coordinate"))?;
@@ -3344,7 +3562,11 @@ pub(crate) async fn persist_workflow_deletion(
             d_tag,
             buzz_db::ArchiveGate::Refuse,
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            // The write carries the whole event: log only a fixed kind.
+            anyhow::anyhow!("workflow deletion write failed: {}", e.kind())
+        })?;
     if let Some(channel_id) = channel_id {
         state
             .workflow_engine
@@ -4573,7 +4795,8 @@ pub async fn publish_nipia_archival_list(
                 None,
                 buzz_db::ArchiveGate::Exempt,
             )
-            .await?;
+            .await
+            .map_err(|e| anyhow::anyhow!("archive snapshot write failed: {}", e.kind()))?;
         if !was_inserted {
             continue;
         }
@@ -4685,7 +4908,8 @@ pub async fn publish_dm_visibility_snapshot(
             // The viewer's own DM view state (Q2).
             buzz_db::ArchiveGate::Exempt,
         )
-        .await?;
+        .await
+        .map_err(|e| anyhow::anyhow!("DM visibility write failed: {}", e.kind()))?;
     if was_inserted {
         dispatch_persistent_event(
             tenant,
