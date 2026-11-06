@@ -31,11 +31,12 @@ def main():
     print("\n📋 2. 檢查狀態機 protocol.yaml 解析無誤...")
     validate_script = os.path.join(base_dir, "scripts", "validate_transition.py")
     if os.path.exists(validate_script):
-        ret = os.system(f'python "{validate_script}"')
-        if ret == 0:
+        import subprocess
+        proc = subprocess.run([sys.executable, validate_script], capture_output=True, text=True)
+        if proc.returncode == 0:
             print("✅ 狀態機 protocol.yaml 解析無誤且結構合法")
         else:
-            print(f"❌ 狀態機解析失敗，exit code: {ret}")
+            print(f"❌ 狀態機解析失敗，exit code: {proc.returncode}, stderr: {proc.stderr}")
             all_passed = False
     else:
         print("❌ 未找到 validate_transition.py 腳本")

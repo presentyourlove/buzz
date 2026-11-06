@@ -1,0 +1,95 @@
+# Buzz Agent Configuration (TOML format)
+# This is an alternative to environment variables for complex deployments
+# Copy to /etc/buzz-agent/buzz-agent.toml and customize
+
+[agent]
+# Provider selection: "anthropic" | "openai" | "databricks" | "databricks_v2" | "openrouter"
+provider = "anthropic"
+
+# Universal model override (takes priority over provider-specific models)
+model = "claude-3-5-sonnet-20241022"
+
+# Agent identity for Nostr (Mode B daemon)
+private_key = ""  # hex or nsec
+relay_url = "http://localhost:3000"
+
+# System prompt
+system_prompt = """
+You are buzz-agent. Use the provided tools to act. Tool calls are your only output.
+"""
+
+# Session limits
+max_sessions = 100
+max_line_bytes = 4194304
+
+# Timeouts (seconds)
+llm_timeout_secs = 240
+tool_timeout_secs = 1260
+mcp_init_timeout_secs = 30
+
+# MCP restart policy
+mcp_max_restart_attempts = 3
+mcp_restart_base_ms = 500
+mcp_restart_max_ms = 30000
+
+# Thinking/reasoning
+thinking_effort = "medium"  # none|minimal|low|medium|high|xhigh|max
+thinking_summary = "auto"   # auto|concise|detailed
+
+# Hints & skills
+hints_enabled = true
+history_cache_ttl_secs = 3600
+history_cache_max_entries = 10000
+
+# Databricks specific
+databricks_host = ""
+databricks_token = ""
+databricks_model = ""
+databricks_model_filter = ""
+
+# OpenAI compatible specific
+openai_compat_base_url = "https://api.openai.com/v1"
+openai_compat_api = "auto"
+
+# OpenRouter specific
+openrouter_base_url = "https://openrouter.ai/api/v1"
+
+[health_guardian]
+enabled = true
+channel_id = "5ca019f6-1a27-592a-b015-4baf0eb33572"
+schedule = "*/15 * * * *"
+daily_deep_schedule = "0 4 * * *"
+
+# Paths
+work_logs_path = "/opt/buzz-agent/.buzz/WORK_LOGS"
+circuit_breaker_path = "/opt/buzz-agent/.buzz/WORK_LOGS/circuit_breaker.json"
+sync_pid_file = "/opt/buzz-agent/.buzz/sync_obsidian.pid"
+
+# Monitored service ports
+openrouter_port = 8080
+proxy_port = 3000
+
+# Alert thresholds
+[health_guardian.alert_threshold]
+max_consecutive_failures = 3
+circuit_breaker_auto_reset = true
+process_restart_cooldown_secs = 300
+
+# Optional: Additional monitored processes
+# Each entry: name = { command = "...", args = [...], critical = true }
+[health_guardian.monitored_processes]
+# openrouter-gateway = { command = "cargo", args = ["run", "--bin", "openrouter-gateway"], critical = true }
+# sync-obsidian = { command = "cargo", args = ["run", "--bin", "sync_obsidian"], critical = true }
+# buzz-proxy = { command = "cargo", args = ["run", "--bin", "buzz-proxy"], critical = true }
+
+# Optional: Custom health check endpoints
+[health_guardian.custom_checks]
+# my-service = { url = "http://localhost:8081/health", timeout_secs = 5, critical = true }
+
+[logging]
+level = "info"  # trace|debug|info|warn|error
+format = "json"  # json|text
+output = "stdout"  # stdout|stderr|file
+file_path = "/var/log/buzz-agent/buzz-agent.log"
+max_file_size_mb = 100
+max_files = 10
