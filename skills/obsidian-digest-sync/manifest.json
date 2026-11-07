@@ -1,0 +1,45 @@
+{
+  "name": "obsidian-digest-sync",
+  "version": "1.0.0",
+  "description": "Obsidian 摘要同步技能 - 將每日進化報告自動同步至 Obsidian 知識庫",
+  "author": "Pollen",
+  "license": "MIT",
+  "entry": "main.js",
+  "capabilities": [
+    "daily-digest-generation",
+    "obsidian-vault-sync",
+    "markdown-template-rendering",
+    "tag-based-organization"
+  ],
+  "dependencies": {
+    "yaml": "^2.3.0"
+  },
+  "config_schema": {
+    "vault_path": {
+      "type": "string",
+      "description": "Obsidian Vault 絕對路徑",
+      "required": true
+    },
+    "daily_note_folder": {
+      "type": "string",
+      "description": "每日筆記資料夾相對路徑",
+      "default": "02-Conversation-Digest/Daily"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "自動添加的標籤",
+      "default": [
+        "daily-evolution",
+        "buzz",
+        "auto-sync"
+      ]
+    }
+  },
+  "hooks": {
+    "on_daily_evolution_complete": "generate_and_sync_digest",
+    "on_manual_trigger": "sync_last_n_days"
+  }
+}

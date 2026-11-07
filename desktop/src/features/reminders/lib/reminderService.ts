@@ -98,19 +98,26 @@ function parseTarget(value: unknown): ReminderTarget | null {
     return null;
   }
   const t = value as Record<string, unknown>;
-  if (
-    typeof t.eventId !== "string" ||
-    typeof t.channelId !== "string" ||
-    typeof t.preview !== "string" ||
-    typeof t.authorPubkey !== "string"
-  ) {
+
+  // Accept target if it has at least channelId OR eventId as strings.
+  // Missing fields default to empty string to maintain ReminderTarget shape.
+  // This matches NIP-ER's flexible target structure where either channelId
+  // or eventId (or both) may be provided.
+  const eventId = typeof t.eventId === "string" ? t.eventId : "";
+  const channelId = typeof t.channelId === "string" ? t.channelId : "";
+  const preview = typeof t.preview === "string" ? t.preview : "";
+  const authorPubkey = typeof t.authorPubkey === "string" ? t.authorPubkey : "";
+
+  // Require at least one identifier to consider it a valid target
+  if (!eventId && !channelId) {
     return null;
   }
+
   return {
-    eventId: t.eventId,
-    channelId: t.channelId,
-    preview: t.preview,
-    authorPubkey: t.authorPubkey,
+    eventId,
+    channelId,
+    preview,
+    authorPubkey,
   };
 }
 

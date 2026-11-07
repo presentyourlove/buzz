@@ -70,6 +70,9 @@ url = { workspace = true }
 # Persona pack parsing, validation, and resolution
 buzz-persona = { path = "../buzz-persona" }
 
+# Human-readable duration parsing (e.g., "30m", "2h", "1d") for reminders
+humantime = "2"
+
 # Platform app-data dir resolution — locates the desktop app's
 # channel-templates.json store for `channels create --template`
 dirs = "6"

@@ -117,6 +117,84 @@ test("parseReminderContent_unknown_fields_are_ignored", () => {
   });
 });
 
+// --- parseTarget partial target support ---
+
+test("parseReminderContent_target_with_only_channelId_is_valid", () => {
+  const result = parseReminderContent(
+    JSON.stringify({
+      status: "pending",
+      target: { channelId: "chan1" },
+      note: "test",
+    }),
+  );
+  assert.ok(result);
+  assert.deepEqual(result?.target, {
+    eventId: "",
+    channelId: "chan1",
+    preview: "",
+    authorPubkey: "",
+  });
+});
+
+test("parseReminderContent_target_with_only_eventId_is_valid", () => {
+  const result = parseReminderContent(
+    JSON.stringify({
+      status: "pending",
+      target: { eventId: "evt123" },
+      note: "test",
+    }),
+  );
+  assert.ok(result);
+  assert.deepEqual(result?.target, {
+    eventId: "evt123",
+    channelId: "",
+    preview: "",
+    authorPubkey: "",
+  });
+});
+
+test("parseReminderContent_target_with_both_ids_missing_preview_author_is_valid", () => {
+  const result = parseReminderContent(
+    JSON.stringify({
+      status: "pending",
+      target: { eventId: "evt123", channelId: "chan1" },
+      note: "test",
+    }),
+  );
+  assert.ok(result);
+  assert.deepEqual(result?.target, {
+    eventId: "evt123",
+    channelId: "chan1",
+    preview: "",
+    authorPubkey: "",
+  });
+});
+
+test("parseReminderContent_empty_target_object_returns_null", () => {
+  // Empty target object has neither eventId nor channelId
+  const result = parseReminderContent(
+    JSON.stringify({ status: "pending", target: {} }),
+  );
+  assert.equal(result, null);
+});
+
+test("parseReminderContent_target_with_non_string_fields_coerces_to_empty", () => {
+  const result = parseReminderContent(
+    JSON.stringify({
+      status: "pending",
+      target: { channelId: "chan1", preview: 123, authorPubkey: true },
+      note: "test",
+    }),
+  );
+  assert.ok(result);
+  assert.deepEqual(result?.target, {
+    eventId: "",
+    channelId: "chan1",
+    preview: "",
+    authorPubkey: "",
+  });
+});
+
 test("parseNotBefore_valid_digits_returns_number", () => {
   assert.equal(parseNotBefore("0"), 0);
   assert.equal(parseNotBefore("1700000000"), 1_700_000_000);

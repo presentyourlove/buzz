@@ -635,6 +635,27 @@ pub struct Config {
     /// Databricks gateway does not auto-cache, so without this the surfaced
     /// `cache_read_input_tokens` is structurally always 0.
     pub prompt_caching: bool,
+
+    /// Agent's Nostr keys for Mode B (daemon mode) — used to sign kind:30300
+    /// reminder events and send DM reminders. Set via `BUZZ_AGENT_KEYS` (nsec or hex).
+    /// Optional: only required when running in Mode B daemon mode.
+    pub agent_keys: Option<Arc<nostr::Keys>>,
+
+    /// Redis URL for distributed daemon lock. Set via `BUZZ_AGENT_REDIS_URL`.
+    /// Required when running in Mode B daemon mode.
+    pub redis_url: String,
+
+    /// WebSocket URL for Nostr Relay (ws:// or wss://). 
+    /// Auto-derived from `relay_url` if not explicitly set via `BUZZ_AGENT_RELAY_WS_URL`.
+    /// Used by Mode B daemon and built-in tools for publishing events over WebSocket.
+    pub relay_ws_url: String,
+
+    /// HistoryItem memory cache TTL in seconds (Mode B: Phase 2).
+    /// Default 300s (5 minutes). Set via `BUZZ_AGENT_HISTORY_CACHE_TTL`.
+    pub history_cache_ttl_secs: u64,
+    /// HistoryItem memory cache maximum entries (Mode B: Phase 2).
+    /// Default 10000. Set via `BUZZ_AGENT_HISTORY_CACHE_MAX`.
+    pub history_cache_max_entries: usize,
 }
 
 impl Config {
@@ -754,6 +775,10 @@ impl Config {
                 env("BUZZ_AGENT_THINKING_SUMMARY").as_deref(),
             )?,
             prompt_caching: parse_env("BUZZ_AGENT_PROMPT_CACHING", 1u8)? != 0,
+            agent_keys: parse_agent_keys(env("BUZZ_AGENT_KEYS").as_deref())?,
+            redis_url: env("BUZZ_AGENT_REDIS_URL").unwrap_or_default(),
+            history_cache_ttl_secs: parse_env("BUZZ_AGENT_HISTORY_CACHE_TTL", 300u64)?,
+            history_cache_max_entries: parse_env("BUZZ_AGENT_HISTORY_CACHE_MAX", 10_000usize)?,
         };
         cfg.validate()?;
         Ok(cfg)
@@ -806,6 +831,10 @@ impl Config {
             thinking_effort: None,
             thinking_summary: ThinkingSummary::Auto,
             prompt_caching: false,
+            agent_keys: None,
+            redis_url: String::new(),
+            history_cache_ttl_secs: 300,
+            history_cache_max_entries: 10_000,
         }
     }
 
@@ -895,6 +924,13 @@ impl Config {
                     effort.openai_effort_str()
                 ));
             }
+        }
+        // Mode B: HistoryItem cache validation
+        if self.history_cache_ttl_secs < 60 {
+            return Err("config: BUZZ_AGENT_HISTORY_CACHE_TTL must be >= 60 seconds".into());
+        }
+        if self.history_cache_max_entries < 100 {
+            return Err("config: BUZZ_AGENT_HISTORY_CACHE_MAX must be >= 100 entries".into());
         }
         Ok(())
     }
@@ -1104,6 +1140,45 @@ impl HookServers {
 
 fn parse_hook_servers_env(key: &str) -> HookServers {
     parse_hook_servers(env(key).as_deref())
+}
+
+/// Helper to auto-derive WebSocket URL from HTTP relay URL.
+/// https:// -> wss://, http:// -> ws://
+fn derive_ws_url(http_url: &str) -> String {
+    if http_url.starts_with("https://") {
+        http_url.replacen("https://", "wss://", 1)
+    } else if http_url.starts_with("http://") {
+        http_url.replacen("http://", "ws://", 1)
+    } else {
+        // Assume it's already a WebSocket URL or unknown scheme
+        http_url.to_string()
+    }
+}
+
+/// Parse agent Nostr keys from environment variable.
+/// Accepts nsec (bech32) or hex private key.
+fn parse_agent_keys(raw: Option<&str>) -> Result<Option<Arc<nostr::Keys>>, String> {
+    let raw = match raw {
+        Some(s) if !s.trim().is_empty() => s.trim(),
+        _ => return Ok(None),
+    };
+
+    // Try nsec (bech32) first
+    if raw.starts_with("nsec1") {
+        let keys = nostr::Keys::from_nsec(raw)
+            .map_err(|e| format!("invalid nsec: {e}"))?;
+        return Ok(Some(Arc::new(keys)));
+    }
+
+    // Try hex private key (64 hex chars)
+    if raw.len() == 64 && raw.chars().all(|c| c.is_ascii_hexdigit()) {
+        let sec_key = nostr::SecretKey::from_hex(raw)
+            .map_err(|e| format!("invalid hex secret key: {e}"))?;
+        let keys = nostr::Keys::new(sec_key);
+        return Ok(Some(Arc::new(keys)));
+    }
+
+    Err("BUZZ_AGENT_KEYS must be a valid nsec (bech32) or 64-char hex private key".into())
 }
 
 /// Pure parser exposed for unit tests. `None` (env unset) and `Some("")`

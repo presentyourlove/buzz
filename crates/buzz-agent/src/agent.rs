@@ -161,6 +161,12 @@ pub struct RunCtx<'a> {
     pub skills: &'a [SkillEntry],
     pub wire: &'a WireSender,
     pub cancel: &'a mut watch::Receiver<bool>,
+    /// Agent's Nostr keys for Mode B daemon mode (signing kind:30300, sending DMs).
+    /// Injected from `Config::agent_keys` when available.
+    pub agent_keys: Option<Arc<nostr::Keys>>,
+    /// HistoryItem memory cache for size estimation (Mode B: Phase 2).
+    /// Injected from `Config` at `RunCtx` construction in `lib.rs`.
+    pub history_cache: Option<Arc<crate::types::HistoryItemCache>>,
     /// Mid-turn steer queue. Drained at each round boundary (before the next
     /// LLM call): queued messages are appended to history as user turns so the
     /// model sees them on its next request, without restarting the turn. Fed by
@@ -401,6 +407,12 @@ impl RunCtx<'_> {
             // Inject the built-in load_skill tool when skills are available.
             if !self.skills.is_empty() {
                 tools.push(builtin::load_skill_def());
+            }
+            // Inject Mode B daemon tools when agent keys are available.
+            if ctx.agent_keys.is_some() {
+                tools.push(builtin::sign_and_send_event_def());
+                tools.push(builtin::send_direct_message_def());
+                tools.push(builtin::create_reminder_def());
             }
             round = round.saturating_add(1);
             let response_result = tokio::select! {
@@ -857,6 +869,16 @@ impl RunCtx<'_> {
             if call.name == builtin::LOAD_SKILL_TOOL {
                 emit_in_progress(self.wire, self.session_id, call).await;
                 let mut result = builtin::call_load_skill(&call.arguments, self.skills).await;
+                result.provider_id = call.provider_id.clone();
+                emit_completed(self.wire, self.session_id, call, &result).await;
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Built-in create_reminder: execute inline, no MCP round-trip.
+            if call.name == builtin::CREATE_REMINDER_TOOL {
+                emit_in_progress(self.wire, self.session_id, call).await;
+                let mut result = builtin::call_create_reminder(&call.arguments, ctx).await;
                 result.provider_id = call.provider_id.clone();
                 emit_completed(self.wire, self.session_id, call, &result).await;
                 results[idx] = Some(result);

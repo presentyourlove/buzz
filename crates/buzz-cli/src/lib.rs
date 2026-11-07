@@ -349,6 +349,9 @@ enum Cmd {
     /// Agent engram management — persistent memory per NIP-AE
     #[command(subcommand)]
     Mem(MemCmd),
+    /// Scheduled reminders (NIP-ER kind:30300)
+    #[command(subcommand)]
+    Reminders(RemindersCmd),
     /// Persona pack operations (local, no relay connection needed)
     #[command(subcommand)]
     Pack(PackCmd),
@@ -2488,6 +2491,67 @@ pub enum PackCmd {
     },
 }
 
+/// Subcommands for `buzz reminders`.
+#[derive(Subcommand)]
+pub enum RemindersCmd {
+    /// Create a new scheduled reminder (NIP-ER kind:30300)
+    ///
+    /// The reminder is signed with your key and encrypted to yourself via NIP-44.
+    /// At the scheduled time, the relay delivers it to your connected clients.
+    ///
+    /// Examples:
+    ///   buzz reminders create --content "喝水" --at "30m"
+    ///   buzz reminders create --content "開會" --at "2026-12-31T23:59:59Z" --channel 550e8400-e29b-41d4-a716-446655440000
+    ///   buzz reminders create --content "截止日期" --at "1h" --dry-run
+    ///   buzz reminders create --content "回覆這則訊息" --at "1h" --event-id abc123... --preview "原始訊息預覽" --author-pubkey <pubkey>
+    Create {
+        /// Reminder content (goes into the encrypted JSON `note` field)
+        #[arg(long)]
+        content: String,
+        /// When to trigger: ISO 8601, unix seconds, or relative duration (e.g., "30m", "2h", "1d")
+        #[arg(long)]
+        at: String,
+        /// Optional channel UUID to associate with the reminder
+        #[arg(long)]
+        channel: Option<String>,
+        /// Optional event ID of the message being reminded about (enables navigation in Desktop)
+        #[arg(long)]
+        event_id: Option<String>,
+        /// Optional preview text of the target message (shown in Desktop reminder panel)
+        #[arg(long)]
+        preview: Option<String>,
+        /// Optional author pubkey of the target message (hex)
+        #[arg(long)]
+        author_pubkey: Option<String>,
+        /// Output the event JSON without broadcasting to the relay
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
+    /// List your scheduled reminders
+    ///
+    /// Fetches kind:30300 events authored by you, decrypts via NIP-44, and displays them.
+    ///
+    /// Example:
+    ///   buzz reminders list --limit 20
+    List {
+        /// Maximum number of reminders to return
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
+    /// Cancel a scheduled reminder by its d-tag
+    ///
+    /// Publishes a replacement event with the same d-tag, status "cancelled",
+    /// no not_before tag, and an expiration timestamp (30-90 days jitter).
+    /// This follows NIP-33 parameterized replaceable semantics.
+    ///
+    /// Example:
+    ///   buzz reminders cancel a1b2c3d4e5f6789012345678901234ab
+    Cancel {
+        /// The d-tag (32 hex chars) of the reminder to cancel
+        d_tag: String,
+    },
+}
+
 /// Community moderation commands.
 ///
 /// The community (tenant) is selected by the relay host in `--relay` /
@@ -2700,6 +2764,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Cmd::Media(sub) => commands::upload::dispatch_media(sub, &client).await,
         Cmd::Upload(sub) => commands::upload::dispatch(sub, &client).await,
         Cmd::Mem(sub) => commands::mem::dispatch(sub, &client).await,
+        Cmd::Reminders(sub) => commands::reminders::dispatch(sub, &client).await,
         Cmd::Moderation(sub) => commands::moderation::dispatch(sub, &client, &cli.format).await,
         Cmd::Pack(_) | Cmd::Auth(_) => unreachable!("handled above"),
     }
@@ -2989,6 +3054,7 @@ mod tests {
             "pr",
             "projects",
             "reactions",
+            "reminders",
             "repos",
             "sidebar",
             "social",
@@ -3184,6 +3250,7 @@ mod tests {
                 "untimeout"
             ]
         );
+        assert_eq!(names(&cmd, "reminders"), vec!["cancel", "create", "list"]);
     }
 
     #[test]
@@ -3204,6 +3271,7 @@ mod tests {
             ("pr", 5),
             ("projects", 8),
             ("reactions", 3),
+            ("reminders", 3),
             ("repos", 6),
             ("social", 7),
             ("upload", 1),

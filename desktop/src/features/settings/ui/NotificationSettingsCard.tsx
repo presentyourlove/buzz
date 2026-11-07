@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { Bell, ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 
 import type {
   DesktopNotificationPermissionState,
@@ -283,6 +283,61 @@ export function NotificationSettingsCard({
                 onSetHomeBadgeEnabled(checked);
               }}
             />
+          </SettingsOptionRow>
+        </SettingsOptionGroup>
+
+        <SettingsOptionGroup title="Reminders">
+          <SettingsOptionRow>
+            <div className="min-w-0">
+              <label className="text-sm font-medium" htmlFor="reminders-info">
+                Scheduled reminders
+              </label>
+              <p className="text-sm font-normal text-muted-foreground/70" data-settings-subcopy>
+                Reminders use the <strong>Needs action</strong> notification slot
+                above. Configure its sound and alert toggle there.
+              </p>
+            </div>
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Bell className="h-4 w-4" />
+              <span>Uses "Needs action" slot</span>
+            </span>
+          </SettingsOptionRow>
+
+          <SettingsOptionRow>
+            <div className="min-w-0">
+              <label className="text-sm font-medium" htmlFor="reminders-preview">
+                Notification preview
+              </label>
+              <p className="text-sm font-normal text-muted-foreground/70" data-settings-subcopy>
+                Show reminder note preview in desktop notification body.
+              </p>
+            </div>
+            <Switch
+              checked={true}
+              data-testid="notifications-reminders-preview-toggle"
+              id="reminders-preview"
+              onCheckedChange={() => {
+                // Placeholder: notification preview is always on for reminders
+                // Could be wired to a setting in the future
+              }}
+            />
+          </SettingsOptionRow>
+
+          <SettingsOptionRow>
+            <div className="min-w-0">
+              <label className="text-sm font-medium" htmlFor="reminders-snooze">
+                Default snooze presets
+              </label>
+              <p className="text-sm font-normal text-muted-foreground/70" data-settings-subcopy>
+                Snooze options in reminder actions (30m, 1h, 3h, tomorrow 9am, next Monday 9am).
+              </p>
+            </div>
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              <ExternalLink className="h-4 w-4" />
+              <span className="underline underline-offset-2 hover:text-primary">
+                Configure in code (timePresets.ts)
+              </span>
+            </span>
           </SettingsOptionRow>
         </SettingsOptionGroup>
       </SettingsOptionGroupList>

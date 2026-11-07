@@ -4,7 +4,7 @@ use crate::config::{
     HANDOFF_ORIGINAL_TASK_MAX_BYTES, MAX_CONTEXT_RECOVERIES_PER_RUN,
 };
 use crate::llm::summary_completion_cap;
-use crate::types::HistoryItem;
+use crate::types::{HistoryItem, HistoryItemCache};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct HandoffTokenCounts {
@@ -231,7 +231,7 @@ impl RunCtx<'_> {
         *self.handoff_count += 1;
         let token_counts = HandoffTokenCounts {
             before: tokens_before,
-            after: estimate_history_tokens(self.history),
+            after: estimate_history_tokens(self.history, self.history_cache.as_deref()),
         };
         tracing::info!(
             "handoff #{} (history {prior} -> {} items; {token_counts})",
@@ -248,11 +248,20 @@ impl RunCtx<'_> {
                     >= token_threshold(self.cfg.max_context_tokens)
             }
             None => {
-                let bytes: usize = self
-                    .history
-                    .iter()
-                    .map(HistoryItem::context_pressure_bytes)
-                    .sum();
+                let bytes: usize = if let Some(cache) = self.history_cache.as_deref() {
+                    self.history
+                        .iter()
+                        .map(|item| {
+                            let (_, pressure) = cache.get_or_compute(item);
+                            pressure
+                        })
+                        .sum()
+                } else {
+                    self.history
+                        .iter()
+                        .map(HistoryItem::context_pressure_bytes)
+                        .sum()
+                };
                 bytes
                     > byte_fallback_threshold(
                         self.cfg.max_context_tokens,
@@ -263,7 +272,7 @@ impl RunCtx<'_> {
     }
 
     fn projected_handoff_input_tokens(&self) -> u64 {
-        let current_tokens = estimate_history_tokens(self.history);
+        let current_tokens = estimate_history_tokens(self.history, self.history_cache.as_deref());
         match *self.last_request_input_tokens {
             // Token-first: the provider told us exactly how many input tokens
             // the PREVIOUS request used. But history has grown since that
@@ -275,11 +284,20 @@ impl RunCtx<'_> {
             // token estimate of the bytes added since the measurement.
             Some(measured_tokens) => {
                 let measured_bytes = self.last_request_history_bytes.unwrap_or(0);
-                let current_bytes: usize = self
-                    .history
-                    .iter()
-                    .map(HistoryItem::context_pressure_bytes)
-                    .sum();
+                let current_bytes: usize = if let Some(cache) = self.history_cache.as_deref() {
+                    self.history
+                        .iter()
+                        .map(|item| {
+                            let (_, pressure) = cache.get_or_compute(item);
+                            pressure
+                        })
+                        .sum()
+                } else {
+                    self.history
+                        .iter()
+                        .map(HistoryItem::context_pressure_bytes)
+                        .sum()
+                };
                 let grown = current_bytes.saturating_sub(measured_bytes);
                 measured_tokens.saturating_add(estimate_tokens_from_bytes(grown))
             }
@@ -477,13 +495,16 @@ pub(crate) fn clamp_bytes(s: &str, max_bytes: usize) -> String {
 /// than risk the next request exceeding the window.
 const CONSERVATIVE_BYTES_PER_TOKEN: u64 = 1;
 
-fn estimate_history_tokens(history: &[HistoryItem]) -> u64 {
-    estimate_tokens_from_bytes(
-        history
-            .iter()
-            .map(HistoryItem::context_pressure_bytes)
-            .sum(),
-    )
+fn estimate_history_tokens(history: &[HistoryItem], cache: Option<&HistoryItemCache>) -> u64 {
+    let total_bytes: usize = if let Some(cache) = cache {
+        history.iter().map(|item| {
+            let (_, pressure) = cache.get_or_compute(item);
+            pressure
+        }).sum()
+    } else {
+        history.iter().map(HistoryItem::context_pressure_bytes).sum()
+    };
+    estimate_tokens_from_bytes(total_bytes)
 }
 
 /// Estimate tokens from a byte count at the conservative ratio (rounding up,

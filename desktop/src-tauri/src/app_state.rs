@@ -143,6 +143,22 @@ pub struct AppState {
     /// outage or a document without `self` must stay retryable).
     pub relay_self_cache: Mutex<HashMap<String, (std::time::Instant, String)>>,
     pub archive_db: crate::archive::ArchiveDb,
+    /// Message deduplication cache: maps idempotency key -> DedupEntry.
+    /// Prevents duplicate message sending caused by UI double-click, ACP retries, or daemon re-triggers.
+    pub message_dedup_cache: Mutex<HashMap<String, DedupEntry>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DedupEntry {
+    pub status: DedupStatus,
+    pub created_at: std::time::Instant,
+}
+
+#[derive(Debug, Clone)]
+pub enum DedupStatus {
+    Pending,
+    Confirmed { event_id: String },
+    Failed,
 }
 
 /// Parse the `BUZZ_PRIVATE_KEY` env var into identity keys. `Some` means the
@@ -247,6 +263,71 @@ pub fn build_app_state() -> AppState {
         pending_owned_channels: Mutex::new(std::collections::HashSet::new()),
         relay_self_cache: Mutex::new(HashMap::new()),
         archive_db: crate::archive::ArchiveDb::default(),
+        message_dedup_cache: Mutex::new(HashMap::new()),
+    }
+}
+
+impl AppState {
+    /// Try to reserve a slot in the message deduplication cache.
+    /// Returns:
+    /// - `Ok(Some(event_id))` if the message was already confirmed within the TTL (caller can return cached result).
+    /// - `Ok(None)` if the slot was reserved as Pending (caller should proceed with sending).
+    /// - `Err(...)` if the same message is currently Pending (in flight).
+    pub fn try_reserve_message_dedup(
+        &self,
+        key: &str,
+        ttl: std::time::Duration,
+    ) -> Result<Option<String>, String> {
+        let mut cache = self
+            .message_dedup_cache
+            .lock()
+            .map_err(|e| format!("dedup cache lock poisoned: {e}"))?;
+        let now = std::time::Instant::now();
+        // Prune expired entries
+        cache.retain(|_, entry| now.duration_since(entry.created_at) < ttl);
+
+        if let Some(entry) = cache.get(key) {
+            match &entry.status {
+                DedupStatus::Pending => {
+                    return Err("A duplicate message is currently being processed".to_string());
+                }
+                DedupStatus::Confirmed { event_id } => {
+                    return Ok(Some(event_id.clone()));
+                }
+                DedupStatus::Failed => {
+                    // Retry allowed after failure
+                }
+            }
+        }
+
+        cache.insert(
+            key.to_string(),
+            DedupEntry {
+                status: DedupStatus::Pending,
+                created_at: now,
+            },
+        );
+        Ok(None)
+    }
+
+    /// Mark a pending deduplication slot as confirmed with the assigned event_id.
+    pub fn confirm_message_dedup(&self, key: &str, event_id: &str) {
+        if let Ok(mut cache) = self.message_dedup_cache.lock() {
+            if let Some(entry) = cache.get_mut(key) {
+                entry.status = DedupStatus::Confirmed {
+                    event_id: event_id.to_string(),
+                };
+            }
+        }
+    }
+
+    /// Mark a pending deduplication slot as failed so subsequent attempts can retry.
+    pub fn fail_message_dedup(&self, key: &str) {
+        if let Ok(mut cache) = self.message_dedup_cache.lock() {
+            if let Some(entry) = cache.get_mut(key) {
+                entry.status = DedupStatus::Failed;
+            }
+        }
     }
 }
 

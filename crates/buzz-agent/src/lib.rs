@@ -3,9 +3,14 @@ mod agent;
 pub mod auth;
 mod auth_http;
 mod builtin;
-pub mod catalog;
+mod catalog;
 pub mod config;
-pub mod databricks;
+mod daemon;
+mod daemon_dispatch;
+mod daemon_lock;
+mod daemon_sub;
+mod daemon_ws;
+mod databricks;
 mod databricks_label_grammar;
 mod handoff;
 mod hints;
@@ -216,13 +221,22 @@ async fn async_main() {
         cfg.permission_timeout,
     ));
     let app = Arc::new(App {
-        cfg,
+        cfg: cfg.clone(),
         llm,
         sessions: Mutex::new(HashMap::new()),
         negotiated_version: AtomicU32::new(PROTOCOL_VERSION),
         permissions,
         models_cache: tokio::sync::OnceCell::new(),
     });
+
+    // Start Agent Daemon for Mode B if agent keys are configured
+    let mut daemon = crate::daemon::Daemon::new(app.cfg.clone());
+    if app.cfg.agent_keys.is_some() {
+        if let Err(e) = daemon.start().await {
+            tracing::error!("Failed to start agent daemon: {}", e);
+        }
+    }
+
     let (wire_tx, wire_rx) = mpsc::channel::<WireMsg>(64);
     let mut writer = tokio::spawn(wire::writer_task(wire_rx));
     // Whichever ends first drives shutdown. The reader ending is the normal
@@ -819,6 +833,11 @@ async fn run_prompt(app: Arc<App>, id: Value, params: Value, wire_tx: WireSender
         skills: &skills,
         wire: &wire_tx,
         cancel: &mut cancel_rx,
+        agent_keys: app.cfg.agent_keys.clone(),
+        history_cache: Some(Arc::new(crate::types::HistoryItemCache::new(
+            app.cfg.history_cache_ttl_secs,
+            app.cfg.history_cache_max_entries,
+        ))),
         steer: &mut steer_rx,
         history: &mut history,
         original_task: &mut original_task,
@@ -1024,7 +1043,7 @@ mod tests {
     use crate::types::AgentError;
 
     /// Regression: a discovery error must not pin the models_cache for the process lifetime.
-    ///
+    /// 
     /// `resolve_models_catalog` uses `get_or_try_init` so an `Err` leaves the `OnceCell`
     /// empty and the next `session/new` retries discovery. This test calls
     /// `resolve_models_catalog` directly — the same function `session_new` calls — so
@@ -1117,5 +1136,114 @@ mod tests {
                 name: "GPT-5.5".into(),
             }]
         );
+    }
+}
+
+#[cfg(test)]
+mod daemon_tests {
+    use super::*;
+    use nostr::{EventBuilder, Keys, Kind, Tag};
+    use serde_json::json;
+
+    /// Test that DaemonLock can be created with valid Redis URL
+    #[tokio::test]
+    #[ignore = "requires Redis"]
+    async fn daemon_lock_acquire_release() {
+        let lock = crate::daemon_lock::DaemonLock::new("redis://localhost:6379", "test_pubkey").await.unwrap();
+        let mut lock = lock;
+        lock.acquire().await.unwrap();
+        lock.release().await.unwrap();
+    }
+
+    /// Test that DaemonLock prevents double acquire
+    #[tokio::test]
+    #[ignore = "requires Redis"]
+    async fn daemon_lock_double_acquire_fails() {
+        let lock1 = crate::daemon_lock::DaemonLock::new("redis://localhost:6379", "test_pubkey2").await.unwrap();
+        let mut lock1 = lock1;
+        lock1.acquire().await.unwrap();
+
+        let lock2 = crate::daemon_lock::DaemonLock::new("redis://localhost:6379", "test_pubkey2").await.unwrap();
+        let mut lock2 = lock2;
+        assert!(lock2.acquire().await.is_err());
+
+        lock1.release().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod dispatcher_tests {
+    use super::*;
+    use nostr::{EventBuilder, Keys, Kind, Tag};
+    use serde_json::json;
+
+    /// Test parsing reminder content from kind:30300 event
+    #[test]
+    fn parse_reminder_content() {
+        let keys = Keys::generate();
+        let target_pubkey = keys.public_key().to_hex();
+        
+        let reminder_content = json!({
+            "target": {
+                "dm_recipient_pubkey": target_pubkey,
+                "channelId": "chan1",
+                "preview": "test message",
+                "authorPubkey": "author1"
+            },
+            "status": "pending",
+            "note": "喝水"
+        });
+
+        let ciphertext = nostr::nips::nip44::encrypt(
+            keys.secret_key(),
+            keys.public_key(),
+            &reminder_content.to_string(),
+            nostr::nips::nip44::Version::V2,
+        ).unwrap();
+
+        let event = EventBuilder::new(Kind::Custom(30300), ciphertext)
+            .tag(Tag::parse(["d", "test123"]).unwrap())
+            .tag(Tag::parse(["not_before", "1234567890"]).unwrap())
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        // Verify we can decrypt
+        let plaintext = nostr::nips::nip44::decrypt(
+            keys.secret_key(),
+            keys.public_key(),
+            &event.content,
+            nostr::nips::nip44::Version::V2,
+        ).unwrap();
+
+        let parsed: serde_json::Value = serde_json::from_str(&plaintext).unwrap();
+        assert_eq!(parsed["status"], "pending");
+        assert_eq!(parsed["note"], "喝水");
+        assert_eq!(parsed["target"]["dm_recipient_pubkey"], target_pubkey);
+    }
+}
+
+#[cfg(test)]
+mod ws_client_tests {
+    use super::*;
+
+    /// Test WebSocketClient creation
+    #[test]
+    fn ws_client_new() {
+        let client = crate::daemon_ws::WebSocketClient::new("wss://relay.example.com".to_string());
+        assert_eq!(client.relay_url, "wss://relay.example.com");
+    }
+}
+
+#[cfg(test)]
+mod subscription_manager_tests {
+    use super::*;
+    use nostr::Keys;
+
+    /// Test SubscriptionManager creation and filter building
+    #[test]
+    fn subscription_manager_new() {
+        let keys = Keys::generate();
+        let manager = crate::daemon_sub::SubscriptionManager::new(keys.public_key().to_hex());
+        assert!(manager.current_sub_id.is_none());
     }
 }

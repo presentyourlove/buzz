@@ -404,6 +404,24 @@ pub use event_batch::{get_event, get_events};
 mod thread_ref;
 use thread_ref::{resolve_thread_ref, thread_ref};
 
+fn compute_message_idempotency_key(
+    channel_id: &str,
+    content: &str,
+    parent_event_id: Option<&str>,
+    signer_pubkey: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(channel_id.as_bytes());
+    hasher.update(b"|");
+    hasher.update(content.trim().as_bytes());
+    hasher.update(b"|");
+    hasher.update(parent_event_id.unwrap_or("").as_bytes());
+    hasher.update(b"|");
+    hasher.update(signer_pubkey.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn send_channel_message(
@@ -447,6 +465,27 @@ pub async fn send_channel_message(
         expected_signer_pubkey.as_deref(),
         &signing_keys.public_key().to_hex(),
     )?;
+
+    // Deduplication check: compute deterministic key for (channel, content, thread, signer)
+    let idempotency_key = compute_message_idempotency_key(
+        &channel_id,
+        &content,
+        parent_event_id.as_deref(),
+        &signing_keys.public_key().to_hex(),
+    );
+
+    if let Some(cached_event_id) = state
+        .try_reserve_message_dedup(&idempotency_key, std::time::Duration::from_secs(300))?
+    {
+        let depth = if parent_event_id.is_some() { 1 } else { 0 };
+        return Ok(SendChannelMessageResponse {
+            event_id: cached_event_id,
+            root_event_id: root_event_id.or(parent_event_id.clone()),
+            parent_event_id,
+            depth,
+            created_at: chrono::Utc::now().timestamp(),
+        });
+    }
     let kind_num = kind.unwrap_or(buzz_core_pkg::kind::KIND_STREAM_MESSAGE);
     if sent_from_thread_tag.is_some() && kind_num != buzz_core_pkg::kind::KIND_STREAM_MESSAGE {
         return Err("sent-from-thread provenance requires a stream message".into());
@@ -523,8 +562,18 @@ pub async fn send_channel_message(
     // Submit through the base resolved (and scope-checked) above and the
     // identity snapshotted (and signer-checked) above — a re-resolve or key
     // re-read here would reopen the mid-command switch window.
-    let (result, created_at) =
-        submit_event_at_created_at(builder, &state, &relay_base, &signing_keys).await?;
+    let submit_res =
+        submit_event_at_created_at(builder, &state, &relay_base, &signing_keys).await;
+    let (result, created_at) = match submit_res {
+        Ok(res) => {
+            state.confirm_message_dedup(&idempotency_key, &res.0.event_id);
+            res
+        }
+        Err(e) => {
+            state.fail_message_dedup(&idempotency_key);
+            return Err(e);
+        }
+    };
 
     let depth = match (&parent_event_id, &resolved_root) {
         (None, _) => 0,
@@ -740,6 +789,26 @@ pub async fn send_managed_agent_channel_message(
     }
     let submission_auth_tag =
         managed_agent_submission_auth_tag(&record, &state, &keys.public_key())?;
+
+    // In-memory deduplication check for agent message submission
+    let agent_dedup_key = compute_message_idempotency_key(
+        &channel_id,
+        trimmed,
+        parent_event_id.as_deref(),
+        &requested_pubkey,
+    );
+
+    if let Some(cached_event_id) = state
+        .try_reserve_message_dedup(&agent_dedup_key, std::time::Duration::from_secs(300))?
+    {
+        return Ok(SendChannelMessageResponse {
+            event_id: cached_event_id,
+            parent_event_id: parent_event_id.clone(),
+            root_event_id: None,
+            depth: if parent_event_id.is_some() { 1 } else { 0 },
+            created_at: chrono::Utc::now().timestamp(),
+        });
+    }
     let thread_ref = match parent_event_id.as_deref() {
         Some(parent_id) => Some(
             // Same active-relay resolution as before — this path has no
@@ -799,9 +868,20 @@ pub async fn send_managed_agent_channel_message(
     )?;
     // Same contract as `send_channel_message`: `created_at` is the signed
     // event's, not a post-publication clock read.
-    let (result, created_at) =
+    let submit_res =
         submit_event_with_keys_created_at(builder, &state, &keys, submission_auth_tag.as_deref())
-            .await?;
+            .await;
+
+    let (result, created_at) = match submit_res {
+        Ok(res) => {
+            state.confirm_message_dedup(&agent_dedup_key, &res.0.event_id);
+            res
+        }
+        Err(e) => {
+            state.fail_message_dedup(&agent_dedup_key);
+            return Err(e);
+        }
+    };
 
     Ok(SendChannelMessageResponse {
         event_id: result.event_id,

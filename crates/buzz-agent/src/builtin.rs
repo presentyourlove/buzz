@@ -1,14 +1,25 @@
 //! Built-in tools that run in-process, bypassing MCP.
 //!
-//! Currently: `load_skill` — reads a skill's full SKILL.md body from disk
-//! and returns it so the agent can load skill content on demand rather than
-//! having every skill inlined into the system prompt at session start.
+//! Currently:
+//! - `load_skill` — reads a skill's full SKILL.md body from disk
+//!   and returns it so the agent can load skill content on demand.
+//! - `sign_and_send_event` — signs and publishes a Nostr event using the
+//!   agent's keys (Mode B daemon only).
+//! - `send_direct_message` — sends a Direct Message (kind:4 / NIP-44) to a target pubkey
+//!   (Mode B daemon only).
+//! - `create_reminder` — creates a scheduled reminder event (kind:30300) (Mode B daemon only).
 
 use serde_json::{json, Value};
 
+use crate::agent::RunCtx;
 use crate::hints::{strip_frontmatter, SkillEntry, MAX_SKILL_BODY_BYTES};
 use crate::mcp::truncate_at_boundary;
-use crate::types::{ToolDef, ToolResult, ToolResultContent};
+use crate::types::{AgentError, ToolDef, ToolResult, ToolResultContent};
+use nostr::{EventBuilder, Keys, Kind, Tag};
+use reqwest;
+use chrono;
+use rand::RngCore;
+use hex;
 
 pub const LOAD_SKILL_TOOL: &str = "load_skill";
 
@@ -235,6 +246,382 @@ fn error_result(msg: &str) -> ToolResult {
         content: vec![ToolResultContent::Text(msg.to_owned())],
         is_error: true,
     }
+}
+
+/// Tool definition for `sign_and_send_event` — signs and publishes a Nostr event
+/// using the agent's keys. Only available in Mode B daemon mode.
+pub const SIGN_AND_SEND_EVENT_TOOL: &str = "sign_and_send_event";
+
+/// Return the `ToolDef` for `sign_and_send_event`.
+pub fn sign_and_send_event_def() -> ToolDef {
+    ToolDef {
+        name: SIGN_AND_SEND_EVENT_TOOL.to_owned(),
+        description: "Sign and publish a Nostr event using the agent's keys. \
+            Only available when running in Mode B daemon mode with agent keys configured."
+            .to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "integer",
+                    "description": "Nostr event kind (e.g., 30300 for reminders, 14 for DMs)"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Event content (will be NIP-44 encrypted if needed)"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                    },
+                    "description": "Event tags as array of string arrays, e.g., [[\"d\", \"...\"], [\"p\", \"...\"]]"
+                }
+            },
+            "required": ["kind", "content", "tags"]
+        }),
+    }
+}
+
+/// Execute `sign_and_send_event`.
+pub async fn call_sign_and_send_event(
+    arguments: &Value,
+    ctx: &RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    let keys = ctx.agent_keys.as_ref()
+        .ok_or_else(|| AgentError::InvalidParams("agent keys not available in this context".into()))?;
+
+    let kind: u16 = arguments["kind"].as_u64()
+        .ok_or_else(|| AgentError::InvalidParams("missing or invalid kind".into()))?
+        .try_into()
+        .map_err(|_| AgentError::InvalidParams("kind out of range".into()))?;
+
+    let content = arguments["content"].as_str()
+        .ok_or_else(|| AgentError::InvalidParams("missing content".into()))?;
+
+    let tags: Vec<Vec<String>> = serde_json::from_value(arguments["tags"].clone())
+        .map_err(|e| AgentError::InvalidParams(format!("invalid tags: {e}")))?;
+
+    // Build and sign event
+    let mut builder = EventBuilder::new(Kind::Custom(kind), content);
+    for tag in tags {
+        builder = builder.tag(Tag::parse(tag)
+            .map_err(|e| AgentError::InvalidParams(format!("invalid tag: {e}")))?);
+    }
+
+    let event = builder.sign_with_keys(keys.as_ref())
+        .map_err(|e| AgentError::Other(format!("sign event failed: {e}")))?;
+
+    // If kind is 30300 or 4, encrypt content with NIP-44
+    let event = if kind == 30300 || kind == 4 {
+        // For kind:30300, encrypt to self (author)
+        // For kind:4, need target pubkey from p-tag
+        let target_pubkey = event.tags.iter()
+            .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p"))
+            .and_then(|t| t.as_slice().get(1))
+            .and_then(|v| v.as_str());
+
+        let encrypted_content = if kind == 4 {
+            if let Some(target_pk_str) = target_pubkey {
+                let target_pk = nostr::PublicKey::from_hex(target_pk_str)
+                    .map_err(|e| AgentError::InvalidParams(format!("invalid target pubkey in p-tag: {e}")))?;
+                nostr::nips::nip44::encrypt(
+                    keys.secret_key(),
+                    target_pk,
+                    &content,
+                    nostr::nips::nip44::Version::V2,
+                ).map_err(|e| AgentError::Other(format!("NIP-44 encrypt failed: {e}")))?
+            } else {
+                return Err(AgentError::InvalidParams("kind:4 requires p-tag with target pubkey".into()));
+            }
+        } else {
+            // kind:30300 - self-encrypt
+            nostr::nips::nip44::encrypt(
+                keys.secret_key(),
+                keys.public_key(),
+                &content,
+                nostr::nips::nip44::Version::V2,
+            ).map_err(|e| AgentError::Other(format!("NIP-44 encrypt failed: {e}")))?
+        };
+
+        EventBuilder::new(Kind::Custom(kind), encrypted_content)
+            .tags(event.tags)
+            .sign_with_keys(keys.as_ref())
+            .map_err(|e| AgentError::Other(format!("sign event failed: {e}")))?
+    } else {
+        event
+    };
+
+    // Publish via HTTP to relay
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&ctx.cfg.relay_url)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!([ "EVENT", event ]))
+        .send()
+        .await
+        .map_err(|e| AgentError::Other(format!("HTTP publish failed: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(AgentError::Other(format!(
+            "relay returned error: {}",
+            response.status()
+        )));
+    }
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            format!("Event published: {}", event.id)
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool definition for `send_direct_message` — sends an NIP-17 DM to a target pubkey.
+/// Only available in Mode B daemon mode.
+pub const SEND_DIRECT_MESSAGE_TOOL: &str = "send_direct_message";
+
+/// Return the `ToolDef` for `send_direct_message`.
+pub fn send_direct_message_def() -> ToolDef {
+    ToolDef {
+        name: SEND_DIRECT_MESSAGE_TOOL.to_owned(),
+        description: "Send a Direct Message (kind:4 / NIP-44 encrypted) to a target pubkey. \
+            Only available when running in Mode B daemon mode with agent keys configured."
+            .to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "target_pubkey": {
+                    "type": "string",
+                    "description": "Target user's pubkey (hex, 64 chars)"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Message content to send"
+                }
+            },
+            "required": ["target_pubkey", "content"]
+        }),
+    }
+}
+
+/// Execute `send_direct_message`.
+pub async fn call_send_direct_message(
+    arguments: &Value,
+    ctx: &RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    let keys = ctx.agent_keys.as_ref()
+        .ok_or_else(|| AgentError::InvalidParams("agent keys not available in this context".into()))?;
+
+    let target_pubkey = arguments["target_pubkey"].as_str()
+        .ok_or_else(|| AgentError::InvalidParams("missing target_pubkey".into()))?;
+
+    let content = arguments["content"].as_str()
+        .ok_or_else(|| AgentError::InvalidParams("missing content".into()))?;
+
+    let target_pk = nostr::PublicKey::from_hex(target_pubkey)
+        .map_err(|e| AgentError::InvalidParams(format!("invalid target pubkey: {e}")))?;
+
+    // Encrypt content with NIP-44 v2 for kind:4 DM
+    let encrypted_content = nostr::nips::nip44::encrypt(
+        keys.secret_key(),
+        target_pk,
+        content,
+        nostr::nips::nip44::Version::V2,
+    ).map_err(|e| AgentError::Other(format!("NIP-44 encrypt failed: {e}")))?;
+
+    // Build DM event (kind:4 / NIP-44 encrypted)
+    let dm_event = EventBuilder::new(Kind::Custom(4), encrypted_content)
+        .tag(Tag::parse(["p", target_pubkey]).unwrap())
+        .sign_with_keys(keys.as_ref())
+        .map_err(|e| AgentError::Other(format!("DM event sign failed: {e}")))?;
+
+    // Publish via HTTP to relay
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&ctx.cfg.relay_url)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!([ "EVENT", dm_event ]))
+        .send()
+        .await
+        .map_err(|e| AgentError::Other(format!("HTTP publish failed: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(AgentError::Other(format!(
+            "relay returned error: {}",
+            response.status()
+        )));
+    }
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            format!("DM sent to {}: {}", target_pubkey, dm_event.id)
+        )],
+        is_error: false,
+    })
+}
+
+/// Parse timestamp or duration string (e.g., "30m", "2h", "2026-12-31T23:59:59Z")
+fn parse_timestamp_or_duration(input: &str) -> Result<i64, AgentError> {
+    // Try parsing as ISO8601 datetime first
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(input) {
+        return Ok(dt.timestamp());
+    }
+    
+    // Try parsing as relative duration
+    let input = input.trim();
+    if input.is_empty() {
+        return Err(AgentError::InvalidParams("empty time specification".into()));
+    }
+    
+    // Find the number and unit
+    let (num_str, unit) = input.split_at(input.len() - 1);
+    let num: i64 = num_str.parse()
+        .map_err(|_| AgentError::InvalidParams(format!("invalid duration number: {}", num_str)))?;
+    
+    let seconds = match unit {
+        "s" => num,
+        "m" => num * 60,
+        "h" => num * 3600,
+        "d" => num * 86400,
+        _ => return Err(AgentError::InvalidParams(format!("invalid duration unit: {}", unit))),
+    };
+    
+    let now = chrono::Utc::now().timestamp();
+    Ok(now + seconds)
+}
+
+/// Validate that not_before is in the future (with small grace period)
+fn validate_not_before(not_before: i64) -> Result<(), AgentError> {
+    let now = chrono::Utc::now().timestamp();
+    if not_before <= now + 5 { // 5 second grace period
+        return Err(AgentError::InvalidParams("reminder time must be in the future".into()));
+    }
+    Ok(())
+}
+
+/// Generate a 128-bit entropy d-tag for NIP-ER reminders
+fn generate_d_tag() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
+/// Tool definition for `create_reminder` — creates a scheduled reminder event (kind:30300).
+/// Only available in Mode B daemon mode.
+pub const CREATE_REMINDER_TOOL: &str = "create_reminder";
+
+/// Return the `ToolDef` for `create_reminder`.
+pub fn create_reminder_def() -> ToolDef {
+    ToolDef {
+        name: CREATE_REMINDER_TOOL.to_owned(),
+        description: "Delegate to the background scheduler to create a timed reminder event. When due, the Agent will send a private message (DM) to the target user."
+            .to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "Reminder content"},
+                "at": {"type": "string", "description": "When to remind: relative time (e.g. '30m', '2h') or ISO8601"},
+                "target_user_pubkey": {"type": "string", "description": "Recipient user pubkey (hex)"},
+                "channel_id": {"type": "string", "description": "Associated channel UUID (optional, for context)"},
+                "event_id": {"type": "string", "description": "Associated message event ID (optional)"},
+                "preview": {"type": "string", "description": "Associated message preview text (optional)"}
+            },
+            "required": ["content", "at", "target_user_pubkey"]
+        }),
+    }
+}
+
+/// Execute `create_reminder`.
+pub async fn call_create_reminder(
+    arguments: &Value,
+    ctx: &RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    let keys = ctx.agent_keys.as_ref()
+        .ok_or_else(|| AgentError::InvalidParams("agent keys not available".into()))?;
+
+    // Parse arguments
+    let content = arguments["content"].as_str()
+        .ok_or_else(|| AgentError::InvalidParams("missing content".into()))?;
+    let at = arguments["at"].as_str()
+        .ok_or_else(|| AgentError::InvalidParams("missing at".into()))?;
+    let target_user_pubkey = arguments["target_user_pubkey"].as_str()
+        .ok_or_else(|| AgentError::InvalidParams("missing target_user_pubkey".into()))?;
+    let channel_id = arguments["channel_id"].as_str();
+    let event_id = arguments["event_id"].as_str();
+    let preview = arguments["preview"].as_str();
+
+    // Parse timestamp
+    let not_before = parse_timestamp_or_duration(at)?;
+    validate_not_before(not_before)?;
+
+    // Validate pubkey
+    let target_pubkey = nostr::PublicKey::from_hex(target_user_pubkey)
+        .map_err(|_| AgentError::InvalidParams("invalid target_user_pubkey".into()))?;
+
+    // Generate d-tag (128-bit entropy)
+    let d_tag = generate_d_tag();
+
+    // Build reminder content JSON (NIP-ER spec)
+    let mut target = serde_json::json!({});
+    if let Some(ch) = channel_id { target["channelId"] = serde_json::json!(ch); }
+    if let Some(eid) = event_id { target["eventId"] = serde_json::json!(eid); }
+    if let Some(p) = preview { target["preview"] = serde_json::json!(p); }
+    target["authorPubkey"] = serde_json::json!(target_user_pubkey);
+
+    let reminder_content = serde_json::json!({
+        "target": target,
+        "status": "pending",
+        "note": content,
+        // Mode B specific: record target user pubkey for DM sending
+        "dm_recipient_pubkey": target_user_pubkey,
+    });
+
+    // NIP-44 self-encrypt (Agent decrypts itself)
+    let ciphertext = nostr::nips::nip44::encrypt(
+        keys.secret_key(),
+        keys.public_key(),
+        &reminder_content.to_string(),
+        nostr::nips::nip44::Version::V2,
+    ).map_err(|e| AgentError::Other(format!("NIP-44 encrypt failed: {e}")))?;
+
+    // Build event
+    let mut builder = EventBuilder::new(Kind::Custom(30300), ciphertext)
+        .tag(Tag::parse(["d", &d_tag])?)
+        .tag(Tag::parse(["not_before", &not_before.to_string()])?)
+        .tag(Tag::parse(["alt", "Encrypted reminder"]) ?);
+
+    let event = builder.sign_with_keys(keys.as_ref())
+        .map_err(|e| AgentError::Other(format!("sign event failed: {e}")))?;
+
+    // Publish via HTTP to relay
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&ctx.cfg.relay_url)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!([ "EVENT", event ]))
+        .send()
+        .await
+        .map_err(|e| AgentError::Other(format!("HTTP publish failed: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(AgentError::Other(format!(
+            "relay returned error: {}",
+            response.status()
+        )));
+    }
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(format!(
+            "Reminder created: d-tag={}, triggers at {}", d_tag, not_before
+        ))],
+        is_error: false,
+    })
 }
 
 #[cfg(test)]

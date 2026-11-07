@@ -1,5 +1,8 @@
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use std::sync::Arc;
+use dashmap::DashMap;
+use blake3;
 
 /// Byte-equivalent charged to the handoff/context-pressure gate for a single
 /// image tool result. The gate maps bytes to tokens at 1 byte/token (see
@@ -117,6 +120,153 @@ impl HistoryItem {
                 r.provider_id.len() + r.content.iter().map(content_size).sum::<usize>()
             }
         }
+    }
+}
+
+/// HistoryItem 尺寸快取
+/// 
+/// 鍵：HistoryItem 內容的 blake3 雜湊 (32 bytes)
+/// 值：(estimated_bytes, context_pressure_bytes)
+/// TTL：配置化，預設 5 分鐘
+#[derive(Debug, Clone)]
+pub struct HistoryItemCache {
+    inner: Arc<DashMap<[u8; 32], (usize, usize, std::time::Instant)>>,
+    ttl: std::time::Duration,
+    max_entries: usize,
+}
+
+impl HistoryItemCache {
+    pub fn new(ttl_secs: u64, max_entries: usize) -> Self {
+        Self {
+            inner: Arc::new(DashMap::new()),
+            ttl: std::time::Duration::from_secs(ttl_secs),
+            max_entries,
+        }
+    }
+
+    /// 計算內容雜湊 (blake3)
+    fn hash_item(item: &HistoryItem) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        match item {
+            HistoryItem::User(s) => hasher.update(s.as_bytes()),
+            HistoryItem::Assistant { text, tool_calls, reasoning_details } => {
+                hasher.update(text.as_bytes());
+                for tc in tool_calls {
+                    hasher.update(tc.provider_id.as_bytes());
+                    hasher.update(tc.name.as_bytes());
+                    if let Ok(bytes) = serde_json::to_vec(&tc.arguments) {
+                        hasher.update(&bytes);
+                    }
+                    // provider_extra: Map<String, Value> — 使用確定性序列化（鍵排序）
+                    hasher.update(&deterministic_json_bytes(&tc.provider_extra));
+                }
+                // reasoning_details: Option<Value> — 使用確定性序列化
+                if let Some(rd) = reasoning_details {
+                    hasher.update(&deterministic_json_bytes(rd));
+                }
+            }
+            HistoryItem::ToolResult(r) => {
+                hasher.update(r.provider_id.as_bytes());
+                for c in &r.content {
+                    match c {
+                        ToolResultContent::Text(t) => hasher.update(t.as_bytes()),
+                        ToolResultContent::Image { data, mime_type } => {
+                            hasher.update(data.as_bytes());
+                            hasher.update(mime_type.as_bytes());
+                        }
+                    }
+                }
+                hasher.update(&[r.is_error as u8]);
+            }
+        }
+        *hasher.finalize().as_bytes()
+    }
+
+    /// 確定性 JSON 序列化：對 Object 的鍵進行排序，確保相同邏輯內容產生相同雜湊
+    fn deterministic_json_bytes<V: serde::Serialize>(value: &V) -> Vec<u8> {
+        // 使用 serde_json 的 to_string 配合 sort_keys 選項，或手動處理
+        // 這裡用簡單可靠的方法：先序列化為 Value，再遞歸排序鍵
+        let v = match serde_json::to_value(value) {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        };
+        deterministic_value_bytes(&v)
+    }
+
+    /// 遞歸處理 Value，對所有 Object 的鍵排序後序列化
+    fn deterministic_value_bytes(value: &Value) -> Vec<u8> {
+        match value {
+            Value::Object(map) => {
+                let mut sorted: Vec<_> = map.iter().collect();
+                sorted.sort_by_key(|(k, _)| *k);
+                let mut bytes = Vec::new();
+                bytes.push(b'{');
+                for (i, (k, v)) in sorted.iter().enumerate() {
+                    if i > 0 {
+                        bytes.push(b',');
+                    }
+                    // 鍵序列化
+                    bytes.extend(serde_json::to_vec(k).unwrap_or_default());
+                    bytes.push(b':');
+                    // 值遞歸處理
+                    bytes.extend(deterministic_value_bytes(v));
+                }
+                bytes.push(b'}');
+                bytes
+            }
+            Value::Array(arr) => {
+                let mut bytes = Vec::new();
+                bytes.push(b'[');
+                for (i, v) in arr.iter().enumerate() {
+                    if i > 0 {
+                        bytes.push(b',');
+                    }
+                    bytes.extend(deterministic_value_bytes(v));
+                }
+                bytes.push(b']');
+                bytes
+            }
+            _ => serde_json::to_vec(value).unwrap_or_default(),
+        }
+    }
+
+    /// 獲取或計算尺寸
+    pub fn get_or_compute(&self, item: &HistoryItem) -> (usize, usize) {
+        let key = Self::hash_item(item);
+        let now = std::time::Instant::now();
+
+        // 快取命中且未過期
+        if let Some(entry) = self.inner.get(&key) {
+            let (est, pressure, cached_at) = *entry;
+            if now.duration_since(cached_at) < self.ttl {
+                return (est, pressure);
+            }
+        }
+
+        // 計算並存入
+        let est = item.estimated_bytes();
+        let pressure = item.context_pressure_bytes();
+        
+        // LRU 淘汰：超過上限時移除最舊 20%
+        if self.inner.len() >= self.max_entries {
+            let to_remove = (self.max_entries / 5).max(1);
+            let mut entries: Vec<_> = self.inner.iter()
+                .map(|e| (*e.key(), *e.value()))
+                .collect();
+            entries.sort_by_key(|(_, (_, _, t))| *t);
+            for (k, _) in entries.into_iter().take(to_remove) {
+                self.inner.remove(&k);
+            }
+        }
+
+        self.inner.insert(key, (est, pressure, now));
+        (est, pressure)
+    }
+
+    /// 清理過期條目 (可定期調用)
+    pub fn cleanup_expired(&self) {
+        let now = std::time::Instant::now();
+        self.inner.retain(|_, (_, _, cached_at)| now.duration_since(*cached_at) < self.ttl);
     }
 }
 

@@ -1,4 +1,7 @@
 use crate::error::CliError;
+use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
+use humantime::parse_duration;
+use std::str::FromStr;
 
 /// Maximum content size in bytes (64 KiB).
 pub const MAX_CONTENT_BYTES: usize = 65_536;
@@ -195,6 +198,93 @@ pub fn read_file_or_stdin(value: &str) -> Result<String, CliError> {
         std::fs::read_to_string(value)
             .map_err(|e| CliError::Usage(format!("failed to read {value:?}: {e}")))
     }
+}
+
+/// Parse a timestamp or relative duration string into a Unix timestamp (seconds).
+///
+/// Accepts:
+/// - ISO 8601 datetime (e.g., "2026-12-31T23:59:59Z", "2026-12-31T23:59:59+08:00")
+/// - Unix timestamp (seconds since epoch, e.g., "1704067199")
+/// - Relative duration (e.g., "30m", "2h", "1d", "1w")
+///
+/// Returns `CliError::Usage` on failure.
+pub fn parse_timestamp_or_duration(s: &str) -> Result<i64, CliError> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(CliError::Usage("timestamp or duration cannot be empty".into()));
+    }
+
+    // Try Unix timestamp first (pure digits)
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        let ts = s.parse::<i64>().map_err(|_| {
+            CliError::Usage(format!("invalid unix timestamp: {s}"))
+        })?;
+        if ts <= 0 {
+            return Err(CliError::Usage("unix timestamp must be positive".into()));
+        }
+        return Ok(ts);
+    }
+
+    // Try ISO 8601 / RFC 3339
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Ok(dt.timestamp());
+    }
+
+    // Try relative duration (e.g., "30m", "2h", "1d")
+    if let Ok(dur) = parse_duration(s) {
+        let now = Utc::now();
+        let future = now + ChronoDuration::from_std(dur).map_err(|_| {
+            CliError::Usage("duration too large".into())
+        })?;
+        return Ok(future.timestamp());
+    }
+
+    Err(CliError::Usage(format!(
+        "invalid timestamp or duration: {s}. Use ISO 8601, unix seconds, or relative like '30m', '2h', '1d'"
+    )))
+}
+
+/// Validate that `not_before` is in the future and within the relay's maximum horizon.
+///
+/// The relay enforces `SPROUT_MAX_NOT_BEFORE_DELTA` (default 1 year = 31536000 seconds).
+/// This function reads the same environment variable for client-side validation.
+///
+/// Returns the validated `not_before` timestamp on success.
+pub fn validate_not_before(not_before: i64) -> Result<i64, CliError> {
+    let now = Utc::now().timestamp();
+    if not_before <= now {
+        return Err(CliError::Usage(
+            "not_before must be in the future (greater than current time)".into(),
+        ));
+    }
+
+    // Read relay's max horizon from env (default 1 year)
+    let max_delta = std::env::var("SPROUT_MAX_NOT_BEFORE_DELTA")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(31_536_000); // 365 days
+
+    if not_before - now > max_delta {
+        return Err(CliError::Usage(format!(
+            "not_before exceeds maximum allowed horizon of {} seconds ({} days)",
+            max_delta,
+            max_delta / 86400
+        )));
+    }
+
+    Ok(not_before)
+}
+
+/// Generate a cryptographically secure 128-bit entropy d-tag (32 hex chars).
+///
+/// Uses `rand::rngs::OsRng` for CSPRNG. This satisfies NIP-ER line 58 requirement
+/// for 128 bits of entropy. UUIDv4 only provides 122 bits and is NOT acceptable.
+pub fn generate_d_tag() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 #[cfg(test)]
@@ -504,3 +594,85 @@ mod tests {
         assert!(matches!(err, CliError::Usage(_)));
     }
 }
+
+    // --- parse_timestamp_or_duration ---
+    
+    #[test]
+    fn parse_timestamp_unix_seconds() {
+        let ts = "1704067199";
+        let result = super::parse_timestamp_or_duration(ts).unwrap();
+        assert_eq!(result, 1704067199);
+    }
+
+    #[test]
+    fn parse_timestamp_iso8601() {
+        let ts = "2026-12-31T23:59:59Z";
+        let result = super::parse_timestamp_or_duration(ts).unwrap();
+        assert_eq!(result, 1798761599); // 2026-12-31T23:59:59Z in unix
+    }
+
+    #[test]
+    fn parse_timestamp_relative() {
+        let before = Utc::now().timestamp();
+        let result = super::parse_timestamp_or_duration("1h").unwrap();
+        let after = Utc::now().timestamp() + 3600;
+        // Allow small time drift
+        assert!(result >= before + 3590 && result <= after + 10);
+    }
+
+    #[test]
+    fn parse_timestamp_invalid() {
+        let err = super::parse_timestamp_or_duration("invalid").unwrap_err();
+        assert!(matches!(err, CliError::Usage(_)));
+    }
+
+    #[test]
+    fn parse_timestamp_empty() {
+        let err = super::parse_timestamp_or_duration("").unwrap_err();
+        assert!(matches!(err, CliError::Usage(_)));
+    }
+
+    // --- validate_not_before ---
+    
+    #[test]
+    fn validate_not_before_in_past() {
+        let past = Utc::now().timestamp() - 100;
+        let err = super::validate_not_before(past).unwrap_err();
+        assert!(matches!(err, CliError::Usage(_)));
+    }
+
+    #[test]
+    fn validate_not_before_now() {
+        let now = Utc::now().timestamp();
+        let err = super::validate_not_before(now).unwrap_err();
+        assert!(matches!(err, CliError::Usage(_)));
+    }
+
+    #[test]
+    fn validate_not_before_future() {
+        let future = Utc::now().timestamp() + 3600;
+        let result = super::validate_not_before(future).unwrap();
+        assert_eq!(result, future);
+    }
+
+    // --- generate_d_tag ---
+    
+    #[test]
+    fn generate_d_tag_correct_length() {
+        let tag = super::generate_d_tag();
+        assert_eq!(tag.len(), 32);
+    }
+
+    #[test]
+    fn generate_d_tag_hex_chars() {
+        let tag = super::generate_d_tag();
+        assert!(tag.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn generate_d_tag_unique() {
+        let tag1 = super::generate_d_tag();
+        let tag2 = super::generate_d_tag();
+        // Extremely unlikely to collide with 128-bit entropy
+        assert_ne!(tag1, tag2);
+    }

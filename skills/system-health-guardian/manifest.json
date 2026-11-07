@@ -1,0 +1,45 @@
+{
+  "name": "system-health-guardian",
+  "version": "1.0.0",
+  "description": "系統健康守護技能 - 監控核心指標、異常捕捉、熔斷機制與自動恢復",
+  "author": "Pollen",
+  "license": "MIT",
+  "entry": "main.js",
+  "capabilities": [
+    "health-monitoring",
+    "anomaly-detection",
+    "circuit-breaker",
+    "auto-recovery",
+    "alerting"
+  ],
+  "dependencies": {
+    "yaml": "^2.3.0"
+  },
+  "config_schema": {
+    "check_interval_ms": {
+      "type": "integer",
+      "description": "健康檢查間隔 (毫秒)",
+      "default": 30000
+    },
+    "thresholds": {
+      "type": "object",
+      "description": "各項指標閾值",
+      "properties": {
+        "memory_percent": {
+          "type": "number",
+          "default": 85
+        },
+        "error_rate_per_min": {
+          "type": "number",
+          "default": 10
+        }
+      }
+    }
+  },
+  "hooks": {
+    "on_health_check": "run_checks",
+    "on_anomaly_detected": "trigger_alert",
+    "on_circuit_open": "execute_fallback",
+    "on_recovery": "notify_recovery"
+  }
+}

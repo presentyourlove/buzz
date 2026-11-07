@@ -592,6 +592,38 @@ impl BuzzClient {
         &self.relay_url
     }
 
+    /// Encrypt plaintext to self using NIP-44 v2 (self-encryption).
+    ///
+    /// Uses the client's own keys for both encryption and decryption.
+    /// Returns the base64-encoded ciphertext suitable for event content.
+    pub fn nip44_encrypt_to_self(&self, plaintext: &str) -> Result<String, CliError> {
+        use nostr::nips::nip44::{encrypt, Version};
+        let ciphertext = encrypt(
+            self.keys.secret_key(),
+            self.keys.public_key(),
+            plaintext,
+            Version::V2,
+        )
+        .map_err(|e| CliError::Other(format!("NIP-44 encrypt failed: {e}")))?;
+        Ok(ciphertext)
+    }
+
+    /// Decrypt NIP-44 v2 ciphertext from self (self-decryption).
+    ///
+    /// Uses the client's own keys for decryption.
+    /// Returns the decrypted plaintext.
+    pub fn nip44_decrypt_from_self(&self, ciphertext: &str) -> Result<String, CliError> {
+        use nostr::nips::nip44::{decrypt, Version};
+        let plaintext = decrypt(
+            self.keys.secret_key(),
+            self.keys.public_key(),
+            ciphertext,
+            Version::V2,
+        )
+        .map_err(|e| CliError::Other(format!("NIP-44 decrypt failed: {e}")))?;
+        Ok(plaintext)
+    }
+
     /// Return the owner pubkey carried by the NIP-OA auth tag, if any.
     ///
     /// The auth tag is `["auth", owner_pubkey, conditions, sig]`; the

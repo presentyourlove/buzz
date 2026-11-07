@@ -44,6 +44,9 @@ path = "tests/bin/auth_worker.rs"
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "io-util", "sync", "process", "time", "net"] }
+tokio-tungstenite = { workspace = true }
+redis = { workspace = true }
+deadpool-redis = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
@@ -63,11 +66,19 @@ url = { workspace = true }
 urlencoding = "2"
 webbrowser = "1"
 dirs = "6"
+uuid = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+
 # Cross-process advisory file lock (flock on Unix, LockFileEx on Windows) for
 # the auth coordinator's single-flight. Kept off std's `File::try_lock` so the
 # crate stays buildable on the repo's declared 1.88 MSRV (those std APIs are
 # 1.89+).
 fs2 = "0.4"
+
+# Mode B: HistoryItem memory cache (DashMap + blake3)
+dashmap = "6"
+blake3 = "1"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["signal", "process"] }
