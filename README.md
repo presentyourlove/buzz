@@ -435,6 +435,332 @@ just reset          # ⚠️  Wipe data + recreate
   - `cargo test --package buzz-agent --test unslop_guard_tests` (5/5 100% 通過)
   - 共計 13 項專屬單元測試與 check 0 錯誤全數通過。
 
+### 8. Phase 3：Agent 重複卡片治理與 VS Code Rust 格式化器優化
+- **VS Code Rust 格式化器定向設定 (`.vscode/settings.json`)**：
+  - 指定 `[rust]` 語言預設格式化器為 `rust-lang.rust-analyzer` 並啟用 `formatOnSave`，徹底根除全域 Prettier 因不支援 Rust 語法而頻繁跳出的彈窗警告。
+- **Buzz Desktop 介面 Agent 重複卡片治理 (`managed-agents.json`)**：
+  - **根本原因根除**：歷史遷移造成 6 個活躍實例其 `persona_id` 誤設為自身 Nostr 公鑰，脫離了真實的角色定義（Persona Definitions），導致原生定義失去關聯顯示為多餘的「Start」卡片，進而造成 12 張重複卡片。
+  - **資料結構一對一綁定**：將 6 個活躍實例（Fizz, Honey, Honey2, Pollen, Sentry, Wax）精準回連對齊原生角色定義 ID（`builtin:fizz`, `builtin:honey`, `builtin:bumble`, `2d513a5a...`, `bd5f5748...`, `ceeb08ca...`），並清除 6 筆以公鑰命名的幽靈定義。
+  - **團隊與外部腳本完美相容**：維持 `teams.json`（Welcome Team）的成員 ID 完整性，守護程序與金鑰輪替腳本皆穩定運行。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `c:\私人\tools\cleanup_agents.py` (資料庫清理工具腳本)
+    - `c:\私人\tools\test_agent_pairing.py` (Agent 定義與實例配對驗證單元測試)
+  - **修改 (Modified)**：
+    - `.vscode/settings.json` (指定 Rust 格式化器為 rust-analyzer)
+    - `%APPDATA%\xyz.block.buzz.app\agents\managed-agents.json` (清理幽靈記錄，還原精準 1-to-1 關聯，備份至 `managed-agents.json.bak_dedup_20261107`)
+- **測試驗證 (Testing & QA)**：
+  - `python c:\私人\tools\test_agent_pairing.py`：6 個定義、6 個實例 100% 一對一精準配對驗證通過；Welcome Team 團隊成員關聯 100% 驗證通過。
+
+### 9. Phase 4：每日進化代碼庫真實狀態驗證器 (CodebaseVerifier) 與全域待辦清單校準
+- **代碼庫真實狀態驗證器 (`codebase_verifier.py`)**：
+  - 終結單純從對話關鍵字「隔空猜測代碼」所產生的資訊滯後與假待辦。
+  - **AST 關鍵符號與實體檔案掃描**：以 AST/正則驗證 `ThreeTierGateRule`、`TicketSandbox`、`UnslopGuardRule`、`system-health-guardian`、`obsidian-digest-sync` 及 6 組 Agent 資料庫配對狀態。
+  - **Cargo 健康度檢測**：秒級檢測 `cargo check -p buzz-agent --bin buzz-agent --offline`，確保編譯無阻礙。
+  - **反幻覺校準過濾器**：自動比對對話待辦，將已在代碼庫實裝驗收之項目移出技術債/待辦清單，杜絕誤報。
+- **全域待辦清單 (`to do list.md`) 深度查漏補缺**：
+  - 針對日報阻礙 2.4 補入「Windows Cargo / NASM 依賴解耦與相容性加固 (`P1`)」。
+  - 補入「每日進化日誌代碼庫真實狀態自驗證閉環 (`P1`)」。
+  - 針對日報建議 4.1 補入「蜂群關鍵異常即時監控與自動告警推送 (`P2`)」。
+  - 修復序號重複問題，看板優先級分流對齊。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `C:\Users\user\.buzz\PLANS\daily_evolution\codebase_verifier.py`
+    - `c:\私人\tools\codebase_verifier.py`
+  - **修改 (Modified)**：
+    - `C:\Users\user\.buzz\PLANS\daily_evolution\daily_evolution.py` (整合 CodebaseVerifier 與反幻覺校準)
+    - `C:\Users\user\.buzz\PLANS\daily_evolution\test_daily_evolution.py` (新增 Verifier 單元測試)
+    - `c:\私人\ai agent\to do list.md` (補全缺漏項目與理順序號)
+    - `README.md`
+- **測試驗證 (Testing & QA)**：
+  - `python C:\Users\user\.buzz\PLANS\daily_evolution\test_daily_evolution.py`：5 項單元測試 100% 通過 (4.9s)。
+  - `python C:\Users\user\.buzz\PLANS\daily_evolution\codebase_verifier.py`：7/7 項實體代碼模組 100% PASS，Cargo check 0 錯誤通過。
+
+### 10. Phase 5：全庫架構指南 (block-buzz.md) 全面升級、特工重複卡片治理原理與待辦看板對齊
+- **全景架構指南 (`block-buzz.md`) 全面升級**：
+  - **總覽架構圖升級 (Mermaid)**：繪入最新常駐進程總管 (`buzz_services_launcher.pyw`)、代碼庫真實驗證器 (`CodebaseVerifier`) 與 NIP-42 Relay 挑戰認證通道。
+  - **增設「第十四章：Phase 2 開源架構吸收落地」**：詳述 `ThreeTierGateRule` 三檔安全門禁、`TicketSandbox` 工單沙箱隔離與 `UnslopGuardRule` 代碼清潔門禁。
+  - **增設「第十五章：特工目錄治理、重複卡片消除與手機端 v0.27.1 相容」**：
+    - 深度解析 `unifiedAgentGroups.ts` 分組演算法，徹底說明 `managed-agents.json` 幽靈公鑰引發 12 張重複卡片之事故成因與 1-to-1 對齊修復機制。
+    - 記錄手機端 v0.27.1 `runtime: buzz/buzz-agent` 標籤正規化與 NIP-42 WebSocket 密鑰挑戰發布通道。
+    - 記錄 IDE User 全域設定 (`settings.json`) 與根工作區 (`.vscode/settings.json`) 配置 `[rust]` 之 `rust-analyzer` 格式化器，根除 Prettier 彈窗問題。
+  - **增設「第十六章：CodebaseVerifier 代碼庫真實驗證器與反幻覺自閉環」**：
+    - 記錄靜態 AST 符號驗證、檔案存在性審查、Cargo 2.45 秒離線健康度檢測與反幻覺自閉環機制。
+  - **更新常駐守護矩陣**：補充 Windows 環境下 5~10 分鐘小黑窗徹底消除之 `CREATE_NO_WINDOW (0x08000000)` 與 `windowsHide: true` 規範。
+- **全域待辦清單 (`to do list.md`) 精準對齊**：
+  - 更新總體進度看板：進行中任務 1 項（推進 P0 11/6 Floorplan 共享認知地圖），P0 1 項，P1 5 項，P2 6 項，已完成重要里程碑 14 項。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `C:\私人\.vscode\settings.json` (根工作區 Rust 格式化器定向配置)
+    - `C:\私人\tools\update_block_buzz.py`
+    - `C:\私人\tools\update_todo_list.py`
+    - `C:\私人\tools\update_readme.py`
+  - **修改 (Modified)**：
+    - `c:\私人\ai agent\block-buzz.md` (增設第 14~16 章與架構圖升級，備份至 `block-buzz.md.bak_20261108`)
+    - `c:\私人\ai agent\to do list.md` (校準任務統計與進度看板，備份至 `to do list.md.bak_20261108_sync`)
+    - `%APPDATA%\Antigravity IDE\User\settings.json` (加入 `[rust]` 使用 rust-analyzer)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - 驗證 `block-buzz.md` 與 `to do list.md` 內部路徑連結有效性與 Mermaid 圖表語法正確性。
+  - 驗證 `test_agent_pairing.py` 6 定義、6 實例 100% PASS。
+  - 驗證 `codebase_verifier.py` 7 模組靜態檢驗與 Cargo 離線健康度 100% PASS。
+
+### 11. Phase 6：Floorplan 式特工共享認知地圖與架構感知引擎 (P0) 落地
+- **Floorplan 架構感知與協同引擎 (`c:\私人\tools\buzz_floorplan\`)**：
+  - **AST 代碼庫解析器 (`parser.py`)**：靜態解析全庫 34 個 Rust Crates、前端 Desktop Features 與 Tauri 後端，抽取 66 個模組節點與 68 條依賴關係。
+  - **全域共享認知地圖 (`cognitive_map.py`)**：維護全域拓撲圖 (`cognitive_map.json`)、特工模組鎖定 (`acquire_lock` / `release_lock`)、衝擊半徑計算 (`get_blast_radius`)，並自動導出 Markdown 拓撲至 Obsidian (`wiki/01-Cold-Memory/Floorplan-Architecture-Map.md`)。
+  - **需求藍圖預演器 (`blueprint_planner.py`)**：實現 Task 4.3 需求推導藍圖預演 (PRD to Blueprint)，在特工動手寫代碼前生成「虛擬架構卡片」，預先分析連帶衝擊與鎖定衝突。
+  - **架構反思審查門禁 (`drift_checker.py`)**：實現 Task 4.2 Sentry 特工架構反思審查 (Review what the plan leaves open)，比對 Git 變更與規劃藍圖，阻斷未經申報的意外改動與架構漂移。
+  - **統一 CLI 介面 (`cli.py`)**：支援 `scan`, `blast-radius`, `lock`, `unlock`, `plan`, `drift`, `export` 指令。
+  - **守護管理器無縫整合 (`buzz_services_launcher.pyw`)**：開機時無黑窗靜默自動掃描並同步最新認知圖譜至 Obsidian。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `c:\私人\tools\buzz_floorplan\__init__.py`
+    - `c:\私人\tools\buzz_floorplan\parser.py`
+    - `c:\私人\tools\buzz_floorplan\cognitive_map.py`
+    - `c:\私人\tools\buzz_floorplan\blueprint_planner.py`
+    - `c:\私人\tools\buzz_floorplan\drift_checker.py`
+    - `c:\私人\tools\buzz_floorplan\cli.py`
+    - `c:\私人\tools\buzz_floorplan\test_floorplan_engine.py`
+    - `c:\私人\ai agent\buzz-obsidian\wiki\01-Cold-Memory\Floorplan-Architecture-Map.md`
+  - **修改 (Modified)**：
+    - `c:\私人\tools\codebase_verifier.py` (加入 FloorplanEngine 驗證規則)
+    - `C:\Users\user\.buzz\PLANS\daily_evolution\codebase_verifier.py` (同步驗證規則)
+    - `c:\私人\tools\buzz_services_launcher.pyw` (整合開機靜默掃描)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 17 章：Floorplan 架構感知引擎)
+    - `c:\私人\ai agent\to do list.md` (Task 4 P0 清零完成，里程碑累計至 15 項)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - `python c:\私人	oolsuzz_floorplan	est_floorplan_engine.py`：5 項專屬單元測試 100% PASS (3.1s)。
+  - `python c:\私人	ools\codebase_verifier.py`：8 項核心模組 AST 與 Cargo 離線健康度 100% PASS。
+
+### 12. Phase 7：三大前沿開源架構吸收落地 (BuzzHarness, OmniParser, UI-TARS)
+- **多模型統一運行時 (`crates/buzz-agent/src/harness/`)**：
+  - 定義 `pub trait BuzzHarness: Send + Sync` 模型無關抽象 Trait。
+  - 實作 `HarnessRegistry` 動態調度註冊表與 `NativeHarness`，支援任意模型（OpenRouter, Gemini Proxy, NVIDIA NIM, 本地 GGUF）熱插拔切換。
+- **純視覺感知定位引擎 (`crates/buzz-agent/src/perception/`)**：
+  - 借鑒微軟 `microsoft/OmniParser-v2.0`（YOLOv9-E 邊界偵測 + Florence-2 標註），實裝 `VisionPerceptionTool` 與 `HybridFusion` 雙軌感知策略。
+  - 建立本地 Python 兩階段解析代理 (`C:\私人\tools\vision_perception\omni_proxy.py`)，提供無 Accessibility API 遠端桌面場景下的純視覺點擊能力。
+- **不可變事件流日誌與時光機回溯 (`desktop/src/features/agents/`)**：
+  - 借鑒字節跳動 `bytedance/UI-TARS-desktop`，定義 `AgentEventStream`（`Thought`, `ToolCall`, `Observation`, `Screenshot`, `Checkpoint`）不可變事件流。
+  - 建立 `AgentEventStreamRail.tsx` 時光機面板組件，支援事件時序展示與一鍵斷點回溯 (`rollbackToCheckpoint`)。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/src/harness/mod.rs`
+    - `crates/buzz-agent/src/harness/native.rs`
+    - `crates/buzz-agent/src/perception/mod.rs`
+    - `crates/buzz-agent/tests/harness_tests.rs`
+    - `C:\私人\tools\vision_perception\omni_proxy.py`
+    - `C:\私人\tools\vision_perception\test_omni_proxy.py`
+    - `desktop/src/features/agents/lib/agentEventStream.ts`
+    - `desktop/src/features/agents/ui/AgentEventStreamRail.tsx`
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/lib.rs` (導出 harness 與 perception 模組)
+    - `c:\私人\tools\codebase_verifier.py` (新增 3 大開源模組驗證項)
+    - `C:\Users\user\.buzz\PLANS\daily_evolution\codebase_verifier.py` (同步驗證規則)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 18 章：三大前沿開源架構吸收落地)
+    - `c:\私人\ai agent\to do list.md` (Task 5.1/5.2/5.5 勾選完工，里程碑累計至 16 項)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - `cargo check -p buzz-agent --bin buzz-agent --offline`：0 錯誤通過 (12s)。
+  - `python C:\私人\tools\vision_perception\test_omni_proxy.py`：2 項視覺代理測試 100% PASS。
+  - `python c:\私人\tools\codebase_verifier.py`：11 項核心模組 AST 符號與 Cargo 健康度 100% PASS。
+
+### 13. Phase 8：蜂群核心加固與自動化體系升級 (Autoloop 引擎, NASM 解耦, 異常監控, 雙腦同步, GitHub CI)
+- **Agent-Autoloop 決定性自洽循環與拍板卡片 (`crates/buzz-agent/src/autoloop/`)**：
+  - 借鑒 `KKKKhazix/agent-autoloop` 實作純函式狀態機迴圈 (`AutoloopContext`, `LoopState`) 與最大迭代防護熔斷。
+  - 實施不可逆高危操作拍板卡片 (`DecisionCard`)，分離常規自治與高危裁決。
+- **Windows Cargo / NASM 依賴解耦 (`buzz/.cargo/config.toml`)**：
+  - 配置 `AWS_LC_SYS_NO_ASM = "1"`，徹底排除 Windows 環境對 NASM 的強制依賴，實現平滑編譯與檢測。
+- **每日系統進化建議書全自動產出與雙腦同步 (`PLANS/daily_evolution/`)**：
+  - 產出提案自動同步至 Obsidian 第二大腦 `wiki/02-Conversation-Digest/` 與 `WAX_BROADCAST_LOG.md`。
+  - 整合 `CodebaseVerifier` 16 大核心特性真實狀態校準，杜絕日報幻覺。
+- **蜂群關鍵異常即時監控與自動告警推送 (`C:\私人\tools\health_alert_daemon.py`)**：
+  - 監控四大關鍵服務存活、記憶體 (>80%) 與 API 429 速率限制，支援直達 Honey2 私訊頻道推送與 Markdown 告警卡片。
+- **Buzz GitHub CI 自動化工作流整合 (`.github/workflows/_ci-rust.yml`)**：
+  - 於 Windows CI 流程中植入 `buzz-agent autoloop` 確定性單元測試驗證管線。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/src/autoloop/mod.rs`
+    - `crates/buzz-agent/src/autoloop/decision_card.rs`
+    - `C:\私人\tools\health_alert_daemon.py`
+    - `C:\私人\tools\test_health_alert.py`
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/lib.rs` (導出 `pub mod autoloop;`)
+    - `buzz/.cargo/config.toml` (新增 `AWS_LC_SYS_NO_ASM = "1"`)
+    - `C:\私人\tools\cargo_isolated_build.py` (支援 `AWS_LC_SYS_NO_ASM = "1"`)
+    - `C:\Users\user\.buzz\PLANS\daily_evolution\daily_evolution.py` (同步 Obsidian 與 Wax 日誌)
+    - `buzz/.github/workflows/_ci-rust.yml` (新增 Windows autoloop 測試步驟)
+    - `c:\私人\tools\codebase_verifier.py` (擴充至 16 大模組 AST 驗證)
+    - `C:\Users\user\.buzz\PLANS\daily_evolution\codebase_verifier.py` (同步驗證規則)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 19 章)
+    - `c:\私人\ai agent\to do list.md` (標記 7, 8, 11, 12, 14 完工，里程碑累計至 21 項)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - `cargo check -p buzz-agent --lib --offline`：0 錯誤通過。
+  - `cargo test -p buzz-agent --lib autoloop --offline`：3 項 Rust 單元測試 100% PASS。
+  - `python C:\私人\tools\test_health_alert.py`：4 項健康告警單元測試 100% PASS。
+  - `python C:\Users\user\.buzz\PLANS\daily_evolution\test_daily_evolution.py`：5 項每日進化單元測試 100% PASS。
+  - `python C:\私人\tools\codebase_verifier.py`：16 項模組 AST 靜態檢查 100% PASS。
+
+### 14. Phase 9：OpenAdapt 可信寫入讀回驗證門禁與 NIP-ER 全域定時提醒機制 (Task 5.1 & Task 6)
+- **OpenAdapt 可信寫入與讀回驗證門禁 (`crates/buzz-agent/src/verified_write/`)**：
+  - 建立 `VerifiedWrite` Trait：路徑安全跳脫防護、強制 40KB 檔案大小上限防爆、Rust/JSON 語法即時預檢。
+  - 磁碟重讀驗證 (Read-Back Verification)：寫入臨時檔案後原子替換，並重讀磁碟計算 SHA-256 雙向比對，阻斷幻覺壞保存。
+  - 實作 Explore-Compile-Run-Repair (ECRR) 四階段狀態機與 `max_repairs` 熔斷機制。
+- **Buzz 全域定時提醒 NIP-ER (kind:30300) 閉環排程機制 (`daemon_dispatch.rs`)**：
+  - NIP-ER kind:30300 事件協議與 NIP-44 v2 自加密資料結構。
+  - `EventDispatcher` Mode B 閉環喚醒：支援 DM 私訊 (kind:4) 與頻道廣播 (kind:42) 提醒。
+  - 建構本地定時提醒管理與預演工具 `C:\私人\tools\buzz_reminders.py`。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/src/verified_write/mod.rs`
+    - `crates/buzz-agent/src/verified_write/ecrr.rs`
+    - `C:\私人\tools\buzz_reminders.py`
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/lib.rs` (導出 `pub mod verified_write;`)
+    - `crates/buzz-agent/src/daemon_dispatch.rs` (增強 Mode B 頻道廣播與完成標記)
+    - `C:\私人\tools\codebase_verifier.py` (新增 Task 5.1 & Task 6 符號驗證)
+    - `c:\私人\ai agent\to do list.md` (細化 Task 13 RAG 架構規劃，Task 5.1 & Task 6 完工勾選)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 20 章)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - `cargo test -p buzz-agent --lib verified_write --offline`：8 項 Rust 單元測試 100% PASS。
+  - `cargo check -p buzz-agent --lib --offline`：0 錯誤通過。
+  - `python C:\私人\tools\buzz_reminders.py --create-dry`：預演格式 100% 符合 NIP-ER 規範。
+  - `python C:\私人\tools\codebase_verifier.py`：18 項核心特性 100% 全部 Verified 通過。
+
+### 15. Phase 10：Agent-S 雙層認知架構落地（敘事長期記憶 CAR、動態意圖路由、技能合成門禁）(Task 5)
+- **敘事長期記憶引擎 (`crates/buzz-agent/src/agent_s/narrative_memory.rs`)**：
+  - 實作「情境-行動-結果」(CAR) 三元組、多維標籤加權檢索與置信度自修剪。
+- **特工動態意圖路由分發器 (`crates/buzz-agent/src/agent_s/router.rs`)**：
+  - 建立 5 大 Specialist 專家矩陣，意圖自動識別匹配與動態推薦決策。
+- **技能動態合成管線與安全門禁 (`crates/buzz-agent/src/agent_s/skill_synthesizer.rs`)**：
+  - 自動生成標準化 `SKILL.md`，內建 Front-matter 格式檢驗、高危指令防注入與 32KB Context 防爆。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/src/agent_s/mod.rs`
+    - `crates/buzz-agent/src/agent_s/narrative_memory.rs`
+    - `crates/buzz-agent/src/agent_s/router.rs`
+    - `crates/buzz-agent/src/agent_s/skill_synthesizer.rs`
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/lib.rs` (導出 `pub mod agent_s;`)
+    - `C:\私人\tools\codebase_verifier.py` (新增第 19 項驗證)
+    - `c:\私人\ai agent\to do list.md` (Task 5 完工勾選，P1 待辦剩餘 1 項)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 21 章)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - `cargo test -p buzz-agent --lib agent_s --offline`：6 項專屬 Rust 單元測試 100% PASS。
+  - `python C:\私人\tools\codebase_verifier.py`：19 項核心特性 100% 全部 Verified 通過。
+
+### 16. Phase 11：AnyModelBot 方案 B 四級權限確認與審批橋接落地 (Task 9)
+- **四級漸進式風險分級模型 (`crates/buzz-agent/src/anymodelbot/risk_tier.rs`)**：
+  - 建立 Level 1 (Low) 至 Level 4 (Critical) 評定矩陣，規範自動放行、首次詢問、每次確認與絕對攔截策略。
+- **`amb-delete-gate` 非沙箱遞歸刪除保護門禁 (`crates/buzz-agent/src/anymodelbot/delete_gate.rs`)**：
+  - 即使特工具備最高權限，非沙箱環境（如根目錄、代碼庫主幹）的遞歸刪除一律強制攔截報錯。
+- **`amb-computer-use-gate` 桌面鍵鼠操作安全門禁 (`crates/buzz-agent/src/anymodelbot/computer_use_gate.rs`)**：
+  - 前置檢驗 GUI 按鍵與滑鼠點擊座標，阻斷系統中斷快捷鍵（`Ctrl+Alt+Del`, `Alt+F4` 等）。
+- **`amb-bridge` 審批橋接狀態機與持久授權 (`crates/buzz-agent/src/anymodelbot/approval_bridge.rs`)**：
+  - 解耦 Agent Runtime 與確認通道，實作 10 分鐘 TTL 審批狀態機與持久授權記憶庫，支援手動撤銷。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/src/anymodelbot/mod.rs`
+    - `crates/buzz-agent/src/anymodelbot/risk_tier.rs`
+    - `crates/buzz-agent/src/anymodelbot/delete_gate.rs`
+    - `crates/buzz-agent/src/anymodelbot/computer_use_gate.rs`
+    - `crates/buzz-agent/src/anymodelbot/approval_bridge.rs`
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/lib.rs` (導出 `pub mod anymodelbot;`)
+    - `C:\私人\tools\codebase_verifier.py` (新增第 20 項驗證)
+    - `c:\私人\ai agent\to do list.md` (Task 9 完工勾選，P1 正式清零！)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 22 章)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - `cargo test -p buzz-agent --lib anymodelbot --offline`：7 項專屬 Rust 單元測試 100% PASS。
+  - `python C:\私人\tools\codebase_verifier.py`：20 項核心特性 100% 全部 Verified 通過。
+
+### 17. Phase 12：企業級 Agentic RAG 智能知識庫混合檢索與引用引擎落地 (Task 13)
+- **本機輕量混合檢索與 RRF 融合排序 (`crates/buzz-agent/src/agentic_rag/hybrid_search.rs`)**：
+  - 結合 FTS 與語義向量檢索，採用 RRF (k=60) 融合演算法，兼顧精確符號與語意同義詞。
+- **本地輕量交叉打分 Reranker (`crates/buzz-agent/src/agentic_rag/reranker.rs`)**：
+  - 實作交叉評分重排，並將上下文預算嚴格壓制在 2KB~4KB 內，防範 Context 爆炸與 API 429 速率限制。
+- **Query 增強層 (`crates/buzz-agent/src/agentic_rag/query_enhancer.rs`)**：
+  - 實施 HyDE 假想文本生成範式與 3 維度 Multi-Query 展開。
+- **來源引用標記與滑動窗口切片 (`citation_annotator.rs` / `chunker.rs`)**：
+  - 自動生成正文行內腳註標記 (`[1]`, `[2]`) 與可點擊直達行號的 Obsidian 雙向鏈結。
+  - Markdown 標題層級切片與 15% 重疊滑動窗口控制。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/src/agentic_rag/mod.rs`
+    - `crates/buzz-agent/src/agentic_rag/hybrid_search.rs`
+    - `crates/buzz-agent/src/agentic_rag/reranker.rs`
+    - `crates/buzz-agent/src/agentic_rag/query_enhancer.rs`
+    - `crates/buzz-agent/src/agentic_rag/citation_annotator.rs`
+    - `crates/buzz-agent/src/agentic_rag/chunker.rs`
+    - `crates/buzz-agent/src/agentic_rag/semantic_cache.rs`
+    - `C:\私人\tools\rag_benchmark_eval.py`
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/lib.rs` (導出 `pub mod agentic_rag;`)
+    - `C:\私人\tools\codebase_verifier.py` (新增第 21 項驗證)
+    - `c:\私人\ai agent\to do list.md` (Task 13 完工勾選，P2 待辦降為 2 項)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 23 章)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - `cargo test -p buzz-agent --lib agentic_rag --offline`：6 項專屬 Rust 單元測試 100% PASS。
+  - `python C:\私人\tools\rag_benchmark_eval.py`：綜合評測 97.9% 滿意度 PASS (忠實度 100%)。
+  - `python C:\私人\tools\codebase_verifier.py`：21 項核心特性 100% 全部 Verified 通過。
+
+### 18. Phase 13：Facebook Graph API 社交帳號整合與 MCP Tool 自動化管理 (Task 15)
+- **Facebook 6 大 MCP 工具協議與 Standby 優雅降級 (`C:\私人\tools\facebook-mcp-module.mjs`)**：
+  - 封裝 `fb_publish_post`, `fb_publish_photo`, `fb_get_recent_posts`, `fb_get_comments`, `fb_reply_comment`, `fb_get_page_insights` 6 大標準工具。
+  - 當環境變數未配置 Token 時自動進入 Standby 待機降級，避免未授權報錯或崩潰。
+- **永久 Page Access Token 兩階段授權管線 (`C:\私人\tools\facebook_auth_helper.py`)**：
+  - 實作短期 User Token -> 60 天 Long-lived Token -> 永不過期 Page Access Token 交換機制，支援 `.env` 自動注入與 `--mock-test` 驗證。
+- **本機 Webhook 即時事件接收服務 (`C:\私人\tools\fb_webhook_server.mjs`)**：
+  - 監聽 8989 端口，處理 Meta Webhook `hub.verify_token` 握手與 POST 事件轉發，支援 `--test-mode` 自檢。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `C:\私人\tools\test_facebook_mcp.mjs`
+    - `C:\私人\tools\facebook_auth_helper.py`
+    - `C:\私人\tools\fb_webhook_server.mjs`
+  - **修改 (Modified)**：
+    - `C:\私人\tools\codebase_verifier.py` (新增第 22 項驗證)
+    - `c:\私人\ai agent\to do list.md` (Task 15 完工勾選，P2 待辦降為 1 項，完成里程碑增至 27 項)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 24 章)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - `node C:\私人\tools\test_facebook_mcp.mjs`：6 大 MCP 工具協議與 Standby 降級測試 100% PASS。
+  - `python C:\私人\tools\facebook_auth_helper.py --mock-test`：兩階段授權管線模擬測試 100% PASS。
+  - `node C:\私人\tools\fb_webhook_server.mjs --test-mode`：Webhook 服務自檢測試 100% PASS。
+  - `python C:\私人\tools\codebase_verifier.py`：22 項核心特性 100% 全部 Verified 通過。
+
+### 19. Phase 14：TStack 技巧堆疊調度器與輕量級執行鏈落地 (Task 16)
+- **模組化技巧標準抽象介面 (`crates/buzz-agent/src/tstack/callable.rs`)**：
+  - 定義 `SkillCallable` Trait、`SkillInput`、`SkillOutput` 與 `SkillContext`，提供閉包包裝器 `ClosureSkill`。
+- **線性與 DAG 拓撲堆疊調度器 (`crates/buzz-agent/src/tstack/dispatcher.rs`)**：
+  - 支援線性流水線與基於 Kahn's 演算法之 DAG 拓撲依賴排序，內建循環依賴阻斷與條件跳轉。
+- **自動 Fallback 容錯備援狀態機**：
+  - 支援任意步驟配置 `fallback_skill_id`，主要技能異常自動無縫導流至備援技能。
+- **動態技巧熱插拔註冊表 (`crates/buzz-agent/src/tstack/registry.rs`)**：
+  - 提供 `SkillRegistry`，支援運行時動態註冊、熱插拔移除與標籤檢索。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/src/tstack/mod.rs`
+    - `crates/buzz-agent/src/tstack/callable.rs`
+    - `crates/buzz-agent/src/tstack/dispatcher.rs`
+    - `crates/buzz-agent/src/tstack/registry.rs`
+    - `C:\私人\tools\test_tstack_pipeline.py`
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/lib.rs` (導出 `pub mod tstack;`)
+    - `C:\私人\tools\codebase_verifier.py` (新增第 23 項驗證)
+    - `c:\私人\ai agent\to do list.md` (Task 16 完工勾選，P2 待辦全數清零，完成里程碑增至 28 項)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 25 章)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - `cargo test -p buzz-agent --lib tstack --offline`：6 項專屬 Rust 單元測試 100% PASS。
+  - `python C:\私人\tools\test_tstack_pipeline.py`：端到端技巧執行鏈與 Fallback 驗證 100% PASS。
+  - `python C:\私人\tools\codebase_verifier.py`：23 項核心特性 100% 全部 Verified 通過。
+
 ---
 
 <p align="center">

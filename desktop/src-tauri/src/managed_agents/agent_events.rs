@@ -119,8 +119,18 @@ pub fn build_agent_event(record: &ManagedAgentRecord) -> Result<EventBuilder, St
     .map_err(|error| format!("Managed agent definition is unsafe to publish: {error}"))?;
     let content = serde_json::to_string(&agent_event_content(record))
         .map_err(|e| format!("failed to serialize managed-agent content: {e}"))?;
-    let tags =
-        vec![Tag::parse(["d", record.pubkey.as_str()]).map_err(|e| format!("invalid d-tag: {e}"))?];
+    let raw_runtime = record.runtime.as_deref().unwrap_or("buzz-agent").trim();
+    let runtime_str = if raw_runtime.contains('/') {
+        raw_runtime.to_string()
+    } else if raw_runtime.is_empty() {
+        "buzz/buzz-agent".to_string()
+    } else {
+        format!("buzz/{raw_runtime}")
+    };
+    let tags = vec![
+        Tag::parse(["d", record.pubkey.as_str()]).map_err(|e| format!("invalid d-tag: {e}"))?,
+        Tag::parse(["runtime", &runtime_str]).map_err(|e| format!("invalid runtime-tag: {e}"))?,
+    ];
     Ok(EventBuilder::new(Kind::Custom(KIND_MANAGED_AGENT as u16), content).tags(tags))
 }
 
@@ -279,6 +289,24 @@ mod tests {
             })
             .unwrap();
         assert_eq!(d, "agentpubkeyhex");
+    }
+
+    #[test]
+    fn runtime_tag_is_formatted_for_mobile_directory() {
+        let builder = build_agent_event(&sample_agent()).unwrap();
+        let keys = nostr::Keys::generate();
+        let event = builder.sign_with_keys(&keys).unwrap();
+        let runtime = event
+            .tags
+            .iter()
+            .find_map(|t| {
+                let v: Vec<&str> = t.as_slice().iter().map(|s| s.as_str()).collect();
+                (v.first() == Some(&"runtime"))
+                    .then(|| v.get(1).map(|s| s.to_string()))
+                    .flatten()
+            })
+            .unwrap();
+        assert_eq!(runtime, "buzz/goose");
     }
 
     /// The security-critical assertion: the published projection must NEVER

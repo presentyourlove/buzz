@@ -13,3 +13,5 @@ debug = "line-tables-only"
 # cmake_minimum_required < 3.5; audiopus_sys's vendored opus declares 3.1.
 # Same workaround CI uses. A value already set in the environment wins.
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+# Windows MinGW / NASM decoupling: disable ASM requirement for aws-lc-sys
+AWS_LC_SYS_NO_ASM = "1"

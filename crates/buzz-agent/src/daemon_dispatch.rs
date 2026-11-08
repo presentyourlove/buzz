@@ -82,10 +82,45 @@ impl EventDispatcher {
             .or_else(|| target.and_then(|t| t.get("authorPubkey")).and_then(|v| v.as_str()))
             .ok_or_else(|| AgentError::Other("missing target recipient pubkey".into()))?;
 
+        // Extract optional channelId for channel broadcast
+        let channel_id = target
+            .and_then(|t| t.get("channelId"))
+            .and_then(|v| v.as_str());
+
         // Send DM reminder (kind:4 NIP-44 encrypted)
         self.send_dm_reminder(target_pubkey, note, d_tag).await?;
 
-        info!("DM reminder sent for d-tag: {} to user: {}", d_tag, target_pubkey);
+        // If target has channelId, also dispatch channel notification (kind:42)
+        if let Some(ch_id) = channel_id {
+            if let Err(e) = self.send_channel_reminder(ch_id, note, d_tag).await {
+                warn!("Failed to send channel reminder to {}: {}", ch_id, e);
+            }
+        }
+
+        info!("Reminder dispatched successfully for d-tag: {}", d_tag);
+        Ok(())
+    }
+
+    /// Send a channel notification (kind:42) reminder.
+    async fn send_channel_reminder(
+        &self,
+        channel_id: &str,
+        note: &str,
+        d_tag: &str,
+    ) -> Result<(), AgentError> {
+        let keys = self.config.agent_keys.as_ref()
+            .ok_or_else(|| AgentError::InvalidParams("agent keys not available".into()))?;
+
+        let channel_content = format!("⏰ 【定時提醒喚醒】\n{}\n\n(識別標籤: {})", note, d_tag);
+
+        let channel_event = EventBuilder::new(Kind::Custom(42), channel_content)
+            .tag(Tag::parse(["e", channel_id, &self.config.relay_ws_url, "root"]).unwrap())
+            .tag(Tag::parse(["d", d_tag]).unwrap())
+            .sign_with_keys(keys.as_ref())
+            .map_err(|e| AgentError::Other(format!("Channel event sign failed: {e}")))?;
+
+        self.ws_client.publish(&channel_event).await?;
+        info!("Channel reminder sent for d-tag: {} to channel: {}", d_tag, channel_id);
         Ok(())
     }
 
