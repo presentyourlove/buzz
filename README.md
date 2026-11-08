@@ -761,6 +761,23 @@ just reset          # ⚠️  Wipe data + recreate
   - `python C:\私人\tools\test_tstack_pipeline.py`：端到端技巧執行鏈與 Fallback 驗證 100% PASS。
   - `python C:\私人\tools\codebase_verifier.py`：23 項核心特性 100% 全部 Verified 通過。
 
+### 20. Phase 15：Buzz 官方主幹最新更新無損合流 (Upstream Lossless Upgrade)
+- **官方 5 大行動端更新純淨合流 (`origin/main`)**：
+  - 合流 `d839d3731` (向左滑動回覆防手勢打架)、`a7a534d47` (長按連結彈出選單)、`e86d0e23a` (Solo 聊天詳情面板)、`1a0dae77b` (iOS 圖片輪播微光動畫修正)、`f3b127e3a` (首頁滾動時鈴鐺點擊修復)。
+- **零衝突與本地核心百分之百保留**：
+  - 建立 `backup/pre-upgrade-20261108` 備份分支，先期固化 Phase 2~14 核心提交 (`6ef820a33`)。
+  - 官方更新僅涉及 `mobile/` 目錄，與本地特工核心完全正交，合流過程零衝突 (`c303aef71`)。
+- **檔案變更清單 (File Inventory)**：
+  - **合流 (Merged from origin/main)**：`mobile/` 共 16 個檔案 (1,096 行新增，402 行刪除)
+  - **修改 (Modified)**：
+    - `c:\私人\ai agent\to do list.md` (新增官方更新無損合流里程碑，累計 29 項)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 26 章)
+    - `c:\私人\ai agent\buzz\README.md`
+- **測試驗證 (Testing & QA)**：
+  - `python C:\私人\tools\codebase_verifier.py`：全域 23 項核心特性 100% 全部 Verified 通過。
+  - `python C:\私人\tools\test_tstack_pipeline.py`：TStack 執行鏈與 Fallback 驗證 100% PASS。
+  - `python C:\私人\tools\facebook_auth_helper.py --mock-test`：兩階段授權管線驗證 100% PASS。
+
 ---
 
 <p align="center">
