@@ -858,6 +858,22 @@ just reset          # ⚠️  Wipe data + recreate
   - 全套單元測試（迴歸測試、安全門禁與派工測試共 37 項）：100% 通過。
   - `CodebaseVerifier` 23 項全域核心特性與 `test_daily_evolution.py`：100% Verified PASS。
 
+### [2026-11-09] Phase 20: Fizz 秘書單向煞車門禁與特工互 @ 乒乓球死循環阻斷
+- **核心架構升級**：
+  - 診斷特工在 Mentions 訂閱模式下因隊友禮貌標籤誘發之確定性互 @ 乒乓球死循環（Ping-Pong Loop）。
+  - 於 `managed-agents.json` 注入【單向煞車門禁核心鐵律】，嚴格限定僅主理人本人發話追問時允許 CLI 轉介。
+  - 隊友標籤全面強制靜默（Silence on Teammate Mentions），遇特工隊友標記一律以 EndTurn 保持沉默，徹底終結討論串洗版。
+- **檔案變更清單 (File Inventory)**：
+  - **修改 (Modified)**：
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json` (Fizz Persona 與 Instance 注入單向煞車門禁)
+    - `c:\私人\ai agent\to do list.md` (里程碑增至 35 項)
+    - `c:\私人\ai agent\block-buzz.md` (增設第三十一章)
+    - `c:\私人\ai agent\buzz\README.md` (增設 Phase 20 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - `managed-agents.json` JSON 語法校驗：12 筆紀錄 100% 結構無損。
+  - 全套單元測試 37 項（含子特工、安全門禁、迴歸測試）：100% 全部 Verified PASS。
+  - `CodebaseVerifier` 23 項核心特性：100% 全部通過。
+
 ---
 
 <p align="center">
