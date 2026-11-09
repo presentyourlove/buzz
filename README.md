@@ -801,6 +801,23 @@ just reset          # ⚠️  Wipe data + recreate
   - `python C:\私人\tools\facebook_auth_helper.py --mock-test`：兩階段授權管線驗證 100% PASS。
   - `sentry_supervisor` 運行狀態與 Sentry Relay 頻道連線日誌：10 個 agent pool 正常就緒，頻道 `5ca019f6-1a27-592a-b015-4baf0eb33572` 訂閱成功，presence 在線待命。
 
+### 22. Phase 17：Agent 角色定義雙層架構還原與 Configuration Missing 徹底治理 (Persona Definition Restore)
+- **雙層卡片架構確診與孤兒實例治理**：
+  - 確診 Buzz 卡片庫之「Persona Definition (角色定義項, slug 識別)」與「Agent Instance (特工實例項, pubkey/nsec 識別)」分層架構。
+  - 確診 Fizz、Honey、Pollen 因屬 Buzz 內建原生角色 (`builtin:`) 自帶預設定義不受影響；而 Honey2、Sentry、Wax 屬自定義角色，因先前精簡清理遺失定義項，遭後端 `persona_drift_state` 判定為 `personaOrphaned: true`，進而打上 `⚠️ CONFIGURATION MISSING` 警告並移入 `Unknown agents (3)`。
+  - 重構 `managed-agents.json` 完整恢復 6 筆 Persona Definitions 與 6 筆 Instances 雙向精準鏈結（總計 12 筆紀錄），補齊全部環境變數與模型設定。
+- **檔案變更清單 (File Inventory)**：
+  - **修改 (Modified)**：
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json` (恢復 6 定義 + 6 實例雙層架構)
+    - `c:\私人\ai agent\to do list.md` (里程碑增至 32 項)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 28 章)
+    - `c:\私人\ai agent\buzz\README.md` (增設 Phase 17 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - `python C:\私人\tools\codebase_verifier.py`：全域 23 項核心特性 100% 全部 Verified 通過。
+  - `python C:\私人\tools\test_tstack_pipeline.py`：TStack 技巧執行鏈與 Fallback 驗證 100% PASS。
+  - `python C:\私人\tools\facebook_auth_helper.py --mock-test`：兩階段授權管線驗證 100% PASS。
+  - Sentry 守護進程日誌驗收：PID 24788 持續健康在線，正常處理多輪 LLM 推理對話。
+
 ---
 
 <p align="center">
