@@ -1,5 +1,6 @@
 [build]
 jobs = 2
+target-dir = "C:/Users/user/.cargo-targets/buzz"
 
 [profile.dev]
 
