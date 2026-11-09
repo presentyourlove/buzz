@@ -1,0 +1,24 @@
+{
+  "collected_at": "2026-11-09T03:54:22.002527+00:00",
+  "since": "2026-11-08T03:54:20.884649+00:00",
+  "sources_requested": [
+    "gha",
+    "nostr",
+    "obsidian",
+    "logs"
+  ],
+  "total_signals": 1,
+  "signals": [
+    {
+      "source": "logs",
+      "type": "log_entry",
+      "timestamp": "2026-11-09T03:50:59.798465+00:00",
+      "payload": {
+        "file": "test.log",
+        "path": "C:\\Users\\user\\.buzz\\LOGS\\test.log",
+        "size": 15
+      },
+      "raw_ref": "C:\\Users\\user\\.buzz\\LOGS\\test.log"
+    }
+  ]
+}

@@ -818,6 +818,27 @@ just reset          # ⚠️  Wipe data + recreate
   - `python C:\私人\tools\facebook_auth_helper.py --mock-test`：兩階段授權管線驗證 100% PASS。
   - Sentry 守護進程日誌驗收：PID 24788 持續健康在線，正常處理多輪 LLM 推理對話。
 
+### 23. Phase 18：全特工動態子特工派發機制與多工防撞實裝 (Dynamic Sub-agent Dispatcher)
+- **多工防撞與動態派發架構**：
+  - 徹底解決主理人在 general 頻道發送新指令引發的物理目錄競爭與 Git 鎖死問題（Workspace Race Condition）。
+  - 實作主特工派工頭 + 臨時子特工沙盒（Dynamic Ephemeral Sub-agents）架構，保持 Buzz 介面卡片清爽不臃腫。
+  - 為 6 大特工（Pollen、Honey、Honey2、Sentry、Fizz、Wax）全面賦予動態衍生子特工能力，雙層 12 筆紀錄對齊注入【動態子特工派發核心鐵律】。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `c:\私人\ai agent\buzz\scripts\tools\spawn_subagent.py` (子特工派發器主程式)
+    - `C:\Users\user\.buzz\tools\spawn_subagent.py` (部署鏡像)
+    - `c:\私人\ai agent\buzz\tests\test_spawn_subagent.py` (派發器單元測試套件)
+  - **修改 (Modified)**：
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json` (雙層 12 筆紀錄提示詞對齊)
+    - `c:\私人\ai agent\to do list.md` (里程碑增至 33 項)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 29 章)
+    - `c:\私人\ai agent\buzz\README.md` (增設 Phase 18 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - `python -m unittest tests/test_spawn_subagent.py`：4 項子特工沙盒單元測試 100% 通過。
+  - 全套回歸測試（含迴歸、安全鉤子、派工測試共 37 項）：100% 全部 Verified PASS。
+  - `CodebaseVerifier` 23 項全域核心特性：100% 全部通過。
+  - 進程監控：Buzz Desktop 與 6 大 buzz-acp 進程全部穩定在線，無 Configuration Missing 漂移。
+
 ---
 
 <p align="center">

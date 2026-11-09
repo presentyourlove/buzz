@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Daily Evolution Specification Document",
+  "type": "object",
+  "required": ["metadata", "architecture_decisions", "api_contracts", "data_models", "migration_strategies", "risk_register", "traceability"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["source_document", "generated_at", "generator_version", "spec_version"],
+      "properties": {
+        "source_document": { "type": "string" },
+        "generated_at": { "type": "string", "format": "date-time" },
+        "generator_version": { "type": "string" },
+        "spec_version": { "type": "string" }
+      }
+    },
+    "architecture_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "decision", "rationale", "source_lines", "status", "tags"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "decision": { "type": "string" },
+          "rationale": { "type": "string" },
+          "source_lines": { "type": "array", "items": { "type": "integer" } },
+          "status": { "type": "string", "enum": ["proposed", "accepted", "deprecated", "superseded"] },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "api_contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "method", "endpoint", "request_schema", "response_schema", "source_lines", "tags"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "method": { "type": "string" },
+          "endpoint": { "type": "string" },
+          "request_schema": { "type": "object" },
+          "response_schema": { "type": "object" },
+          "source_lines": { "type": "array", "items": { "type": "integer" } },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "data_models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "type", "fields", "source_lines", "tags"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["class", "interface", "type", "enum", "struct"] },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "type", "required", "description"],
+              "properties": {
+                "name": { "type": "string" },
+                "type": { "type": "string" },
+                "required": { "type": "boolean" },
+                "description": { "type": "string" }
+              }
+            }
+          },
+          "source_lines": { "type": "array", "items": { "type": "integer" } },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "migration_strategies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "description", "steps", "rollback_plan", "source_lines", "risk_level"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "steps": { "type": "array", "items": { "type": "string" } },
+          "rollback_plan": { "type": "string" },
+          "source_lines": { "type": "array", "items": { "type": "integer" } },
+          "risk_level": { "type": "string", "enum": ["low", "medium", "high", "critical"] }
+        }
+      }
+    },
+    "risk_register": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "category", "likelihood", "impact", "mitigation", "source_lines", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "category": { "type": "string", "enum": ["technical", "security", "operational", "schedule", "resource"] },
+          "likelihood": { "type": "string", "enum": ["rare", "unlikely", "possible", "likely", "almost_certain"] },
+          "impact": { "type": "string", "enum": ["negligible", "minor", "moderate", "major", "severe"] },
+          "mitigation": { "type": "string" },
+          "source_lines": { "type": "array", "items": { "type": "integer" } },
+          "status": { "type": "string", "enum": ["open", "mitigated", "accepted", "closed"] }
+        }
+      }
+    },
+    "traceability": {
+      "type": "object",
+      "required": ["source_file", "total_source_lines", "coverage_percentage", "mapping"],
+      "properties": {
+        "source_file": { "type": "string" },
+        "total_source_lines": { "type": "integer" },
+        "coverage_percentage": { "type": "number", "minimum": 0, "maximum": 100 },
+        "mapping": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["spec_element", "source_lines"],
+            "properties": {
+              "spec_element": { "type": "string" },
+              "source_lines": { "type": "array", "items": { "type": "integer" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
