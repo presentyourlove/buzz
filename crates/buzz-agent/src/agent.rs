@@ -95,10 +95,10 @@ const REPLY_GUARD_SERVER: &str = "buzz-agent";
 /// Explicitly licenses silence. The base prompt tells agents that publishing is
 /// optional and "silence is usually correct"; a reminder that argued otherwise
 /// would fight that instruction and make agents chattier.
-const REPLY_GUARD_NAG: &str = "You are about to end this turn without calling `buzz messages send`. \
-Your assistant text and reasoning are never shown to anyone — if you did work, found an answer, \
-or hit a blocker that someone is waiting on, it exists only if you publish it. \
-If you already posted, or if silence is genuinely correct for this turn, ignore this and end your turn.";
+const REPLY_GUARD_NAG: &str = "CRITICAL: You are about to end this turn without calling `buzz messages send`. \
+Your assistant text, analysis, and reasoning are NEVER shown to the user or published to the channel! \
+If you have answered the user's question, drafted an analysis, or completed a task, you MUST publish your response using `buzz messages send` right now! \
+Do NOT output plain text response; you MUST invoke the tool to send the message.";
 
 /// Whether `call` is a recognized attempt to publish a reply to Buzz.
 ///
@@ -128,6 +128,77 @@ fn is_send_message_shaped(name: &str, arguments: &serde_json::Value) -> bool {
             .is_some_and(|cmd| {
                 cmd.contains("messages send")
             })
+}
+
+/// Extract channel UUID and optional reply-to event hex from a user prompt.
+pub fn extract_reply_target_from_prompt(text: &str) -> Option<(String, Option<String>)> {
+    // 1. Extract reply-to (64 hex characters)
+    let reply_to = {
+        let mut found = None;
+        if let Some(pos) = text.find("--reply-to") {
+            let after = &text[pos + 10..];
+            let token = after.split_whitespace().next().unwrap_or("").trim_matches(|c| c == '`' || c == '"' || c == '\'' || c == ',');
+            if token.len() == 64 && token.chars().all(|c| c.is_ascii_hexdigit()) {
+                found = Some(token.to_string());
+            }
+        }
+        if found.is_none() {
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("event_id:") || trimmed.starts_with("Event ID:") || trimmed.starts_with("id:") {
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let candidate = parts[1].trim_matches(|c| c == '`' || c == '"' || c == '\'' || c == ',');
+                        if candidate.len() == 64 && candidate.chars().all(|c| c.is_ascii_hexdigit()) {
+                            found = Some(candidate.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        found
+    };
+
+    // 2. Extract channel_id (UUID 8-4-4-4-12)
+    let channel_id = {
+        let mut found = None;
+        if let Some(pos) = text.find("--channel") {
+            let after = &text[pos + 9..];
+            let token = after.split_whitespace().next().unwrap_or("").trim_matches(|c| c == '`' || c == '"' || c == '\'' || c == ')' || c == ',');
+            if is_valid_uuid(token) {
+                found = Some(token.to_string());
+            }
+        }
+        if found.is_none() {
+            for word in text.split(|c: char| c.is_whitespace() || c == '(' || c == ')' || c == '#' || c == '"' || c == '\'' || c == ',' || c == '<' || c == '>') {
+                let clean = word.trim();
+                if is_valid_uuid(clean) {
+                    found = Some(clean.to_string());
+                    break;
+                }
+            }
+        }
+        found
+    };
+
+    channel_id.map(|cid| (cid, reply_to))
+}
+
+fn is_valid_uuid(s: &str) -> bool {
+    if s.len() != 36 {
+        return false;
+    }
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 5 {
+        return false;
+    }
+    parts[0].len() == 8
+        && parts[1].len() == 4
+        && parts[2].len() == 4
+        && parts[3].len() == 4
+        && parts[4].len() == 12
+        && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 /// Whether a tool name and arguments have the shape of a Buzz publish command.
@@ -814,6 +885,9 @@ impl RunCtx<'_> {
                 // Only gate genuine end_turn — don't override max_tokens/refusal.
                 if stop == StopReason::EndTurn {
                     if stop_rejections >= self.cfg.stop_max_rejections {
+                        if self.cfg.require_reply && !buzz_reply_call_seen {
+                            self.try_auto_publish_fallback().await;
+                        }
                         return Ok(stop);
                     }
                     let mut objections = self
@@ -840,6 +914,9 @@ impl RunCtx<'_> {
                         stop_rejections = stop_rejections.saturating_add(1);
                         push_hook_outputs_as_tool_results(self.history, "_Stop", &objections);
                         continue;
+                    }
+                    if self.cfg.require_reply && !buzz_reply_call_seen {
+                        self.try_auto_publish_fallback().await;
                     }
                 }
                 return Ok(stop);
@@ -1257,6 +1334,99 @@ impl RunCtx<'_> {
                 emit_failed(self.wire, self.session_id, &calls[i], "cancelled").await;
             }
         }
+    }
+
+    fn last_assistant_text(&self) -> Option<String> {
+        for item in self.history.iter().rev() {
+            if let HistoryItem::Assistant { text, .. } = item {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    async fn try_auto_publish_fallback(&mut self) {
+        let text_to_publish = match self.last_assistant_text() {
+            Some(t) if t.len() >= 5 => t,
+            _ => return,
+        };
+
+        let user_prompt = self.history.iter().rev().find_map(|item| {
+            if let HistoryItem::User(text) = item {
+                Some(text.as_str())
+            } else {
+                None
+            }
+        });
+
+        let (channel_id, maybe_reply_to) = match user_prompt.and_then(extract_reply_target_from_prompt) {
+            Some(target) => target,
+            None => {
+                tracing::warn!(session_id = self.session_id, "auto_publish_fallback: could not extract channel_id from prompt");
+                return;
+            }
+        };
+
+        let shell_tool = match self.mcp.tools().into_iter().find(|t| t.name.ends_with("__shell")) {
+            Some(t) => t.name,
+            None => {
+                tracing::warn!(session_id = self.session_id, "auto_publish_fallback: no shell tool available for auto-publish");
+                return;
+            }
+        };
+
+        let temp_dir = std::env::temp_dir();
+        let temp_filename = format!("buzz_auto_pub_{}.txt", uuid::Uuid::new_v4());
+        let temp_path = temp_dir.join(&temp_filename);
+        if let Err(e) = std::fs::write(&temp_path, &text_to_publish) {
+            tracing::error!(session_id = self.session_id, "auto_publish_fallback: failed to write temp file: {e}");
+            return;
+        }
+
+        let temp_str = temp_path.to_string_lossy().replace('\\', "/");
+        let py_script = "import subprocess, sys, shutil, os; \
+p = sys.argv[1]; \
+c = open(p, 'r', encoding='utf-8').read(); \
+buzz_bin = shutil.which('buzz') or os.path.expandvars(r'%LOCALAPPDATA%\\Buzz\\buzz.exe'); \
+args = [buzz_bin, 'messages', 'send', '--channel', sys.argv[2], '--content', c]; \
+if len(sys.argv) > 3 and sys.argv[3]: args.extend(['--reply-to', sys.argv[3]]); \
+subprocess.run(args, check=True)";
+
+        let mut cmd = format!("python -c \"{}\" \"{}\" \"{}\"", py_script, temp_str, channel_id);
+        if let Some(ref reply_to) = maybe_reply_to {
+            cmd.push_str(&format!(" \"{}\"", reply_to));
+        }
+
+        tracing::info!(
+            session_id = self.session_id,
+            channel_id = %channel_id,
+            reply_to = ?maybe_reply_to,
+            "auto_publish_fallback: rescuing unpublished assistant response via auto-publish"
+        );
+
+        let call = ToolCall {
+            provider_id: format!("auto_pub_{}", uuid::Uuid::new_v4()),
+            name: shell_tool,
+            arguments: serde_json::json!({ "command": cmd }),
+            provider_extra: serde_json::Map::new(),
+        };
+
+        let timeout = self.cfg.tool_timeout;
+        let budget = ResultBudget {
+            total: MAX_TOOL_RESULT_BYTES,
+            text: self.cfg.max_tool_result_text_bytes,
+        };
+        let cancel = (*self.cancel).clone();
+        emit_in_progress(self.wire, self.session_id, &call).await;
+        let outcome = invoke_tool_inner(self.mcp, &call, timeout, budget, cancel).await;
+        let result = outcome_to_result(&call, outcome);
+        emit_completed(self.wire, self.session_id, &call, &result).await;
+        self.history.push(HistoryItem::ToolResult(result));
+
+        let _ = std::fs::remove_file(&temp_path);
     }
 }
 
@@ -2147,5 +2317,24 @@ mod tests {
         failures += 1;
         failures += 1;
         assert!(failures >= MAX_FAILURES);
+    }
+
+    #[test]
+    fn test_extract_reply_target_from_prompt() {
+        // Standard prompt with --reply-to and --channel
+        let prompt1 = "IMPORTANT: For ordinary replies in this turn, use `--reply-to e4fa7a3209951eefb6a914c5e31ea65a696971bcb1dbc43a3d4e9d6af680e239` on `buzz messages send` so the conversation stays threaded.\nChannel: general (#af946a63-dd43-4050-baea-65140d47fc42)";
+        let target1 = extract_reply_target_from_prompt(prompt1);
+        assert!(target1.is_some());
+        let (channel, reply_to) = target1.unwrap();
+        assert_eq!(channel, "af946a63-dd43-4050-baea-65140d47fc42");
+        assert_eq!(reply_to, Some("e4fa7a3209951eefb6a914c5e31ea65a696971bcb1dbc43a3d4e9d6af680e239".to_string()));
+
+        // Prompt with explicit --channel flag and event_id line
+        let prompt2 = "event_id: 1111111111111111111111111111111111111111111111111111111111111111\nbuzz messages send --channel 22222222-2222-4222-8222-222222222222";
+        let target2 = extract_reply_target_from_prompt(prompt2);
+        assert!(target2.is_some());
+        let (channel2, reply_to2) = target2.unwrap();
+        assert_eq!(channel2, "22222222-2222-4222-8222-222222222222");
+        assert_eq!(reply_to2, Some("1111111111111111111111111111111111111111111111111111111111111111".to_string()));
     }
 }
