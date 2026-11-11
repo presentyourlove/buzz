@@ -834,7 +834,12 @@ impl Config {
             (_, Some(p)) => std::fs::read_to_string(&p).map_err(|e| format!("config: read {p}: {e}"))?,
             _ => DEFAULT_SYSTEM_PROMPT.to_owned(),
         };
-        let max_context_tokens: u64 = parse_env("BUZZ_AGENT_MAX_CONTEXT_TOKENS", 200_000u64)?;
+        let mut max_context_tokens: u64 = parse_env("BUZZ_AGENT_MAX_CONTEXT_TOKENS", 200_000u64)?;
+        // 防呆下限保護：確保 max_context_tokens 不得低於 64,000 tokens，
+        // 避免因設定過低導致 System Prompt (26k+) 觸發 preflight handoff 窒息死循環。
+        if max_context_tokens < 64_000 {
+            max_context_tokens = 64_000;
+        }
         let mut max_output_tokens: u32 = parse_env("BUZZ_AGENT_MAX_OUTPUT_TOKENS", 65_536)?;
         if max_context_tokens <= u64::from(max_output_tokens) {
             max_output_tokens = (max_context_tokens / 4).max(512) as u32;
@@ -1083,7 +1088,10 @@ impl Config {
         };
         
         // Build config
-        let max_context_tokens = get_uint("max_context_tokens", "BUZZ_AGENT_MAX_CONTEXT_TOKENS", 200_000);
+        let mut max_context_tokens = get_uint("max_context_tokens", "BUZZ_AGENT_MAX_CONTEXT_TOKENS", 200_000);
+        if max_context_tokens < 64_000 {
+            max_context_tokens = 64_000;
+        }
         let mut max_output_tokens = get_uint("max_output_tokens", "BUZZ_AGENT_MAX_OUTPUT_TOKENS", 65536) as u32;
         if max_context_tokens <= u64::from(max_output_tokens) {
             max_output_tokens = (max_context_tokens / 4).max(512) as u32;

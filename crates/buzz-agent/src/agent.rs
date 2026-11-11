@@ -116,6 +116,20 @@ fn is_buzz_reply_call(call: &ToolCall, mcp: &McpRegistry) -> bool {
     mcp.has(&call.name) && !mcp.is_hook(&call.name) && is_reply_shaped(&call.name, &call.arguments)
 }
 
+fn is_buzz_send_message_call(call: &ToolCall, mcp: &McpRegistry) -> bool {
+    mcp.has(&call.name) && !mcp.is_hook(&call.name) && is_send_message_shaped(&call.name, &call.arguments)
+}
+
+fn is_send_message_shaped(name: &str, arguments: &serde_json::Value) -> bool {
+    name.ends_with("__shell")
+        && arguments
+            .get("command")
+            .and_then(|v| v.as_str())
+            .is_some_and(|cmd| {
+                cmd.contains("messages send")
+            })
+}
+
 /// Whether a tool name and arguments have the shape of a Buzz publish command.
 ///
 /// Split from [`is_buzz_reply_call`] only so the matcher is testable without a
@@ -965,9 +979,10 @@ impl RunCtx<'_> {
             emit_pending(self.wire, self.session_id, call).await;
 
             // 重複發布物理熔斷門禁 (Duplicate Publish Circuit Breaker)：
-            // 單一 Turn 內僅允許發送一次頻道訊息；若因 Handoff 或模型失憶重複發起發布，一律源頭攔截，
+            // 單一 Turn 內僅允許發送一次頻道訊息 (messages send)；若因 Handoff 或模型失憶重複發起發布，一律源頭攔截，
             // 避免 Honey 發生連續回覆 12 次之重播洗版風暴。
-            if is_buzz_reply_call(call, self.mcp) {
+            // 注意：貼表情符號 (reactions add) 不受此限，亦不會消耗此回覆訊息計數，確保先貼表情再發訊息之正常流程不被誤殺。
+            if is_buzz_send_message_call(call, self.mcp) {
                 if *reply_publish_count > 0 {
                     tracing::warn!(
                         session_id = self.session_id,
