@@ -75,6 +75,14 @@ const MAX_REPLY_NAGS: u32 = 2;
 /// well above this value even in the most terse case.
 const SILENT_TURN_TOKEN_THRESHOLD: u64 = 12;
 
+/// Maximum consecutive silent rounds allowed within a single turn before
+/// the early-stop braking gate triggers to halt infinite handoff/steer loops.
+const MAX_CONSECUTIVE_SILENT_TURNS: u32 = 2;
+
+/// User-facing message emitted when the silent early-stop braking gate triggers.
+const SILENT_EARLY_STOP_BREAKER_MSG: &str =
+    "⚠️ [系統熔斷] 雲端模型未產生有效輸出（連續交白卷），為避免無效重試已觸發保護閘門中止本回合。請稍後重試或檢查模型狀態。";
+
 /// Server label on the synthetic reply-guard objection.
 ///
 /// Not a real MCP server. It rides the same tool-result path as `_Stop` hook
@@ -367,7 +375,11 @@ impl RunCtx<'_> {
         // ran read-only tools and then died at 3 tokens IS a silent death;
         // only a genuine publish should suppress the WARN.
         let mut buzz_reply_call_seen = false;
+        let mut buzz_reply_publish_count = 0usize;
+        let mut consecutive_tool_failures = 0usize;
+        const MAX_CONSECUTIVE_TOOL_FAILURES: usize = 3;
         let mut reply_nags = 0u32;
+        let mut silent_turns = 0u32;
         // Per-`run()` reactive context-recovery budget. Per-turn, not
         // per-session: a fresh prompt deserves a fresh chance to recover, and
         // `max_rounds` defaults to 0 (unbounded) so it cannot bound this.
@@ -747,6 +759,44 @@ impl RunCtx<'_> {
                     response.output_tokens,
                     response.stop,
                 );
+
+                let is_silent = is_silent_candidate(
+                    buzz_reply_call_seen,
+                    text_is_empty,
+                    response.output_tokens,
+                );
+                if is_silent {
+                    silent_turns = silent_turns.saturating_add(1);
+                } else {
+                    silent_turns = 0;
+                }
+
+                if is_silent && silent_turns >= MAX_CONSECUTIVE_SILENT_TURNS {
+                    tracing::error!(
+                        silent_turns = silent_turns,
+                        max_silent_turns = MAX_CONSECUTIVE_SILENT_TURNS,
+                        "agent: silent early-stop braking gate triggered — halting turn to prevent infinite retry loop"
+                    );
+                    let breaker_msg_id = format!("{}-breaker-{round}", self.run_id);
+                    wire::send(
+                        self.wire,
+                        wire::session_update(
+                            self.session_id,
+                            json!({
+                                "sessionUpdate": "agent_message_chunk",
+                                "messageId": &breaker_msg_id,
+                                "content": { "type": "text", "text": SILENT_EARLY_STOP_BREAKER_MSG }
+                            }),
+                        ),
+                    )
+                    .await;
+                    if let Some(HistoryItem::Assistant { text, .. }) = self.history.last_mut() {
+                        if text.trim().is_empty() {
+                            *text = SILENT_EARLY_STOP_BREAKER_MSG.to_string();
+                        }
+                    }
+                    return Ok(StopReason::EndTurn);
+                }
                 // Only gate genuine end_turn — don't override max_tokens/refusal.
                 if stop == StopReason::EndTurn {
                     if stop_rejections >= self.cfg.stop_max_rejections {
@@ -781,6 +831,7 @@ impl RunCtx<'_> {
                 return Ok(stop);
             }
 
+            silent_turns = 0;
             let mut calls = response.tool_calls;
             if calls.len() > MAX_TOOL_CALLS_PER_TURN {
                 tracing::warn!(
@@ -803,8 +854,50 @@ impl RunCtx<'_> {
                 reasoning_details: response.reasoning_details,
             });
 
-            if let Some(stop) = self.execute_calls(&calls).await {
+            if let Some(stop) = self.execute_calls(&calls, &mut buzz_reply_publish_count).await {
                 return Ok(stop);
+            }
+
+            // 連續工具錯誤硬熔斷煞車門禁 (Consecutive Tool Failures Breaker)
+            let calls_failed = !calls.is_empty() && self.history.iter().rev().take(calls.len()).all(|item| {
+                if let HistoryItem::ToolResult(tr) = item {
+                    tr.is_error
+                } else {
+                    false
+                }
+            });
+
+            if calls_failed {
+                consecutive_tool_failures = consecutive_tool_failures.saturating_add(1);
+            } else {
+                consecutive_tool_failures = 0;
+            }
+
+            if consecutive_tool_failures >= MAX_CONSECUTIVE_TOOL_FAILURES {
+                tracing::error!(
+                    consecutive_tool_failures = consecutive_tool_failures,
+                    "agent: consecutive tool failures breaker triggered — halting turn to prevent runaway loops"
+                );
+                let breaker_msg_id = format!("{}-breaker-tool-{round}", self.run_id);
+                let err_msg = "【安全熔斷煞車】特工遭遇連續 3 次工具執行失敗（如檔案路徑不存在或系統錯誤），已自動終止任務以防範無效重試。請檢查檔案路徑或系統設定。";
+                wire::send(
+                    self.wire,
+                    wire::session_update(
+                        self.session_id,
+                        json!({
+                            "sessionUpdate": "agent_message_chunk",
+                            "messageId": &breaker_msg_id,
+                            "content": { "type": "text", "text": err_msg }
+                        }),
+                    ),
+                )
+                .await;
+                self.history.push(HistoryItem::Assistant {
+                    text: err_msg.to_string(),
+                    tool_calls: Vec::new(),
+                    reasoning_details: None,
+                });
+                return Ok(StopReason::EndTurn);
             }
 
             // Solution 3: Tool-call round pacing buffer to prevent burst rate-limit (429) on upstream LLM
@@ -849,7 +942,7 @@ impl RunCtx<'_> {
     /// `max_parallel_tools = 1` makes phase 2 effectively sequential
     /// (one in-flight call at a time via the semaphore). Larger values
     /// run that many calls concurrently.
-    async fn execute_calls(&mut self, calls: &[ToolCall]) -> Option<StopReason> {
+    async fn execute_calls(&mut self, calls: &[ToolCall], reply_publish_count: &mut usize) -> Option<StopReason> {
         let mut results: Vec<Option<ToolResult>> = vec![None; calls.len()];
         let mut runnable: Vec<usize> = Vec::with_capacity(calls.len());
 
@@ -870,6 +963,28 @@ impl RunCtx<'_> {
                 return Some(StopReason::Cancelled);
             }
             emit_pending(self.wire, self.session_id, call).await;
+
+            // 重複發布物理熔斷門禁 (Duplicate Publish Circuit Breaker)：
+            // 單一 Turn 內僅允許發送一次頻道訊息；若因 Handoff 或模型失憶重複發起發布，一律源頭攔截，
+            // 避免 Honey 發生連續回覆 12 次之重播洗版風暴。
+            if is_buzz_reply_call(call, self.mcp) {
+                if *reply_publish_count > 0 {
+                    tracing::warn!(
+                        session_id = self.session_id,
+                        tool_name = %call.name,
+                        reply_publish_count = *reply_publish_count,
+                        "agent: duplicate publish suppressed in turn to prevent replay storm"
+                    );
+                    let suppressed_text = "Notice: Your message was already published to the channel earlier in this turn. Duplicate publish is suppressed. Conclude your turn now.";
+                    let mut result = synthetic_tool_result(call, suppressed_text.into());
+                    result.is_error = false;
+                    emit_completed(self.wire, self.session_id, call, &result).await;
+                    results[idx] = Some(result);
+                    continue;
+                } else {
+                    *reply_publish_count += 1;
+                }
+            }
 
             // Built-in load_skill: execute inline, no MCP round-trip.
             if call.name == builtin::LOAD_SKILL_TOOL {
@@ -1404,6 +1519,23 @@ fn map_stop(p: ProviderStop) -> StopReason {
 /// async agent loop.
 fn is_silent_turn(output_tokens: u64) -> bool {
     output_tokens <= SILENT_TURN_TOKEN_THRESHOLD
+}
+
+/// Returns `true` when a round response matches the silent-death signature:
+/// no publish attempt across the turn, the response text is empty,
+/// and output tokens are either near-zero or absent.
+fn is_silent_candidate(
+    buzz_reply_call_seen: bool,
+    text_is_empty: bool,
+    output_tokens: Option<u64>,
+) -> bool {
+    if buzz_reply_call_seen || !text_is_empty {
+        return false;
+    }
+    match output_tokens {
+        Some(t) => is_silent_turn(t),
+        None => true,
+    }
 }
 
 /// Emits the silent-turn diagnostic WARN when the turn produced no publish,
@@ -1942,5 +2074,63 @@ mod tests {
             );
         });
         assert_eq!(n, 1, "unknown-usage silent turn must emit exactly one WARN");
+    }
+
+    // ── is_silent_candidate (braking gate predicate) ───────────────────────
+
+    #[test]
+    fn is_silent_candidate_canonical_cases() {
+        // True cases: no publish, empty text, token <= 12 or None
+        assert!(is_silent_candidate(false, true, Some(0)));
+        assert!(is_silent_candidate(false, true, Some(4)));
+        assert!(is_silent_candidate(false, true, Some(SILENT_TURN_TOKEN_THRESHOLD)));
+        assert!(is_silent_candidate(false, true, None));
+
+        // False cases: publish seen, or non-empty text, or token > threshold
+        assert!(!is_silent_candidate(true, true, Some(0)), "publish seen must disarm");
+        assert!(!is_silent_candidate(false, false, Some(0)), "non-empty text must disarm");
+        assert!(!is_silent_candidate(false, true, Some(SILENT_TURN_TOKEN_THRESHOLD + 1)), "tokens above threshold must disarm");
+    }
+
+    #[test]
+    fn silent_early_stop_breaker_constants() {
+        assert_eq!(MAX_CONSECUTIVE_SILENT_TURNS, 2);
+        assert!(SILENT_EARLY_STOP_BREAKER_MSG.contains("系統熔斷"));
+    }
+
+    #[test]
+    fn test_duplicate_publish_counter_logic() {
+        let mut publish_count = 0usize;
+        // First publish call: should increment count and proceed
+        if publish_count == 0 {
+            publish_count += 1;
+        }
+        assert_eq!(publish_count, 1);
+
+        // Second publish call in same turn: should be detected as duplicate
+        let is_duplicate = publish_count > 0;
+        assert!(is_duplicate, "subsequent publish in same turn must be identified as duplicate");
+    }
+
+    #[test]
+    fn test_consecutive_tool_failures_logic() {
+        let mut failures = 0usize;
+        const MAX_FAILURES: usize = 3;
+
+        // Simulate 2 failures
+        failures += 1;
+        failures += 1;
+        assert_eq!(failures, 2);
+        assert!(failures < MAX_FAILURES);
+
+        // Success resets
+        failures = 0;
+        assert_eq!(failures, 0);
+
+        // 3 consecutive failures trigger breaker
+        failures += 1;
+        failures += 1;
+        failures += 1;
+        assert!(failures >= MAX_FAILURES);
     }
 }

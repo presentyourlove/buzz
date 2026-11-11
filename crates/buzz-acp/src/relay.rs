@@ -3719,6 +3719,10 @@ pub(crate) fn is_dns_error(err: &RelayError) -> bool {
         || msg.contains("Name or service not known")
         || msg.contains("No such host")
         || msg.contains("failed to lookup address")
+        || msg.contains("os error 11001")
+        || msg.contains("os error 11002")
+        || msg.contains("無法識別這台主機")
+        || msg.contains("不知道這樣的主機")
 }
 
 /// Shutdown-aware fixed-duration sleep for REQ pacing in `resubscribe_after_reconnect`.
@@ -6339,7 +6343,8 @@ mod tests {
             // ── WebSocket(Tls): deterministic config (terminal, pins the arm) ──
             // These shapes are constructible but not reachable through our
             // rustls production connector — cert failures arrive as Io above.
-            // Kept to pin the Tls(_) => true arm.
+            // Kept to pin the Tls(_) => true arm when rustls backend is enabled.
+            #[cfg(feature = "rustls-tls-native-roots")]
             (
                 "Tls(Rustls(General)): pins Tls arm terminal",
                 ws(WsError::Tls(
@@ -6347,11 +6352,13 @@ mod tests {
                 )),
                 true,
             ),
+            #[cfg(feature = "rustls-tls-native-roots")]
             (
                 "Tls(InvalidDnsName): only reachable connect-time Tls variant",
                 ws(WsError::Tls(TlsError::InvalidDnsName)),
                 true,
             ),
+            #[cfg(feature = "rustls-tls-native-roots")]
             (
                 "Tls(Rustls(InvalidCertificate(Expired))): pins Tls arm terminal",
                 ws(WsError::Tls(

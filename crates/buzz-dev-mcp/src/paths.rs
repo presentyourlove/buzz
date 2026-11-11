@@ -16,10 +16,30 @@ use std::path::{Path, PathBuf};
 
 pub(crate) const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
+/// Windows CP950 / UTF-8 Mojibake 容錯還原：
+/// 「私人」之 UTF-8 編碼 (E7 A7 81 E4 BA BA) 在 Windows Big5/CP950 環境被誤解碼時，
+/// 常呈現為「蝘犖」或相關字元。自動修復該路徑，防範模型踩雷卡死。
+#[cfg(windows)]
+pub(crate) fn repair_mojibake(p: &str) -> String {
+    if p.contains("蝘") || p.contains("犖") {
+        p.replace("蝘\u{e7}犖", "私人")
+         .replace("蝘犖", "私人")
+         .replace("蝘", "私")
+         .replace("犖", "人")
+    } else {
+        p.to_string()
+    }
+}
+
 /// Resolve `path` (absolute or relative) against `root` and canonicalize
 /// the result. Returns an error string suitable for `ErrorData::invalid_params`
 /// if the path cannot be resolved.
 pub(crate) fn resolve_path(root: &Path, path: &str) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    let repaired = repair_mojibake(path);
+    #[cfg(windows)]
+    let path = repaired.as_str();
+
     // The agent runs inside MSYS bash and naturally hands us MSYS-form absolute
     // paths (`/c/Users/...`). On Windows those are NOT `is_absolute()` (a leading
     // `/` has no drive `Prefix`), so without translation they'd take the relative
@@ -457,6 +477,18 @@ mod tests {
             assert_eq!(msys_to_windows("/usr/bin/git"), "/usr/bin/git");
             // Two-letter leading segment is root-anchored, not a drive.
             assert_eq!(msys_to_windows("/cc/x"), "/cc/x");
+        }
+
+        #[test]
+        fn repair_mojibake_recovers_private_path() {
+            assert_eq!(
+                super::repair_mojibake(r"C:\蝘犖\ai agent\buzz-obsidian"),
+                r"C:\私人\ai agent\buzz-obsidian"
+            );
+            assert_eq!(
+                super::repair_mojibake(r"C:\Users\user\test.txt"),
+                r"C:\Users\user\test.txt"
+            );
         }
 
         #[test]

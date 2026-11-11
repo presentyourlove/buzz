@@ -226,7 +226,12 @@ impl RunCtx<'_> {
         }
         self.history.push(HistoryItem::User(handoff_text));
         if let Some(prompt) = current_prompt {
-            self.history.push(HistoryItem::User(prompt));
+            // 防範 Handoff 重播放大死循環：重新注入使用者提問時，提示模型注意審核 Handoff 摘要，
+            // 避免重複調用已完成之發布或寫入動作。
+            let guarded_prompt = format!(
+                "{prompt}\n\n[System Note: Context has been compacted. Review the Context Handoff summary above before taking action. If you have already delivered the final answer or published a reply to the channel, do NOT duplicate previous tool calls. Conclude your turn promptly.]"
+            );
+            self.history.push(HistoryItem::User(guarded_prompt));
         }
         *self.handoff_count += 1;
         let token_counts = HandoffTokenCounts {
