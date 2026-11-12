@@ -265,6 +265,11 @@ pub fn denoise_prompt_markdown_links(input: &str) -> String {
         result.push_str(&line_res);
     }
 
+    // Pass 3: Restore devoured backslash in Windows user profile path `user.buzz\` -> `user\.buzz\`
+    let result = result
+        .replace("user.buzz\\", "user\\.buzz\\")
+        .replace("user.buzz/", "user\\.buzz/");
+
     result
 }
 
@@ -547,8 +552,11 @@ impl RunCtx<'_> {
         // only a genuine publish should suppress the WARN.
         let mut buzz_reply_call_seen = false;
         let mut buzz_reply_publish_count = 0usize;
-        let mut consecutive_tool_failures = 0usize;
-        const MAX_CONSECUTIVE_TOOL_FAILURES: usize = 3;
+        let mut last_failed_call: Option<ToolCall> = None;
+        let mut identical_call_failures = 0usize;
+        let mut total_consecutive_tool_failures = 0usize;
+        const MAX_IDENTICAL_TOOL_FAILURES: usize = 3;
+        const MAX_TOTAL_CONSECUTIVE_TOOL_FAILURES: usize = 8;
         let mut reply_nags = 0u32;
         let mut silent_turns = 0u32;
         // Per-`run()` reactive context-recovery budget. Per-turn, not
@@ -1040,7 +1048,7 @@ impl RunCtx<'_> {
                 return Ok(stop);
             }
 
-            // 連續工具錯誤硬熔斷煞車門禁 (Consecutive Tool Failures Breaker)
+            // 智慧型死循環與連續工具錯誤硬熔斷煞車門禁
             let calls_failed = !calls.is_empty() && self.history.iter().rev().take(calls.len()).all(|item| {
                 if let HistoryItem::ToolResult(tr) = item {
                     tr.is_error
@@ -1050,18 +1058,43 @@ impl RunCtx<'_> {
             });
 
             if calls_failed {
-                consecutive_tool_failures = consecutive_tool_failures.saturating_add(1);
+                total_consecutive_tool_failures = total_consecutive_tool_failures.saturating_add(1);
+                // 檢查是否為完全相同的工具呼叫與參數（死循環特徵）
+                let first_call = calls.first();
+                if let (Some(last), Some(current)) = (&last_failed_call, first_call) {
+                    if last.name == current.name && last.arguments == current.arguments {
+                        identical_call_failures = identical_call_failures.saturating_add(1);
+                    } else {
+                        identical_call_failures = 1;
+                        last_failed_call = Some((*current).clone());
+                    }
+                } else {
+                    identical_call_failures = 1;
+                    last_failed_call = first_call.cloned();
+                }
             } else {
-                consecutive_tool_failures = 0;
+                total_consecutive_tool_failures = 0;
+                identical_call_failures = 0;
+                last_failed_call = None;
             }
 
-            if consecutive_tool_failures >= MAX_CONSECUTIVE_TOOL_FAILURES {
+            let is_identical_loop = identical_call_failures >= MAX_IDENTICAL_TOOL_FAILURES;
+            let is_total_overflow = total_consecutive_tool_failures >= MAX_TOTAL_CONSECUTIVE_TOOL_FAILURES;
+
+            if is_identical_loop || is_total_overflow {
                 tracing::error!(
-                    consecutive_tool_failures = consecutive_tool_failures,
+                    identical_call_failures,
+                    total_consecutive_tool_failures,
+                    is_identical_loop,
+                    is_total_overflow,
                     "agent: consecutive tool failures breaker triggered — halting turn to prevent runaway loops"
                 );
                 let breaker_msg_id = format!("{}-breaker-tool-{round}", self.run_id);
-                let err_msg = "【安全熔斷煞車】特工遭遇連續 3 次工具執行失敗（如檔案路徑不存在或系統錯誤），已自動終止任務以防範無效重試。請檢查檔案路徑或系統設定。";
+                let err_msg = if is_identical_loop {
+                    "【安全熔斷煞車】特工連續 3 次重複執行完全相同的失敗工具呼叫，已自動終止任務以防範無效死循環。請檢查工具參數與系統設定。"
+                } else {
+                    "【安全熔斷煞車】特工累計連續 8 次工具執行失敗（如多個備選檔案路徑均不存在），已自動終止任務以防範無效重試。請檢查檔案路徑或系統設定。"
+                };
                 wire::send(
                     self.wire,
                     wire::session_update(
@@ -1079,6 +1112,8 @@ impl RunCtx<'_> {
                     tool_calls: Vec::new(),
                     reasoning_details: None,
                 });
+                // 無條件兜底發布，確保熔斷原因送入 Buzz 討論串
+                self.try_auto_publish_fallback().await;
                 return Ok(StopReason::EndTurn);
             }
 
@@ -2477,24 +2512,49 @@ mod tests {
 
     #[test]
     fn test_consecutive_tool_failures_logic() {
-        let mut failures = 0usize;
-        const MAX_FAILURES: usize = 3;
+        let mut total_failures = 0usize;
+        let mut identical_failures = 0usize;
+        const MAX_IDENTICAL: usize = 3;
+        const MAX_TOTAL: usize = 8;
 
-        // Simulate 2 failures
-        failures += 1;
-        failures += 1;
-        assert_eq!(failures, 2);
-        assert!(failures < MAX_FAILURES);
+        // 3 different failures do NOT trigger identical breaker
+        total_failures += 1;
+        identical_failures = 1; // call 1
+        total_failures += 1;
+        identical_failures = 1; // call 2 (different arg)
+        total_failures += 1;
+        identical_failures = 1; // call 3 (different arg)
+        assert_eq!(total_failures, 3);
+        assert!(identical_failures < MAX_IDENTICAL);
+        assert!(total_failures < MAX_TOTAL);
 
-        // Success resets
-        failures = 0;
-        assert_eq!(failures, 0);
+        // 3 identical failures DO trigger identical breaker
+        identical_failures = 3;
+        assert!(identical_failures >= MAX_IDENTICAL);
 
-        // 3 consecutive failures trigger breaker
-        failures += 1;
-        failures += 1;
-        failures += 1;
-        assert!(failures >= MAX_FAILURES);
+        // Reset on success
+        total_failures = 0;
+        identical_failures = 0;
+
+        // 8 total failures trigger overflow breaker
+        for _ in 0..8 {
+            total_failures += 1;
+        }
+        assert!(total_failures >= MAX_TOTAL);
+    }
+
+    #[test]
+    fn test_denoise_user_buzz_path_restoration() {
+        let dirty = "請讀取 C:\\Users\\user.buzz\\PLANS\\GITHUB_TRENDING_ANALYSIS_PLAN.md 檔案";
+        let cleaned = denoise_prompt_markdown_links(dirty);
+        assert_eq!(
+            cleaned,
+            "請讀取 C:\\Users\\user\\.buzz\\PLANS\\GITHUB_TRENDING_ANALYSIS_PLAN.md 檔案"
+        );
+
+        let dirty_slash = "path C:/Users/user.buzz/PLANS/test.md";
+        let cleaned_slash = denoise_prompt_markdown_links(dirty_slash);
+        assert_eq!(cleaned_slash, "path C:/Users/user\\.buzz/PLANS/test.md");
     }
 
     #[test]
@@ -2522,7 +2582,7 @@ mod tests {
         let cleaned = denoise_prompt_markdown_links(dirty);
         assert_eq!(
             cleaned,
-            "請讀取 C:\\Users\\user.buzz\\PLANS\\REPORTS\\2026-11-11_GITHUB_TRENDING.md 內容"
+            "請讀取 C:\\Users\\user\\.buzz\\PLANS\\REPORTS\\2026-11-11_GITHUB_TRENDING.md 內容"
         );
 
         let dirty2 = "Check out [https://example.com](https://example.com) and [foo](http://foo.bar)";
