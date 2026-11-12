@@ -1,0 +1,22 @@
+{
+  "name": "agent-skill",
+  "description": "janestreet/agent_skill 整合技能 - 透過 Nostr 事件流 (Kind:30300) 與 Buzz 同步，提供輕量級 Agent 執行環境、任務持久化與 SQLite 去重",
+  "version": "1.0.0",
+  "author": "Pollen",
+  "created_at": "2026-11-12T05:30:00Z",
+  "tags": ["agent", "nostr", "task-persistence", "skill", "automation"],
+  "dependencies": [],
+  "features": [
+    "nostr_bridge",
+    "task_persistence", 
+    "agent_runtime",
+    "sqlite_dedup",
+    "kind_30300_sync"
+  ],
+  "rust_modules": ["nostr_bridge", "task_store", "agent_runtime"],
+  "compatibility": {
+    "buzz_version": "^2.0.0",
+    "rust_toolchain": "1.70+",
+    "required_features": []
+  }
+}

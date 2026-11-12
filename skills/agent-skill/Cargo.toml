@@ -1,0 +1,47 @@
+[package]
+name = "agent-skill"
+version = "0.1.0"
+edition = "2021"
+authors = ["Pollen", "Antigravity"]
+description = "janestreet/agent_skill 整合技能 - Nostr 事件橋接、任務持久化與 Agent 執行環境"
+license = "Apache-2.0"
+repository = "https://github.com/block/sprout"
+
+[workspace]
+
+[dependencies]
+# Buzz 核心依賴
+buzz-core = { path = "../../crates/buzz-core" }
+buzz-agent = { path = "../../crates/buzz-agent" }
+
+# Nostr 協議
+nostr = { version = "0.44", features = ["nip44"] }
+
+# 異步運行時
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# 日期時間
+chrono = { version = "0.4", features = ["serde"] }
+
+# 錯誤處理
+anyhow = "1.0"
+thiserror = "1.0"
+
+# 日誌
+tracing = "0.1"
+
+[lib]
+name = "agent_skill"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[profile.dev]
+opt-level = 1
+
+[profile.test]
+opt-level = 1
