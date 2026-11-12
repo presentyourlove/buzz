@@ -971,7 +971,7 @@ impl RunCtx<'_> {
                 // Only gate genuine end_turn — don't override max_tokens/refusal.
                 if stop == StopReason::EndTurn {
                     if stop_rejections >= self.cfg.stop_max_rejections {
-                        if self.cfg.require_reply && !buzz_reply_call_seen {
+                        if !buzz_reply_call_seen {
                             self.try_auto_publish_fallback().await;
                         }
                         return Ok(stop);
@@ -1006,7 +1006,7 @@ impl RunCtx<'_> {
                         push_hook_outputs_as_tool_results(self.history, "_Stop", &objections);
                         continue;
                     }
-                    if self.cfg.require_reply && !buzz_reply_call_seen {
+                    if !buzz_reply_call_seen {
                         self.try_auto_publish_fallback().await;
                     }
                 }
@@ -1427,6 +1427,45 @@ impl RunCtx<'_> {
         }
     }
 
+    fn extract_reasoning_text(details: &serde_json::Value, system_prompt: &str) -> Option<String> {
+        let mut extracted_reasoning = String::new();
+        if let Some(arr) = details.as_array() {
+            for val in arr {
+                if let Some(s) = val.as_str() {
+                    extracted_reasoning.push_str(s);
+                    extracted_reasoning.push('\n');
+                } else if let Some(text_val) = val.get("text").and_then(|t| t.as_str()) {
+                    extracted_reasoning.push_str(text_val);
+                    extracted_reasoning.push('\n');
+                }
+            }
+        } else if let Some(s) = details.as_str() {
+            extracted_reasoning = s.to_string();
+        }
+
+        let clean_reasoning = extracted_reasoning.trim();
+        if !clean_reasoning.is_empty() {
+            let agent_title = if system_prompt.contains("Sentry") {
+                "Sentry"
+            } else if system_prompt.contains("Honey2") {
+                "Honey2"
+            } else if system_prompt.contains("Pollen") {
+                "Pollen"
+            } else if system_prompt.contains("Wax") {
+                "Wax"
+            } else if system_prompt.contains("Fizz") {
+                "Fizz"
+            } else if system_prompt.contains("Honey") {
+                "Honey"
+            } else {
+                "特工"
+            };
+            Some(format!("【{} 分析思考報告】：\n\n{}", agent_title, clean_reasoning))
+        } else {
+            None
+        }
+    }
+
     fn last_assistant_text(&self) -> Option<String> {
         for item in self.history.iter().rev() {
             if let HistoryItem::Assistant { text, reasoning_details, .. } = item {
@@ -1436,24 +1475,8 @@ impl RunCtx<'_> {
                 }
                 // If text is empty but reasoning_details exists, extract reasoning as fallback text
                 if let Some(details) = reasoning_details {
-                    let mut extracted_reasoning = String::new();
-                    if let Some(arr) = details.as_array() {
-                        for val in arr {
-                            if let Some(s) = val.as_str() {
-                                extracted_reasoning.push_str(s);
-                                extracted_reasoning.push('\n');
-                            } else if let Some(text_val) = val.get("text").and_then(|t| t.as_str()) {
-                                extracted_reasoning.push_str(text_val);
-                                extracted_reasoning.push('\n');
-                            }
-                        }
-                    } else if let Some(s) = details.as_str() {
-                        extracted_reasoning = s.to_string();
-                    }
-
-                    let clean_reasoning = extracted_reasoning.trim();
-                    if !clean_reasoning.is_empty() {
-                        return Some(format!("【Honey2 分析思考報告】：\n\n{}", clean_reasoning));
+                    if let Some(extracted) = Self::extract_reasoning_text(details, self.system_prompt) {
+                        return Some(extracted);
                     }
                 }
             }
@@ -1464,7 +1487,10 @@ impl RunCtx<'_> {
     async fn try_auto_publish_fallback(&mut self) {
         let text_to_publish = match self.last_assistant_text() {
             Some(t) if t.len() >= 5 => t,
-            _ => return,
+            _ => {
+                tracing::warn!(session_id = self.session_id, "auto_publish_fallback: no text candidate found for auto-publish");
+                return;
+            }
         };
 
         let user_prompt = self.history.iter().rev().find_map(|item| {
