@@ -1398,6 +1398,13 @@ impl RunCtx<'_> {
             // On tool error: append a reflection prompt so the LLM
             // diagnoses the failure before blindly retrying.
             if result.is_error {
+                tracing::warn!(
+                    session_id = %self.session_id,
+                    tool_name = %call.name,
+                    tool_args = %call.arguments,
+                    error = %result.text(),
+                    "agent: tool execution failed"
+                );
                 result
                     .content
                     .push(ToolResultContent::Text(ERROR_REFLECTION_SUFFIX.to_string()));

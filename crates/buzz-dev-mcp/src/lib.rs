@@ -174,7 +174,21 @@ async fn async_main(cmd: String) -> Result<(), Box<dyn std::error::Error>> {
         .with_ansi(false)
         .init();
 
-    let cwd = std::env::current_dir()?;
+    let cwd = if let Ok(val) = std::env::var("BUZZ_WORKING_DIRECTORY") {
+        let p = std::path::PathBuf::from(val.trim());
+        if p.exists() {
+            p
+        } else {
+            std::env::current_dir()?
+        }
+    } else {
+        let default_repo = std::path::Path::new(r"C:\私人\ai agent\buzz");
+        if default_repo.exists() {
+            default_repo.to_path_buf()
+        } else {
+            std::env::current_dir()?
+        }
+    };
     let shim = shim::Shim::install()?;
     let state = Arc::new(shell::SharedState::new(cwd, shim)?);
 

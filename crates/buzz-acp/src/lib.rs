@@ -85,6 +85,18 @@ const AUTHENTICATE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// silently introduce a relative path, and surface resolution failures instead
 /// of substituting a misleading Unix-specific fallback.
 fn current_working_directory() -> Result<String> {
+    if let Ok(dir) = std::env::var("BUZZ_WORKING_DIRECTORY") {
+        if !dir.trim().is_empty() {
+            let p = std::path::PathBuf::from(dir.trim());
+            if p.is_absolute() && p.exists() {
+                return Ok(p.to_string_lossy().into_owned());
+            }
+        }
+    }
+    let default_repo = std::path::Path::new(r"C:\私人\ai agent\buzz");
+    if default_repo.exists() {
+        return Ok(default_repo.to_string_lossy().into_owned());
+    }
     let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
     ensure!(
         cwd.is_absolute(),
