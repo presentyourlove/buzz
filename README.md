@@ -778,6 +778,29 @@ just reset          # ⚠️  Wipe data + recreate
   - `python C:\私人\tools\test_tstack_pipeline.py`：TStack 執行鏈與 Fallback 驗證 100% PASS。
   - `python C:\私人\tools\facebook_auth_helper.py --mock-test`：兩階段授權管線驗證 100% PASS。
 
+### 21. Phase 16：Sentry 特工守護進程故障修復與官方最新版本雙向無損合流 (Sentry Recovery & Upstream Merge)
+- **Sentry (QA Gatekeeper) 故障根因確診與自檢邏輯修復**：
+  - 確診 Sentry 每 4 秒崩潰重啟死循環根因：`managed-agents.json` 實例項缺失 `env_vars`，導致子進程 `buzz-agent.exe` 缺少 `BUZZ_AGENT_PROVIDER` 與 `OPENROUTER_API_KEY` 而啟動失敗。
+  - 修正 `sentry_supervisor.py` 中 `is_sentry_running` 進程自我誤檢問題（PowerShell 自身命令列包含公鑰關鍵字誤判為已運行；啟動參數實為私鑰 `nsec176x8n6290z`），改以私鑰精確匹配，徹底排除幽靈死鎖。
+  - 清理殘留死進程鎖並成功拉起 Sentry 守護進程，10 個 agent pool 就緒，成功連上 Relay，成功訂閱主理人頻道 `5ca019f6-1a27-592a-b015-4baf0eb33572`，在線待命。
+- **官方 5 筆最新版本更新無損合流 (`origin/main`)**：
+  - 合流 `65e864301` (WebSocket Upgrade 新增 User-Agent)、`31fa53174` (Relay 斷線結構化記錄與靜音關閉警告)、`4bfe60197` (Relay Webhook 保存拒絕文字優化)、`8cce12f59` (行動端 Solo 聊天設定整合)、`8130cd9fc` (CLI 連續編輯訊息附件保留 `edit.rs`)。
+  - 解決 `crates/buzz-relay/Cargo.toml` 依賴衝突，產出合流 Commit (`770a46b87`)。
+- **檔案變更清單 (File Inventory)**：
+  - **合流 (Merged from origin/main)**：44 個檔案 (1,842 行新增，512 行刪除)
+  - **修改 (Modified)**：
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json` (修復 Sentry 等 6 大特工環境變數與身分 1-to-1 對齊)
+    - `C:\私人\tools\sentry_supervisor.py` (修復進程自檢邏輯與啟動命令列參數)
+    - `crates/buzz-relay/Cargo.toml` (解除依賴衝突，保留官方新增之 `buzz-cli` 與 `ring`)
+    - `c:\私人\ai agent\to do list.md` (新增 Sentry 復原與官方升級里程碑，累計 31 項)
+    - `c:\私人\ai agent\block-buzz.md` (增設第 27 章)
+    - `c:\私人\ai agent\buzz\README.md` (增設 Phase 16 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - `python C:\私人\tools\codebase_verifier.py`：全域 23 項核心特性 100% 全部 Verified 通過。
+  - `python C:\私人\tools\test_tstack_pipeline.py`：TStack 執行鏈與 Fallback 驗證 100% PASS。
+  - `python C:\私人\tools\facebook_auth_helper.py --mock-test`：兩階段授權管線驗證 100% PASS。
+  - `sentry_supervisor` 運行狀態與 Sentry Relay 頻道連線日誌：10 個 agent pool 正常就緒，頻道 `5ca019f6-1a27-592a-b015-4baf0eb33572` 訂閱成功，presence 在線待命。
+
 ---
 
 <p align="center">
