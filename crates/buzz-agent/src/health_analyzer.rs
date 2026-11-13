@@ -80,6 +80,14 @@ pub async fn scan_failure_logs(work_logs_path: &Path) -> Result<Vec<FailureLogEn
             continue;
         }
         
+        // 限制單一日誌分析大小（避免超大型日誌造成 OOM DoS）
+        const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
+        if let Ok(meta) = fs::metadata(&path) {
+            if meta.len() > MAX_LOG_BYTES {
+                continue;
+            }
+        }
+
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => continue,
@@ -90,13 +98,15 @@ pub async fn scan_failure_logs(work_logs_path: &Path) -> Result<Vec<FailureLogEn
             .unwrap_or("unknown")
             .to_string();
         
+        let lines: Vec<&str> = content.lines().collect();
+
         // 解析日誌行，尋找 ERROR/CRITICAL
-        for (line_num, line) in content.lines().enumerate() {
+        for (line_num, &line) in lines.iter().enumerate() {
             let severity = parse_severity(line);
             if severity >= Severity::Error {
                 let timestamp = extract_timestamp(line).unwrap_or_else(|| now_timestamp());
                 let error_type = extract_error_type(line);
-                let stack_trace = extract_stack_trace(&content, line_num);
+                let stack_trace = extract_stack_trace_from_lines(&lines, line_num);
                 
                 failures.push(FailureLogEntry {
                     timestamp,
@@ -157,23 +167,33 @@ fn extract_timestamp(line: &str) -> Option<String> {
     None
 }
 
-/// 提取錯誤類型
+/// 提取錯誤類型（使用 ASCII 大小寫不敏感搜尋，避免 Unicode 轉大寫改變 Byte 長度造成切片 Panic）
 fn extract_error_type(line: &str) -> String {
-    // 簡單提取：取 ERROR/CRITICAL 後的第一個詞作為錯誤類型
-    let line_upper = line.to_uppercase();
-    if let Some(pos) = line_upper.find("ERROR") {
-        let after = &line[pos+5..].trim_start();
-        if let Some(end) = after.find([':', ' ', '\t', '[']) {
-            return after[..end].to_string();
+    let line_ascii_upper = line.to_ascii_uppercase();
+    // 優先匹配行首或獨立嚴重度前綴（例如 "CRITICAL "、"ERROR: "），否則退回子字串匹配
+    for (kw, default_err) in [("CRITICAL", "CriticalError"), ("ERROR", "UnknownError")] {
+        let pos_opt = if line_ascii_upper.starts_with(kw) {
+            Some(0)
+        } else {
+            line_ascii_upper.find(&format!("{} ", kw))
+                .or_else(|| line_ascii_upper.find(&format!("{}:", kw)))
+                .or_else(|| line_ascii_upper.find(kw))
+        };
+        if let Some(pos) = pos_opt {
+            let start = pos + kw.len();
+            if let Some(after_raw) = line.get(start..) {
+                let after = after_raw.trim_start_matches([':', ' ', '\t', '-']);
+                if let Some(end) = after.find([':', ' ', '\t', '[']) {
+                    if let Some(extracted) = after.get(..end) {
+                        if !extracted.is_empty() {
+                            return extracted.to_string();
+                        }
+                    }
+                }
+                let word = after.split_whitespace().next().unwrap_or(default_err);
+                return word.trim_end_matches(':').to_string();
+            }
         }
-        return after.split_whitespace().next().unwrap_or("UnknownError").to_string();
-    }
-    if let Some(pos) = line_upper.find("CRITICAL") {
-        let after = &line[pos+8..].trim_start();
-        if let Some(end) = after.find([':', ' ', '\t', '[']) {
-            return after[..end].to_string();
-        }
-        return after.split_whitespace().next().unwrap_or("CriticalError").to_string();
     }
     "UnknownError".to_string()
 }
@@ -181,6 +201,10 @@ fn extract_error_type(line: &str) -> String {
 /// 提取堆疊追蹤
 fn extract_stack_trace(content: &str, error_line: usize) -> Option<String> {
     let lines: Vec<&str> = content.lines().collect();
+    extract_stack_trace_from_lines(&lines, error_line)
+}
+
+fn extract_stack_trace_from_lines(lines: &[&str], error_line: usize) -> Option<String> {
     let mut trace = Vec::new();
     
     // 往後找最多 50 行作為堆疊

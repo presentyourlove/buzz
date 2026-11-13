@@ -288,4 +288,15 @@ impl DependencyToolChecker {
         self.check_history.push(CheckRecord {
             id: format!("{}_{}", tool_name, chrono::Utc::now().timestamp()),
             tool_name: tool_name.clone(),
-       
+            checked_at: chrono::Utc::now(),
+            result: result.clone(),
+            duration_ms: duration,
+        });
+
+        ToolCheckResult {
+            tool_name,
+            result,
+            tool_status,
+        }
+    }
+}

@@ -13,7 +13,7 @@ use tokio::time::sleep;
 use crate::config::Config;
 use crate::health_analyzer::{AnalysisResult, CircuitBreakerStatus, CircuitBreakerFile};
 use crate::health_diagnoser::{HealthCheckResult, OverallStatus};
-use crate::health_reporter::{build_report, render_json, render_markdown, HealthReport};
+use crate::health_reporter::{build_report, render_json, render_markdown, HealthReport, now_timestamp};
 use crate::types::AgentError;
 
 /// 修復動作類型
@@ -159,28 +159,35 @@ async fn restart_process(config: &Config, proc: &crate::health_diagnoser::Proces
         .spawn()
     {
         Ok(mut child) => {
-            let output = child.wait().await;
-            match output {
-                Ok(status) if status.success() => RemediationAction {
+            // 背景守護進程不應無限期阻塞等待退出，僅等待短暫啟動期確認未立即崩潰
+            match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
+                Ok(Ok(status)) if status.success() => RemediationAction {
                     action_type: RemediationType::RestartProcess,
                     target: proc.name.clone(),
                     reason: "Process was not running".into(),
                     success: true,
-                    output: Some("Process restarted successfully".into()),
+                    output: Some("Process restarted and exited cleanly".into()),
                 },
-                Ok(status) => RemediationAction {
+                Ok(Ok(status)) => RemediationAction {
                     action_type: RemediationType::RestartProcess,
                     target: proc.name.clone(),
                     reason: "Process was not running".into(),
                     success: false,
-                    output: Some(format!("Restart failed with exit code: {}", status.code().unwrap_or(-1))),
+                    output: Some(format!("Restart failed immediately with exit code: {}", status.code().unwrap_or(-1))),
                 },
-                Err(e) => RemediationAction {
+                Ok(Err(e)) => RemediationAction {
                     action_type: RemediationType::RestartProcess,
                     target: proc.name.clone(),
                     reason: "Process was not running".into(),
                     success: false,
                     output: Some(format!("Failed to wait for process: {e}")),
+                },
+                Err(_) => RemediationAction {
+                    action_type: RemediationType::RestartProcess,
+                    target: proc.name.clone(),
+                    reason: "Process was not running".into(),
+                    success: true,
+                    output: Some(format!("Background daemon spawned and running (PID: {:?})", child.id())),
                 },
             }
         }
@@ -209,6 +216,7 @@ pub async fn send_alert(config: &Config, report: &HealthReport, consecutive_fail
         .filter(|s| !s.is_empty())
         .ok_or_else(|| AgentError::Other("Health guardian channel not configured".into()))?;
     
+    let channel_id_for_tags = channel_id.clone();
     let markdown = render_markdown(report);
     let _content = format!("🚨 **System Health Alert** (Consecutive Failures: {})\n\n{}", consecutive_failures, markdown);
     
@@ -218,7 +226,7 @@ pub async fn send_alert(config: &Config, report: &HealthReport, consecutive_fail
     
     // 構建 tags
     let _tags = vec![
-        vec!["h".to_string(), channel_id],
+        vec!["h".to_string(), channel_id_for_tags],
         vec!["t".to_string(), "health-alert".to_string()],
     ];
     
@@ -249,28 +257,35 @@ impl CronSchedule {
         Self { expression, schedule: None }
     }
 
-    /// 取得或建立 cron Schedule (延遲初始化)
+    /// 取得或建立 cron Schedule (延遲初始化，支援 5 欄位自動補齊秒數為 6 欄位)
     fn get_schedule(&mut self) -> Result<&Schedule, AgentError> {
         if self.schedule.is_none() {
-            let schedule: Schedule = self.expression.parse()
+            let parts: Vec<&str> = self.expression.split_whitespace().collect();
+            let normalized = if parts.len() == 5 {
+                format!("0 {}", parts.join(" "))
+            } else {
+                self.expression.clone()
+            };
+            let schedule: Schedule = normalized.parse()
                 .map_err(|e| AgentError::Other(format!("Invalid cron expression '{}': {}", self.expression, e)))?;
             self.schedule = Some(schedule);
         }
         Ok(self.schedule.as_ref().unwrap())
     }
 
-    /// 檢查當前時間是否匹配排程
+    /// 檢查指定時間是否匹配排程
     pub fn matches(&mut self, now: SystemTime) -> Result<bool, AgentError> {
         let schedule = self.get_schedule()?;
         let dt: chrono::DateTime<chrono::Utc> = now.into();
-        Ok(schedule.upcoming(chrono::Utc).take(1).next() == Some(dt))
+        let prev = dt - chrono::Duration::seconds(1);
+        Ok(schedule.after(&prev).take(1).next() == Some(dt))
     }
 
-    /// 取得下一次執行時間
+    /// 取得指定時間之後的下一次執行時間
     pub fn next_after(&mut self, after: SystemTime) -> Result<SystemTime, AgentError> {
         let schedule = self.get_schedule()?;
         let after_dt: chrono::DateTime<chrono::Utc> = after.into();
-        let next = schedule.upcoming(after_dt).next()
+        let next = schedule.after(&after_dt).next()
             .ok_or_else(|| AgentError::Other("No upcoming schedule found".into()))?;
         Ok(next.into())
     }
@@ -314,7 +329,7 @@ pub async fn write_consecutive_failures(path: &std::path::Path, failures: &Conse
 pub async fn phase_a_run_once(config: &Config, output_json: bool) -> Result<HealthReport, AgentError> {
     // 1. 讀取連續失敗計數
     let consecutive_path = config.health_guardian.as_ref()
-        .map(|h| h.circuit_breaker_path.parent().unwrap().join("consecutive_failures.json"))
+        .and_then(|h| h.circuit_breaker_path.parent().map(|p| p.join("consecutive_failures.json")))
         .unwrap_or_else(|| std::path::PathBuf::from(".buzz/WORK_LOGS/consecutive_failures.json"));
     
     let mut consecutive = read_consecutive_failures(&consecutive_path).await?;
@@ -348,7 +363,7 @@ pub async fn phase_a_run_once(config: &Config, output_json: bool) -> Result<Heal
 
 /// Phase B: 帶排程的健康檢查守護進程
 /// 在 Daemon 中運行，按 cron 排程定期執行健康檢查並執行修復
-pub async fn phase_b_run_daemon(config: Arc<Config>, agent_keys: Arc<crate::types::AgentKeys>, shutdown_rx: tokio::sync::watch::Receiver<bool>) -> Result<(), AgentError> {
+pub async fn phase_b_run_daemon(config: Arc<Config>, agent_keys: Arc<crate::types::AgentKeys>, mut shutdown_rx: tokio::sync::watch::Receiver<bool>) -> Result<(), AgentError> {
     let hg_config = config.health_guardian.as_ref()
         .ok_or_else(|| AgentError::Other("Health guardian not configured".into()))?;
     
@@ -357,7 +372,9 @@ pub async fn phase_b_run_daemon(config: Arc<Config>, agent_keys: Arc<crate::type
     let mut daily_deep_schedule = CronSchedule::new(hg_config.daily_deep_schedule.clone());
     
     // 連續失敗計數檔案路徑
-    let consecutive_path = hg_config.circuit_breaker_path.parent().unwrap().join("consecutive_failures.json");
+    let consecutive_path = hg_config.circuit_breaker_path.parent()
+        .map(|p| p.join("consecutive_failures.json"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".buzz/WORK_LOGS/consecutive_failures.json"));
     
     tracing::info!("Health Guardian Phase B started: schedule={}, daily_deep={}", 
         hg_config.schedule, hg_config.daily_deep_schedule);
@@ -495,95 +512,70 @@ async fn send_alert_with_keys(
     
     // 構建 tags
     let tags = vec![
-        vec!["h".to_string(), channel_id],
+        vec!["h".to_string(), channel_id.clone()],
         vec!["t".to_string(), "health-alert".to_string()],
     ];
     
     // 實際發送 Nostr 事件 (Kind 1 - Text Note)
     let event_id = crate::builtin::call_sign_and_send_event_direct(
         agent_keys,
-        &config.relay_url,
+        &config.relay_ws_url,
         1, // Kind 1: Text Note
         content,
         tags,
     ).await?;
     
     tracing::info!("Health alert sent via Nostr: event_id={}, channel={}, failures={}", 
-        event_id, channel_id, consecutive_failures);
+        event_id, channel_id.clone(), consecutive_failures);
     
     Ok(())
-}
-
-/// Phase A: 僅檢查與報告的單次運行 (供 CLI 調用)
-/// 別名：phase_a_run_once 的簡化版本，不更新連續失敗計數
-pub async fn run_health_check_once(config: &Config) -> Result<HealthReport, AgentError> {
-    // 1. 診斷
-    let checks = crate::health_diagnoser::run_health_check(config).await?;
-    
-    // 2. 分析
-    let analysis = crate::health_analyzer::run_analysis(config).await?;
-    
-    // 3. Phase A 不執行修復，只報告
-    let remediations = Vec::new();
-    
-    // 4. 產出報告
-    let report = build_report(checks, analysis, remediations);
-    
-    Ok(report)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use chrono::{DateTime, Utc, TimeZone};
+    use std::time::SystemTime;
+    use chrono::{Utc, TimeZone};
     
     #[test]
     fn test_cron_schedule_every_15_min() {
-        let cron = CronSchedule::new("*/15 * * * *".to_string());
+        let mut cron = CronSchedule::new("*/15 * * * *".to_string());
         // 2026-01-01 12:00:00 UTC
         let t = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
         let sys_time: SystemTime = t.into();
-        assert!(cron.matches(sys_time));
+        assert!(cron.matches(sys_time).unwrap());
         
         let t2 = Utc.with_ymd_and_hms(2026, 1, 1, 12, 15, 0).unwrap();
         let sys_time2: SystemTime = t2.into();
-        assert!(cron.matches(sys_time2));
+        assert!(cron.matches(sys_time2).unwrap());
         
         let t3 = Utc.with_ymd_and_hms(2026, 1, 1, 12, 14, 0).unwrap();
         let sys_time3: SystemTime = t3.into();
-        assert!(!cron.matches(sys_time3));
+        assert!(!cron.matches(sys_time3).unwrap());
     }
     
     #[test]
     fn test_cron_schedule_daily_at_4am() {
-        let cron = CronSchedule::new("0 4 * * *".to_string());
+        let mut cron = CronSchedule::new("0 4 * * *".to_string());
         let t = Utc.with_ymd_and_hms(2026, 1, 1, 4, 0, 0).unwrap();
         let sys_time: SystemTime = t.into();
-        assert!(cron.matches(sys_time));
+        assert!(cron.matches(sys_time).unwrap());
         
         let t2 = Utc.with_ymd_and_hms(2026, 1, 2, 4, 0, 0).unwrap();
         let sys_time2: SystemTime = t2.into();
-        assert!(cron.matches(sys_time2));
+        assert!(cron.matches(sys_time2).unwrap());
         
         let t3 = Utc.with_ymd_and_hms(2026, 1, 1, 5, 0, 0).unwrap();
         let sys_time3: SystemTime = t3.into();
-        assert!(!cron.matches(sys_time3));
+        assert!(!cron.matches(sys_time3).unwrap());
     }
     
     #[test]
-    fn test_cron_match_field() {
-        assert!(cron_match_field("*", 5, 0, 59));
-        assert!(cron_match_field("*/15", 0, 0, 59));
-        assert!(cron_match_field("*/15", 15, 0, 59));
-        assert!(cron_match_field("*/15", 30, 0, 59));
-        assert!(cron_match_field("*/15", 45, 0, 59));
-        assert!(!cron_match_field("*/15", 14, 0, 59));
-        assert!(cron_match_field("0", 0, 0, 23));
-        assert!(!cron_match_field("0", 1, 0, 23));
-        assert!(cron_match_field("1-5", 3, 1, 31));
-        assert!(!cron_match_field("1-5", 6, 1, 31));
-        assert!(cron_match_field("1,3,5", 3, 1, 7));
-        assert!(!cron_match_field("1,3,5", 2, 1, 7));
+    fn test_cron_next_after() {
+        let mut cron = CronSchedule::new("0 4 * * *".to_string());
+        let t = Utc.with_ymd_and_hms(2026, 1, 1, 3, 30, 0).unwrap();
+        let next = cron.next_after(t.into()).unwrap();
+        let expected: SystemTime = Utc.with_ymd_and_hms(2026, 1, 1, 4, 0, 0).unwrap().into();
+        assert_eq!(next, expected);
     }
 }

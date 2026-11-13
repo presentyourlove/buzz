@@ -1,4 +1,9 @@
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use nostr::{Keys, SecretKey};
 
 pub const PROTOCOL_VERSION: u32 = 2;
 
@@ -368,6 +373,50 @@ pub fn parse_thinking_summary(raw: Option<&str>) -> Result<ThinkingSummary, Stri
     }
 }
 
+/// Parse Health Guardian configuration from environment variables.
+/// Returns `None` if not enabled (BUZZ_HEALTH_GUARDIAN_ENABLED not set or false).
+fn parse_health_guardian_env() -> Result<Option<HealthGuardianConfig>, String> {
+    let enabled = std::env::var("BUZZ_HEALTH_GUARDIAN_ENABLED")
+        .map(|v| v == "1" || v.to_lowercase() == "true")
+        .unwrap_or(false);
+    
+    if !enabled {
+        return Ok(None);
+    }
+    
+    let channel_id = std::env::var("BUZZ_HEALTH_GUARDIAN_CHANNEL")
+        .map_err(|_| "config: BUZZ_HEALTH_GUARDIAN_CHANNEL required when guardian enabled".to_string())?;
+    
+    let schedule = std::env::var("BUZZ_HEALTH_GUARDIAN_SCHEDULE").unwrap_or_else(|_| "*/15 * * * *".to_string());
+    let daily_deep_schedule = std::env::var("BUZZ_HEALTH_GUARDIAN_DAILY_DEEP").unwrap_or_else(|_| "0 4 * * *".to_string());
+    let work_logs_path = std::env::var("BUZZ_WORK_LOGS_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(".buzz/WORK_LOGS"));
+    let circuit_breaker_path = std::env::var("BUZZ_CIRCUIT_BREAKER_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(".buzz/WORK_LOGS/circuit_breaker.json"));
+    let openrouter_port = std::env::var("BUZZ_OPENROUTER_PORT").map(|v| v.parse().unwrap_or(8080)).unwrap_or(8080);
+    let sync_pid_file = std::env::var("BUZZ_SYNC_PID_FILE").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(".buzz/sync_obsidian.pid"));
+    let proxy_port = std::env::var("BUZZ_PROXY_PORT").map(|v| v.parse().unwrap_or(3000)).unwrap_or(3000);
+    
+    let max_consecutive_failures = std::env::var("BUZZ_HEALTH_MAX_CONSECUTIVE_FAILURES").map(|v| v.parse().unwrap_or(3)).unwrap_or(3);
+    let circuit_breaker_auto_reset = std::env::var("BUZZ_HEALTH_CB_AUTO_RESET").map(|v| v == "1" || v.to_lowercase() == "true").unwrap_or(true);
+    let process_restart_cooldown_secs = std::env::var("BUZZ_HEALTH_RESTART_COOLDOWN").map(|v| v.parse().unwrap_or(300)).unwrap_or(300);
+    
+    Ok(Some(HealthGuardianConfig {
+        enabled: true,
+        channel_id,
+        schedule,
+        daily_deep_schedule,
+        work_logs_path,
+        circuit_breaker_path,
+        openrouter_port,
+        sync_pid_file,
+        proxy_port,
+        alert_threshold: AlertThreshold {
+            max_consecutive_failures,
+            circuit_breaker_auto_reset,
+            process_restart_cooldown_secs,
+        },
+    }))
+}
+
 /// Parse `BUZZ_AGENT_THINKING_EFFORT`. Pure (env-free) for testability.
 pub fn parse_thinking_effort(raw: Option<&str>) -> Result<Option<ThinkingEffort>, String> {
     match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
@@ -604,6 +653,9 @@ pub struct Config {
     /// all end-turn objections — at the default 3 both reminders fit; at 1 only
     /// one does; at 0 the guard is off with the hooks.
     pub require_reply: bool,
+    /// Delay in milliseconds between agent rounds to prevent rate-limit bursts.
+    /// Set via `BUZZ_AGENT_ROUND_PACING_MS`. Default 0.
+    pub round_pacing_ms: u64,
     /// Hook server allowlist. See [`HookServers`] for variant semantics.
     /// Default (env unset/empty) is `None` — hooks are off unless the
     /// operator explicitly opts in.
@@ -656,6 +708,61 @@ pub struct Config {
     /// HistoryItem memory cache maximum entries (Mode B: Phase 2).
     /// Default 10000. Set via `BUZZ_AGENT_HISTORY_CACHE_MAX`.
     pub history_cache_max_entries: usize,
+
+    /// System Health Guardian configuration.
+    pub health_guardian: Option<HealthGuardianConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HealthGuardianConfig {
+    pub enabled: bool,
+    pub channel_id: String,
+    pub schedule: String,
+    pub daily_deep_schedule: String,
+    pub work_logs_path: PathBuf,
+    pub circuit_breaker_path: PathBuf,
+    pub openrouter_port: u16,
+    pub sync_pid_file: PathBuf,
+    pub proxy_port: u16,
+    pub alert_threshold: AlertThreshold,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AlertThreshold {
+    pub max_consecutive_failures: u32,
+    pub circuit_breaker_auto_reset: bool,
+    pub process_restart_cooldown_secs: u64,
+}
+
+impl Default for HealthGuardianConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            channel_id: String::new(),
+            schedule: "*/15 * * * *".into(),
+            daily_deep_schedule: "0 4 * * *".into(),
+            work_logs_path: PathBuf::from(".buzz/WORK_LOGS"),
+            circuit_breaker_path: PathBuf::from(".buzz/WORK_LOGS/circuit_breaker.json"),
+            openrouter_port: 8080,
+            sync_pid_file: PathBuf::from(".buzz/sync_obsidian.pid"),
+            proxy_port: 3000,
+            alert_threshold: AlertThreshold {
+                max_consecutive_failures: 3,
+                circuit_breaker_auto_reset: true,
+                process_restart_cooldown_secs: 300,
+            },
+        }
+    }
+}
+
+impl Default for AlertThreshold {
+    fn default() -> Self {
+        Self {
+            max_consecutive_failures: 3,
+            circuit_breaker_auto_reset: true,
+            process_restart_cooldown_secs: 300,
+        }
+    }
 }
 
 impl Config {
@@ -727,6 +834,11 @@ impl Config {
             (_, Some(p)) => std::fs::read_to_string(&p).map_err(|e| format!("config: read {p}: {e}"))?,
             _ => DEFAULT_SYSTEM_PROMPT.to_owned(),
         };
+        let max_context_tokens: u64 = parse_env("BUZZ_AGENT_MAX_CONTEXT_TOKENS", 200_000u64)?;
+        let mut max_output_tokens: u32 = parse_env("BUZZ_AGENT_MAX_OUTPUT_TOKENS", 65_536)?;
+        if max_context_tokens <= u64::from(max_output_tokens) {
+            max_output_tokens = (max_context_tokens / 4).max(512) as u32;
+        }
         let cfg = Config {
             provider,
             system_prompt,
@@ -736,7 +848,7 @@ impl Config {
             anthropic_api_version: env_or("ANTHROPIC_API_VERSION", "2023-06-01"),
             openai_api,
             max_rounds: parse_env("BUZZ_AGENT_MAX_ROUNDS", 0)?,
-            max_output_tokens: parse_env("BUZZ_AGENT_MAX_OUTPUT_TOKENS", 65_536)?,
+            max_output_tokens,
             max_token_recoveries: parse_env("BUZZ_AGENT_MAX_TOKEN_RECOVERIES", 3u32)?,
             llm_timeout: Duration::from_secs(parse_env("BUZZ_AGENT_LLM_TIMEOUT_SECS", 240)?),
             tool_timeout: Duration::from_secs(parse_env("BUZZ_AGENT_TOOL_TIMEOUT_SECS", 1_260)?),
@@ -754,7 +866,7 @@ impl Config {
                 "BUZZ_AGENT_MAX_TOOL_RESULT_TEXT_BYTES",
                 DEFAULT_TOOL_RESULT_TEXT_BYTES,
             )?,
-            max_context_tokens: parse_env("BUZZ_AGENT_MAX_CONTEXT_TOKENS", 200_000u64)?,
+            max_context_tokens,
             max_handoffs: parse_env("BUZZ_AGENT_MAX_HANDOFFS", 10)?,
             max_parallel_tools: parse_env("BUZZ_AGENT_MAX_PARALLEL_TOOLS", 8usize)?,
             max_pending_permissions: parse_env("BUZZ_AGENT_MAX_PENDING_PERMISSIONS", 32usize)?,
@@ -765,6 +877,7 @@ impl Config {
             hook_timeout: Duration::from_millis(parse_env("BUZZ_AGENT_HOOK_TIMEOUT_MS", 2500u64)?),
             stop_max_rejections: parse_env("BUZZ_AGENT_STOP_MAX_REJECTIONS", 3u32)?,
             require_reply: parse_env("BUZZ_AGENT_REQUIRE_REPLY", 0u8)? != 0,
+            round_pacing_ms: parse_env("BUZZ_AGENT_ROUND_PACING_MS", 0u64)?,
             hook_servers: parse_hook_servers_env("MCP_HOOK_SERVERS"),
             databricks_model_filter: DatabricksModelFilter::parse(
                 env("DATABRICKS_MODEL_FILTER").as_deref(),
@@ -777,9 +890,248 @@ impl Config {
             prompt_caching: parse_env("BUZZ_AGENT_PROMPT_CACHING", 1u8)? != 0,
             agent_keys: parse_agent_keys(env("BUZZ_AGENT_KEYS").as_deref())?,
             redis_url: env("BUZZ_AGENT_REDIS_URL").unwrap_or_default(),
+            relay_ws_url: env("BUZZ_AGENT_RELAY_WS_URL").unwrap_or_default(),
             history_cache_ttl_secs: parse_env("BUZZ_AGENT_HISTORY_CACHE_TTL", 300u64)?,
             history_cache_max_entries: parse_env("BUZZ_AGENT_HISTORY_CACHE_MAX", 10_000usize)?,
+            health_guardian: parse_health_guardian_env()?,
         };
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    /// Load configuration from a TOML file.
+    /// 
+    /// This merges TOML config with environment variables (env vars take precedence).
+    /// Returns the parsed Config.
+    pub fn from_toml_file(path: &std::path::Path) -> Result<Self, String> {
+        use std::fs;
+        
+        let content = fs::read_to_string(path)
+            .map_err(|e| format!("config: failed to read TOML file {}: {}", path.display(), e))?;
+        
+        let toml_value: toml::Value = content.parse()
+            .map_err(|e| format!("config: failed to parse TOML file {}: {}", path.display(), e))?;
+        
+        // Extract agent section
+        let agent = toml_value.get("agent").and_then(|v| v.as_table())
+            .ok_or_else(|| "config: missing [agent] section in TOML".to_string())?;
+        
+        // Helper to get string from TOML or env
+        let get_str = |key: &str, env_key: &str| -> Result<String, String> {
+            agent.get(key)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var(env_key).ok())
+                .ok_or_else(|| format!("config: {} not found in TOML or env {}", key, env_key))
+        };
+        
+        let get_opt_str = |key: &str, env_key: &str| -> Option<String> {
+            agent.get(key)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var(env_key).ok())
+        };
+        
+        let get_bool = |key: &str, env_key: &str, default: bool| -> bool {
+            agent.get(key)
+                .and_then(|v| v.as_bool())
+                .unwrap_or_else(|| std::env::var(env_key).ok().and_then(|v| v.parse().ok()).unwrap_or(default))
+        };
+        
+        let get_int = |key: &str, env_key: &str, default: i64| -> i64 {
+            agent.get(key)
+                .and_then(|v| v.as_integer())
+                .unwrap_or_else(|| std::env::var(env_key).ok().and_then(|v| v.parse().ok()).unwrap_or(default))
+        };
+        
+        let get_uint = |key: &str, env_key: &str, default: u64| -> u64 {
+            agent.get(key)
+                .and_then(|v| v.as_integer())
+                .map(|v| v as u64)
+                .unwrap_or_else(|| std::env::var(env_key).ok().and_then(|v| v.parse().ok()).unwrap_or(default))
+        };
+        
+        // Parse provider
+        let provider_str = get_str("provider", "BUZZ_AGENT_PROVIDER")?;
+        let provider = match provider_str.to_lowercase().as_str() {
+            "anthropic" => Provider::Anthropic,
+            "openai" => Provider::OpenAi,
+            "databricks" => Provider::Databricks,
+            "databricks_v2" => Provider::DatabricksV2,
+            "openrouter" => Provider::OpenRouter,
+            _ => return Err(format!("config: unknown provider '{}'", provider_str)),
+        };
+        
+        // Get API key based on provider
+        let api_key = match provider {
+            Provider::Anthropic => get_str("anthropic_api_key", "ANTHROPIC_API_KEY")?,
+            Provider::OpenAi => get_str("openai_compat_api_key", "OPENAI_COMPAT_API_KEY")?,
+            Provider::OpenRouter => get_str("openrouter_api_key", "OPENROUTER_API_KEY")?,
+            Provider::Databricks | Provider::DatabricksV2 => get_opt_str("databricks_token", "DATABRICKS_TOKEN").unwrap_or_default(),
+        };
+        
+        // Get model
+        let model = get_opt_str("model", "BUZZ_AGENT_MODEL")
+            .or_else(|| match provider {
+                Provider::Anthropic => get_opt_str("anthropic_model", "ANTHROPIC_MODEL"),
+                Provider::OpenAi => get_opt_str("openai_compat_model", "OPENAI_COMPAT_MODEL"),
+                Provider::Databricks | Provider::DatabricksV2 => get_opt_str("databricks_model", "DATABRICKS_MODEL"),
+                Provider::OpenRouter => get_opt_str("openrouter_model", "OPENROUTER_MODEL"),
+            })
+            .ok_or_else(|| "config: model not specified".to_string())?;
+        
+        // Get base URL
+        let base_url = match provider {
+            Provider::Anthropic => get_opt_str("anthropic_base_url", "ANTHROPIC_BASE_URL").unwrap_or_else(|| "https://api.anthropic.com".to_string()),
+            Provider::OpenAi => get_opt_str("openai_compat_base_url", "OPENAI_COMPAT_BASE_URL").unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+            Provider::OpenRouter => get_opt_str("openrouter_base_url", "OPENROUTER_BASE_URL").unwrap_or_else(|| "https://openrouter.ai/api/v1".to_string()),
+            Provider::Databricks | Provider::DatabricksV2 => get_str("databricks_host", "DATABRICKS_HOST")?,
+        };
+        
+        // Parse openai_api
+        let openai_api = match provider {
+            Provider::OpenAi => {
+                let api_str = get_opt_str("openai_compat_api", "OPENAI_COMPAT_API").unwrap_or_else(|| "auto".to_string());
+                parse_openai_api(Some(&api_str))?
+            }
+            _ => OpenAiApi::Auto,
+        };
+        
+        // System prompt
+        let system_prompt = get_opt_str("system_prompt", "BUZZ_AGENT_SYSTEM_PROMPT")
+            .or_else(|| {
+                get_opt_str("system_prompt_file", "BUZZ_AGENT_SYSTEM_PROMPT_FILE")
+                    .and_then(|p| fs::read_to_string(&p).ok())
+            })
+            .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_owned());
+        
+        // Agent keys
+        let agent_keys = parse_agent_keys(get_opt_str("private_key", "BUZZ_PRIVATE_KEY").as_deref())?;
+        let redis_url = get_opt_str("redis_url", "BUZZ_AGENT_REDIS_URL").unwrap_or_default();
+        
+        // Health guardian from TOML
+        let health_guardian = if let Some(hg) = toml_value.get("health_guardian").and_then(|v| v.as_table()) {
+            let enabled = hg.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            if enabled {
+                let channel_id = hg.get("channel_id").and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| std::env::var("BUZZ_HEALTH_GUARDIAN_CHANNEL").ok())
+                    .ok_or_else(|| "config: health_guardian.channel_id required when enabled".to_string())?;
+                
+                let schedule = hg.get("schedule").and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| std::env::var("BUZZ_HEALTH_GUARDIAN_SCHEDULE").ok())
+                    .unwrap_or_else(|| "*/15 * * * *".to_string());
+                
+                let daily_deep_schedule = hg.get("daily_deep_schedule").and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| std::env::var("BUZZ_HEALTH_GUARDIAN_DAILY_DEEP").ok())
+                    .unwrap_or_else(|| "0 4 * * *".to_string());
+                
+                let work_logs_path = hg.get("work_logs_path").and_then(|v| v.as_str())
+                    .map(std::path::PathBuf::from)
+                    .or_else(|| std::env::var("BUZZ_WORK_LOGS_PATH").ok().map(std::path::PathBuf::from))
+                    .unwrap_or_else(|| std::path::PathBuf::from(".buzz/WORK_LOGS"));
+                
+                let circuit_breaker_path = hg.get("circuit_breaker_path").and_then(|v| v.as_str())
+                    .map(std::path::PathBuf::from)
+                    .or_else(|| std::env::var("BUZZ_CIRCUIT_BREAKER_PATH").ok().map(std::path::PathBuf::from))
+                    .unwrap_or_else(|| std::path::PathBuf::from(".buzz/WORK_LOGS/circuit_breaker.json"));
+                
+                let openrouter_port = hg.get("openrouter_port").and_then(|v| v.as_integer())
+                    .map(|v| v as u16)
+                    .or_else(|| std::env::var("BUZZ_OPENROUTER_PORT").ok().and_then(|v| v.parse().ok()))
+                    .unwrap_or(8080);
+                
+                let sync_pid_file = hg.get("sync_pid_file").and_then(|v| v.as_str())
+                    .map(std::path::PathBuf::from)
+                    .or_else(|| std::env::var("BUZZ_SYNC_PID_FILE").ok().map(std::path::PathBuf::from))
+                    .unwrap_or_else(|| std::path::PathBuf::from(".buzz/sync_obsidian.pid"));
+                
+                let proxy_port = hg.get("proxy_port").and_then(|v| v.as_integer())
+                    .map(|v| v as u16)
+                    .or_else(|| std::env::var("BUZZ_PROXY_PORT").ok().and_then(|v| v.parse().ok()))
+                    .unwrap_or(3000);
+                
+                let alert_threshold = if let Some(at) = hg.get("alert_threshold").and_then(|v| v.as_table()) {
+                    AlertThreshold {
+                        max_consecutive_failures: at.get("max_consecutive_failures").and_then(|v| v.as_integer()).map(|v| v as u32).unwrap_or(3),
+                        circuit_breaker_auto_reset: at.get("circuit_breaker_auto_reset").and_then(|v| v.as_bool()).unwrap_or(true),
+                        process_restart_cooldown_secs: at.get("process_restart_cooldown_secs").and_then(|v| v.as_integer()).map(|v| v as u64).unwrap_or(300),
+                    }
+                } else {
+                    AlertThreshold::default()
+                };
+                
+                Some(HealthGuardianConfig {
+                    enabled: true,
+                    channel_id,
+                    schedule,
+                    daily_deep_schedule,
+                    work_logs_path,
+                    circuit_breaker_path,
+                    openrouter_port,
+                    sync_pid_file,
+                    proxy_port,
+                    alert_threshold,
+                })
+            } else {
+                None
+            }
+        } else {
+            parse_health_guardian_env()?
+        };
+        
+        // Build config
+        let max_context_tokens = get_uint("max_context_tokens", "BUZZ_AGENT_MAX_CONTEXT_TOKENS", 200_000);
+        let mut max_output_tokens = get_uint("max_output_tokens", "BUZZ_AGENT_MAX_OUTPUT_TOKENS", 65536) as u32;
+        if max_context_tokens <= u64::from(max_output_tokens) {
+            max_output_tokens = (max_context_tokens / 4).max(512) as u32;
+        }
+        let cfg = Config {
+            provider,
+            system_prompt,
+            api_key,
+            model,
+            base_url,
+            anthropic_api_version: get_opt_str("anthropic_api_version", "ANTHROPIC_API_VERSION").unwrap_or_else(|| "2023-06-01".to_string()),
+            openai_api,
+            max_rounds: get_uint("max_rounds", "BUZZ_AGENT_MAX_ROUNDS", 0) as u32,
+            max_output_tokens,
+            max_token_recoveries: get_uint("max_token_recoveries", "BUZZ_AGENT_MAX_TOKEN_RECOVERIES", 3) as u32,
+            llm_timeout: Duration::from_secs(get_uint("llm_timeout_secs", "BUZZ_AGENT_LLM_TIMEOUT_SECS", 240)),
+            tool_timeout: Duration::from_secs(get_uint("tool_timeout_secs", "BUZZ_AGENT_TOOL_TIMEOUT_SECS", 1260)),
+            mcp_init_timeout: Duration::from_secs(get_uint("mcp_init_timeout_secs", "BUZZ_AGENT_MCP_INIT_TIMEOUT_SECS", 30)),
+            mcp_max_restart_attempts: get_uint("mcp_max_restart_attempts", "BUZZ_AGENT_MCP_RESTART_MAX_ATTEMPTS", 3) as u32,
+            mcp_restart_base_ms: get_uint("mcp_restart_base_ms", "BUZZ_AGENT_MCP_RESTART_BASE_MS", 500),
+            mcp_restart_max_ms: get_uint("mcp_restart_max_ms", "BUZZ_AGENT_MCP_RESTART_MAX_MS", 30000),
+            max_sessions: get_uint("max_sessions", "BUZZ_AGENT_MAX_SESSIONS", usize::MAX as u64) as usize,
+            max_line_bytes: get_uint("max_line_bytes", "BUZZ_AGENT_MAX_LINE_BYTES", 4 * 1024 * 1024) as usize,
+            max_history_bytes: get_uint("max_history_bytes", "BUZZ_AGENT_MAX_HISTORY_BYTES", 16 * 1024 * 1024) as usize,
+            max_tool_result_text_bytes: get_uint("max_tool_result_text_bytes", "BUZZ_AGENT_MAX_TOOL_RESULT_TEXT_BYTES", DEFAULT_TOOL_RESULT_TEXT_BYTES as u64) as usize,
+            max_context_tokens,
+            max_handoffs: get_uint("max_handoffs", "BUZZ_AGENT_MAX_HANDOFFS", 10) as usize,
+            max_parallel_tools: get_uint("max_parallel_tools", "BUZZ_AGENT_MAX_PARALLEL_TOOLS", 8) as usize,
+            max_pending_permissions: get_uint("max_pending_permissions", "BUZZ_AGENT_MAX_PENDING_PERMISSIONS", 32) as usize,
+            permission_timeout: Duration::from_secs(get_uint("permission_timeout_secs", "BUZZ_AGENT_PERMISSION_TIMEOUT_SECS", 330)),
+            hook_timeout: Duration::from_millis(get_uint("hook_timeout_ms", "BUZZ_AGENT_HOOK_TIMEOUT_MS", 2500)),
+            stop_max_rejections: get_uint("stop_max_rejections", "BUZZ_AGENT_STOP_MAX_REJECTIONS", 3) as u32,
+            require_reply: get_uint("require_reply", "BUZZ_AGENT_REQUIRE_REPLY", 0) != 0,
+            round_pacing_ms: get_uint("round_pacing_ms", "BUZZ_AGENT_ROUND_PACING_MS", 0),
+            hook_servers: parse_hook_servers_env(get_opt_str("hook_servers", "MCP_HOOK_SERVERS").as_deref().unwrap_or("")),
+            databricks_model_filter: DatabricksModelFilter::parse(get_opt_str("databricks_model_filter", "DATABRICKS_MODEL_FILTER").as_deref())?,
+            hints_enabled: get_bool("hints_enabled", "BUZZ_AGENT_NO_HINTS", true),
+            thinking_effort: parse_thinking_effort(get_opt_str("thinking_effort", "BUZZ_AGENT_THINKING_EFFORT").as_deref())?,
+            thinking_summary: parse_thinking_summary(get_opt_str("thinking_summary", "BUZZ_AGENT_THINKING_SUMMARY").as_deref())?,
+            prompt_caching: get_bool("prompt_caching", "BUZZ_AGENT_PROMPT_CACHING", true),
+            agent_keys,
+            redis_url,
+            relay_ws_url: get_opt_str("relay_ws_url", "BUZZ_AGENT_RELAY_WS_URL").unwrap_or_default(),
+            history_cache_ttl_secs: get_uint("history_cache_ttl_secs", "BUZZ_AGENT_HISTORY_CACHE_TTL", 300),
+            history_cache_max_entries: get_uint("history_cache_max_entries", "BUZZ_AGENT_HISTORY_CACHE_MAX", 10_000) as usize,
+            health_guardian,
+        };
+        
         cfg.validate()?;
         Ok(cfg)
     }
@@ -825,6 +1177,7 @@ impl Config {
             hook_timeout: Duration::from_secs(1),
             stop_max_rejections: 0,
             require_reply: false,
+            round_pacing_ms: 0,
             hook_servers: HookServers::None,
             databricks_model_filter,
             hints_enabled: false,
@@ -833,8 +1186,10 @@ impl Config {
             prompt_caching: false,
             agent_keys: None,
             redis_url: String::new(),
+            relay_ws_url: String::new(),
             history_cache_ttl_secs: 300,
             history_cache_max_entries: 10_000,
+            health_guardian: None,
         }
     }
 
@@ -1165,7 +1520,7 @@ fn parse_agent_keys(raw: Option<&str>) -> Result<Option<Arc<nostr::Keys>>, Strin
 
     // Try nsec (bech32) first
     if raw.starts_with("nsec1") {
-        let keys = nostr::Keys::from_nsec(raw)
+        let keys = nostr::Keys::parse(raw)
             .map_err(|e| format!("invalid nsec: {e}"))?;
         return Ok(Some(Arc::new(keys)));
     }

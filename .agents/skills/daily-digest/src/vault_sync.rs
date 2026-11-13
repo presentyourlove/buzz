@@ -15,7 +15,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::daily_digest::digest_generator::NaiveDate;
+use chrono::NaiveDate;
 
 /// Vault 同步模組
 /// 
@@ -30,7 +30,9 @@ use crate::daily_digest::digest_generator::NaiveDate;
 /// 
 /// # 使用範例
 /// 
-/// ```rust
+/// ```rust,no_run
+/// use std::path::PathBuf;
+/// use chrono::NaiveDate;
 /// use daily_digest::vault_sync::VaultSync;
 /// 
 /// fn main() {
@@ -113,7 +115,8 @@ impl VaultSync {
     /// 
     /// # 示例
     /// 
-    /// ```rust
+    /// ```rust,no_run
+    /// use std::path::PathBuf;
     /// use daily_digest::vault_sync::VaultSync;
     /// use chrono::NaiveDate;
     /// 
@@ -286,11 +289,36 @@ impl VaultSync {
                 lines.push(&date_header);
             }
             
-            lines.push(link);
+            lines.push(&link);
             
             // 重新構建 INDEX.md 內容
             index_content = lines.join("\n");
         }
         
         // 寫入更新後的 INDEX.md 文件
-   
+        self.atomic_write(&index_path, &index_content)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SyncResult {
+    pub file_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub enum SyncError {
+    IoError(String),
+    InvalidPath(String),
+}
+
+impl std::fmt::Display for SyncError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SyncError::IoError(s) => write!(f, "IO 錯誤: {}", s),
+            SyncError::InvalidPath(s) => write!(f, "路徑無效: {}", s),
+        }
+    }
+}
+
+impl std::error::Error for SyncError {}

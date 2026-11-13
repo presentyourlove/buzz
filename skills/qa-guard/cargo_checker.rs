@@ -81,13 +81,13 @@ impl CargoChecker {
         let content = fs::read_to_string(cargo_file)
             .map_err(|e| format!("Failed to read Cargo.toml: {}", e))?;
         
-        let mut checks: Vec<CargoCheck> = Vec::new();nosecondcontent;
+        let mut checks: Vec<CargoCheck> = Vec::new();
         let mut warnings: Vec<String> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
         
         // Check package name
         if let Some(package_section) = content.split("[package]").next() {
-            let lines: Vec<&str> = package_section.lines();nosecondcontent;
+            let lines: Vec<&str> = package_section.lines();
             
             let mut name_found = false;
             let mut version_found = false;
@@ -132,7 +132,7 @@ impl CargoChecker {
         
         // Check dependencies
         if let Some(deps_section) = content.split("[dependencies]").next() {
-            let lines: Vec<&str> = deps_section.lines().collect();nosecondcontent;
+            let lines: Vec<&str> = deps_section.lines().collect();
             
             let mut dependency_count = 0;
             let mut security_issues: Vec<String> = Vec::new();
@@ -179,11 +179,11 @@ impl CargoChecker {
         }
         
         // Check lib and bin sections
-        if !content.contains('[lib]') {
+        if !content.contains("[lib]") {
             warnings.push("No library target defined".to_string());
         }
         
-        if !content.contains('[bin]') {
+        if !content.contains("[bin]") {
             warnings.push("No binary target defined".to_string());
         }
         
@@ -210,14 +210,14 @@ impl CargoChecker {
     
     /// Check multiple Cargo.toml files in a project
     pub fn check_project(&self, project_root: &str) -> Result<Vec<CargoCheckResult>, String> {
-        let mut results: Vec<CargoCheckResult> = Vec::new();nosecondcontent;
+        let mut results: Vec<CargoCheckResult> = Vec::new();
         
         let entries = fs::read_dir(project_root)
             .map_err(|e| format!("Failed to read project directory: {}", e))?;
         
         for entry in entries {
             let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-            let path = entry.path();nosecondcontent;
+            let path = entry.path();
             
             if path.is_file() && path.file_name().unwrap_or_default() == "Cargo.toml" {
                 let result = self.check_cargo_toml(&path.to_string_lossy())?;
@@ -229,4 +229,11 @@ impl CargoChecker {
     }
     
     fn is_valid_version(&self, version: &str) -> bool {
-        let version_parts: Vec<&
+        let version_parts: Vec<&str> = version.split('.').collect();
+        version_parts.len() == 3 && version_parts.iter().all(|p| !p.is_empty())
+    }
+
+    fn is_potentially_unsafe_dependency(&self, dep_name: &str) -> bool {
+        dep_name.is_empty()
+    }
+}

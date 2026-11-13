@@ -15,10 +15,9 @@ use crate::agent::RunCtx;
 use crate::hints::{strip_frontmatter, SkillEntry, MAX_SKILL_BODY_BYTES};
 use crate::mcp::truncate_at_boundary;
 use crate::types::{AgentError, ToolDef, ToolResult, ToolResultContent};
-use nostr::{EventBuilder, Keys, Kind, Tag};
+use nostr::{EventBuilder, Kind, Tag};
 use reqwest;
 use chrono;
-use rand::RngCore;
 use hex;
 
 pub const LOAD_SKILL_TOOL: &str = "load_skill";
@@ -310,7 +309,7 @@ pub async fn call_sign_and_send_event(
             .map_err(|e| AgentError::InvalidParams(format!("invalid tag: {e}")))?);
     }
 
-    let event = builder.sign_with_keys(keys.as_ref())
+    let event = builder.sign_with_keys(keys)
         .map_err(|e| AgentError::Other(format!("sign event failed: {e}")))?;
 
     // If kind is 30300 or 4, encrypt content with NIP-44
@@ -320,7 +319,7 @@ pub async fn call_sign_and_send_event(
         let target_pubkey = event.tags.iter()
             .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p"))
             .and_then(|t| t.as_slice().get(1))
-            .and_then(|v| v.as_str());
+            .and_then(|v| Some(v.as_str()));
 
         let encrypted_content = if kind == 4 {
             if let Some(target_pk_str) = target_pubkey {
@@ -328,7 +327,7 @@ pub async fn call_sign_and_send_event(
                     .map_err(|e| AgentError::InvalidParams(format!("invalid target pubkey in p-tag: {e}")))?;
                 nostr::nips::nip44::encrypt(
                     keys.secret_key(),
-                    target_pk,
+                    &target_pk,
                     &content,
                     nostr::nips::nip44::Version::V2,
                 ).map_err(|e| AgentError::Other(format!("NIP-44 encrypt failed: {e}")))?
@@ -339,7 +338,7 @@ pub async fn call_sign_and_send_event(
             // kind:30300 - self-encrypt
             nostr::nips::nip44::encrypt(
                 keys.secret_key(),
-                keys.public_key(),
+                &keys.public_key(),
                 &content,
                 nostr::nips::nip44::Version::V2,
             ).map_err(|e| AgentError::Other(format!("NIP-44 encrypt failed: {e}")))?
@@ -347,7 +346,7 @@ pub async fn call_sign_and_send_event(
 
         EventBuilder::new(Kind::Custom(kind), encrypted_content)
             .tags(event.tags)
-            .sign_with_keys(keys.as_ref())
+            .sign_with_keys(keys)
             .map_err(|e| AgentError::Other(format!("sign event failed: {e}")))?
     } else {
         event
@@ -356,7 +355,7 @@ pub async fn call_sign_and_send_event(
     // Publish via HTTP to relay
     let client = reqwest::Client::new();
     let response = client
-        .post(&ctx.cfg.relay_url)
+        .post(&ctx.cfg.relay_ws_url)
         .header("Content-Type", "application/json")
         .json(&serde_json::json!([ "EVENT", event ]))
         .send()
@@ -427,7 +426,7 @@ pub async fn call_send_direct_message(
     // Encrypt content with NIP-44 v2 for kind:4 DM
     let encrypted_content = nostr::nips::nip44::encrypt(
         keys.secret_key(),
-        target_pk,
+        &target_pk,
         content,
         nostr::nips::nip44::Version::V2,
     ).map_err(|e| AgentError::Other(format!("NIP-44 encrypt failed: {e}")))?;
@@ -435,13 +434,13 @@ pub async fn call_send_direct_message(
     // Build DM event (kind:4 / NIP-44 encrypted)
     let dm_event = EventBuilder::new(Kind::Custom(4), encrypted_content)
         .tag(Tag::parse(["p", target_pubkey]).unwrap())
-        .sign_with_keys(keys.as_ref())
+        .sign_with_keys(keys)
         .map_err(|e| AgentError::Other(format!("DM event sign failed: {e}")))?;
 
     // Publish via HTTP to relay
     let client = reqwest::Client::new();
     let response = client
-        .post(&ctx.cfg.relay_url)
+        .post(&ctx.cfg.relay_ws_url)
         .header("Content-Type", "application/json")
         .json(&serde_json::json!([ "EVENT", dm_event ]))
         .send()
@@ -505,7 +504,7 @@ fn validate_not_before(not_before: i64) -> Result<(), AgentError> {
 
 /// Generate a 128-bit entropy d-tag for NIP-ER reminders
 fn generate_d_tag() -> String {
-    use rand::RngCore;
+    use rand::Rng;
     let mut bytes = [0u8; 16];
     rand::rng().fill_bytes(&mut bytes);
     hex::encode(bytes)
@@ -584,7 +583,7 @@ pub async fn call_create_reminder(
     // NIP-44 self-encrypt (Agent decrypts itself)
     let ciphertext = nostr::nips::nip44::encrypt(
         keys.secret_key(),
-        keys.public_key(),
+        &keys.public_key(),
         &reminder_content.to_string(),
         nostr::nips::nip44::Version::V2,
     ).map_err(|e| AgentError::Other(format!("NIP-44 encrypt failed: {e}")))?;
@@ -595,13 +594,13 @@ pub async fn call_create_reminder(
         .tag(Tag::parse(["not_before", &not_before.to_string()])?)
         .tag(Tag::parse(["alt", "Encrypted reminder"]) ?);
 
-    let event = builder.sign_with_keys(keys.as_ref())
+    let event = builder.sign_with_keys(keys)
         .map_err(|e| AgentError::Other(format!("sign event failed: {e}")))?;
 
     // Publish via HTTP to relay
     let client = reqwest::Client::new();
     let response = client
-        .post(&ctx.cfg.relay_url)
+        .post(&ctx.cfg.relay_ws_url)
         .header("Content-Type", "application/json")
         .json(&serde_json::json!([ "EVENT", event ]))
         .send()
@@ -622,6 +621,47 @@ pub async fn call_create_reminder(
         ))],
         is_error: false,
     })
+}
+
+/// Direct Nostr event signing and sending for non-agent contexts (e.g., Health Guardian).
+/// This bypasses the RunCtx requirement and directly uses agent keys and relay URL.
+pub async fn call_sign_and_send_event_direct(
+    keys: &crate::types::AgentKeys,
+    relay_url: &str,
+    kind: u16,
+    content: String,
+    tags: Vec<Vec<String>>,
+) -> Result<String, AgentError> {
+    use nostr::{EventBuilder, Kind, Tag};
+    use reqwest;
+
+    let mut builder = EventBuilder::new(Kind::Custom(kind), content);
+    for tag in tags {
+        builder = builder.tag(Tag::parse(tag)
+            .map_err(|e| AgentError::InvalidParams(format!("invalid tag: {e}")))?);
+    }
+
+    let event = builder.sign_with_keys(keys)
+        .map_err(|e| AgentError::Other(format!("sign event failed: {e}")))?;
+
+    // Publish via HTTP to relay
+    let client = reqwest::Client::new();
+    let response = client
+        .post(relay_url)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!([ "EVENT", event ]))
+        .send()
+        .await
+        .map_err(|e| AgentError::Other(format!("HTTP publish failed: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(AgentError::Other(format!(
+            "relay returned error: {}",
+            response.status()
+        )));
+    }
+
+    Ok(event.id.to_string())
 }
 
 #[cfg(test)]

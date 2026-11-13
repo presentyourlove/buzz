@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::types::AgentError;
+use crate::health_guardian::phase_b_run_daemon;
+use crate::types::{AgentError, AgentKeys};
 use tokio::sync::watch;
 
 /// Daemon lifecycle management for Mode B Agent reminder proxy.
@@ -9,10 +10,12 @@ use tokio::sync::watch;
 /// The daemon runs as a background task within the buzz-agent process,
 /// maintaining a persistent WebSocket connection to the Relay to listen
 /// for `kind:30300` (Event Reminder) due signals addressed to the Agent.
+/// Also runs the System Health Guardian (Phase B) on a cron schedule.
 pub struct Daemon {
     config: Arc<Config>,
     shutdown_tx: watch::Sender<bool>,
     handle: Option<tokio::task::JoinHandle<()>>,
+    health_guardian_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Daemon {
@@ -23,12 +26,14 @@ impl Daemon {
             config,
             shutdown_tx,
             handle: None,
+            health_guardian_handle: None,
         }
     }
 
     /// Start the daemon.
     ///
-    /// Spawns the WebSocket client, subscription manager, and event dispatcher.
+    /// Spawns the WebSocket client, subscription manager, event dispatcher,
+    /// and the System Health Guardian (Phase B).
     /// Returns an error if the daemon is already running or redis_url is not configured.
     pub async fn start(&mut self) -> Result<(), AgentError> {
         if self.handle.is_some() {
@@ -49,18 +54,39 @@ impl Daemon {
         });
 
         self.handle = Some(handle);
+        
+        // Start Health Guardian Phase B if configured
+        if self.config.health_guardian.is_some() {
+            let hg_shutdown_rx = self.shutdown_tx.subscribe();
+            let hg_config = self.config.clone();
+            let agent_keys = self.config.agent_keys.clone()
+                .ok_or_else(|| AgentError::InvalidParams("agent keys required for health guardian".into()))?;
+            
+            let hg_handle = tokio::spawn(async move {
+                if let Err(e) = phase_b_run_daemon(hg_config, agent_keys, hg_shutdown_rx).await {
+                    tracing::error!("Health Guardian exited with error: {}", e);
+                }
+            });
+            
+            self.health_guardian_handle = Some(hg_handle);
+            tracing::info!("System Health Guardian (Phase B) started");
+        }
+
         tracing::info!("Agent daemon started");
         Ok(())
     }
 
     /// Stop the daemon gracefully.
     ///
-    /// Signals shutdown and waits for the background task to complete.
+    /// Signals shutdown and waits for the background tasks to complete.
     pub async fn stop(&mut self) {
         if self.shutdown_tx.send(true).is_err() {
             tracing::warn!("daemon shutdown channel already closed");
         }
         if let Some(handle) = self.handle.take() {
+            let _ = handle.await;
+        }
+        if let Some(handle) = self.health_guardian_handle.take() {
             let _ = handle.await;
         }
         tracing::info!("Agent daemon stopped");
@@ -95,7 +121,7 @@ async fn run_daemon(
         .map(|k| k.public_key().to_hex())
         .ok_or_else(|| AgentError::InvalidParams("agent keys not configured".into()))?;
 
-    let lock = DaemonLock::new(&config.redis_url, &agent_pubkey)
+    let mut lock = DaemonLock::new(&config.redis_url, &agent_pubkey)
         .await
         .map_err(|e| AgentError::Other(format!("failed to create daemon lock: {e}")))?;
 
@@ -109,7 +135,7 @@ async fn run_daemon(
     let heartbeat_handle = lock.start_heartbeat();
 
     // Create components
-    let mut ws_client = WebSocketClient::new(config.relay_url.clone());
+    let mut ws_client = WebSocketClient::new(config.redis_url.clone());
     let mut sub_manager = SubscriptionManager::new(agent_pubkey.clone());
 
     // Connect and authenticate
@@ -135,17 +161,10 @@ async fn run_daemon(
             }
             event = event_stream.recv() => {
                 match event {
-                    Some(Ok(event)) => {
+                    Some(event) => {
                         if let Err(e) = dispatcher.dispatch(event).await {
                             tracing::error!("Failed to dispatch reminder event: {}", e);
                         }
-                    }
-                    Some(Err(e)) => {
-                        tracing::error!("WebSocket event error: {}", e);
-                        // Attempt reconnection
-                        ws_client.reconnect().await?;
-                        sub_manager.subscribe(&ws_client).await?;
-                        event_stream = ws_client.event_stream();
                     }
                     None => {
                         tracing::warn!("WebSocket stream ended");

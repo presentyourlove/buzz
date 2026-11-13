@@ -1,0 +1,17 @@
+{
+  "name": "obsidian-digest-sync",
+  "version": "1.0.0",
+  "description": "Obsidian Digest Sync Skill - 自動化對話摘要提取與同步",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "daemon": "node digest_daemon.mjs",
+    "sync-once": "node main.js --run-once",
+    "sync-range": "node main.js --run-range",
+    "sync-daily": "node main.js --daily"
+  },
+  "dependencies": {
+    "node-cron": "^3.0.3"
+  }
+}

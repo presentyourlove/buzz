@@ -263,6 +263,76 @@ class TestBuzzSecurityAndHooks(unittest.TestCase):
         self.assertNotIn("os.system", code, "DO_VERIFY.py 中嚴禁使用不安全 os.system 指令拼接")
         self.assertIn("subprocess.run", code, "DO_VERIFY.py 必須使用參數化安全子進程 subprocess.run")
 
+    def test_11_health_dashboard_xss_protection(self):
+        """測試 health_dashboard 已實作 HTML 跳脫與安全 Content-Type，消除 XSS (CWE-79)"""
+        mod_path = os.path.join(BUZZ_DIR, "crates", "buzz-agent", "src", "health_dashboard", "mod.rs")
+        with open(mod_path, "r", encoding="utf-8") as f:
+            code = f.read()
+        self.assertIn("fn escape_html", code, "health_dashboard 必須包含 escape_html 跳脫函式")
+        self.assertIn("escape_html(&p.name)", code, "進程名稱必須經過 HTML 跳脫")
+        self.assertIn("escape_html(&p.details)", code, "進程詳情必須經過 HTML 跳脫")
+        self.assertIn("text/plain; charset=utf-8", code, "health.md 端點必須返回 text/plain 以防範儲存型 XSS")
+
+    def test_12_utf8_multibyte_slicing_safety(self):
+        """測試 health_diagnoser 與 health_analyzer 已移除不安全位元組切片，支援繁體中文與 Emoji"""
+        diag_path = os.path.join(BUZZ_DIR, "crates", "buzz-agent", "src", "health_diagnoser.rs")
+        with open(diag_path, "r", encoding="utf-8") as f:
+            diag_code = f.read()
+        self.assertNotIn("&value[..4]", diag_code, "health_diagnoser 嚴禁使用 &value[..4] 位元組切割")
+        self.assertIn("value.chars()", diag_code, "health_diagnoser 必須使用字元安全迭代")
+
+        analyzer_path = os.path.join(BUZZ_DIR, "crates", "buzz-agent", "src", "health_analyzer.rs")
+        with open(analyzer_path, "r", encoding="utf-8") as f:
+            analyzer_code = f.read()
+        self.assertIn("MAX_LOG_BYTES", analyzer_code, "health_analyzer 必須限制單次日誌讀取大小防止 OOM DoS")
+
+    def test_13_hooks_deterministic_and_real_checks(self):
+        """測試 Hooks 規則引擎具備確定性順序且修復所有偽檢查與參數錯置漏洞"""
+        hooks_mod = os.path.join(BUZZ_DIR, "crates", "buzz-agent", "src", "hooks", "mod.rs")
+        with open(hooks_mod, "r", encoding="utf-8") as f:
+            mod_code = f.read()
+        self.assertIn("rules: Vec<RuleDef>", mod_code, "Hooks 規則儲存必須使用 Vec<RuleDef> 確保確定性執行順序")
+
+        large_file_rs = os.path.join(BUZZ_DIR, "crates", "buzz-agent", "src", "hooks", "rules", "large_file_refuse.rs")
+        with open(large_file_rs, "r", encoding="utf-8") as f:
+            lf_code = f.read()
+        self.assertNotIn('contains("large")', lf_code, "large_file_refuse 嚴禁使用假檔名判斷")
+        self.assertIn("std::fs::metadata", lf_code, "large_file_refuse 必須檢查真實檔案大小")
+
+    def test_14_obsidian_digest_sync_security(self):
+        """測試 obsidian-digest-sync 已移除 CLI 私鑰暴露與命令注入，並補齊機敏遮罩"""
+        collector_path = os.path.join(BUZZ_DIR, "skills", "obsidian-digest-sync", "digest_collector.mjs")
+        with open(collector_path, "r", encoding="utf-8") as f:
+            collector_code = f.read()
+        self.assertNotIn("'--private-key'", collector_code, "digest_collector 嚴禁透過 CLI 參數傳遞私鑰")
+        self.assertIn("BUZZ_PRIVATE_KEY", collector_code, "digest_collector 必須透過環境變數傳遞私鑰")
+
+        sync_path = os.path.join(BUZZ_DIR, "skills", "obsidian-digest-sync", "digest_sync.mjs")
+        with open(sync_path, "r", encoding="utf-8") as f:
+            sync_code = f.read()
+        self.assertIn("execFileSync", sync_code, "digest_sync 必須使用參數化 execFileSync")
+
+    def test_15_all_skills_rust_files_brace_balance_and_no_truncation(self):
+        """測試 skills/ 與 .agents/skills/ 下全部 36 個 Rust 檔案大括號 100% 平衡且無截斷"""
+        skill_roots = [
+            os.path.join(BUZZ_DIR, "skills"),
+            os.path.join(BUZZ_DIR, ".agents", "skills"),
+        ]
+        rs_count = 0
+        unbalanced = []
+        for root_dir in skill_roots:
+            for r, _, files in os.walk(root_dir):
+                for file in files:
+                    if file.endswith(".rs"):
+                        rs_count += 1
+                        p = os.path.join(r, file)
+                        with open(p, "r", encoding="utf-8") as f:
+                            text = f.read()
+                        if text.count("{") != text.count("}"):
+                            unbalanced.append(os.path.relpath(p, BUZZ_DIR))
+        self.assertGreaterEqual(rs_count, 36, "應至少檢測 36 個技能區 Rust 原始碼檔案")
+        self.assertEqual(len(unbalanced), 0, f"發現大括號不平衡或截斷之 Rust 檔案: {unbalanced}")
+
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(TestBuzzSecurityAndHooks)
     runner = unittest.TextTestRunner(verbosity=2)

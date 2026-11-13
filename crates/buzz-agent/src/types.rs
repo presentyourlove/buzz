@@ -3,6 +3,8 @@ use serde_json::{Map, Value};
 use std::sync::Arc;
 use dashmap::DashMap;
 use blake3;
+use nostr::event::tag::Error as TagError;
+use tokio_tungstenite::tungstenite::Error as WsError;
 
 /// Byte-equivalent charged to the handoff/context-pressure gate for a single
 /// image tool result. The gate maps bytes to tokens at 1 byte/token (see
@@ -16,7 +18,7 @@ use blake3;
 /// fresh context.
 const IMAGE_CONTEXT_TOKEN_EQUIV: usize = 16 * 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ToolResultContent {
     Text(String),
     Image { data: String, mime_type: String },
@@ -148,7 +150,7 @@ impl HistoryItemCache {
     fn hash_item(item: &HistoryItem) -> [u8; 32] {
         let mut hasher = blake3::Hasher::new();
         match item {
-            HistoryItem::User(s) => hasher.update(s.as_bytes()),
+            HistoryItem::User(s) => { hasher.update(s.as_bytes()); }
             HistoryItem::Assistant { text, tool_calls, reasoning_details } => {
                 hasher.update(text.as_bytes());
                 for tc in tool_calls {
@@ -158,18 +160,18 @@ impl HistoryItemCache {
                         hasher.update(&bytes);
                     }
                     // provider_extra: Map<String, Value> — 使用確定性序列化（鍵排序）
-                    hasher.update(&deterministic_json_bytes(&tc.provider_extra));
+                    hasher.update(&Self::deterministic_json_bytes(&tc.provider_extra));
                 }
                 // reasoning_details: Option<Value> — 使用確定性序列化
                 if let Some(rd) = reasoning_details {
-                    hasher.update(&deterministic_json_bytes(rd));
+                    hasher.update(&Self::deterministic_json_bytes(rd));
                 }
             }
             HistoryItem::ToolResult(r) => {
                 hasher.update(r.provider_id.as_bytes());
                 for c in &r.content {
                     match c {
-                        ToolResultContent::Text(t) => hasher.update(t.as_bytes()),
+                        ToolResultContent::Text(t) => { hasher.update(t.as_bytes()); }
                         ToolResultContent::Image { data, mime_type } => {
                             hasher.update(data.as_bytes());
                             hasher.update(mime_type.as_bytes());
@@ -190,7 +192,7 @@ impl HistoryItemCache {
             Ok(v) => v,
             Err(_) => return Vec::new(),
         };
-        deterministic_value_bytes(&v)
+        Self::deterministic_value_bytes(&v)
     }
 
     /// 遞歸處理 Value，對所有 Object 的鍵排序後序列化
@@ -209,7 +211,7 @@ impl HistoryItemCache {
                     bytes.extend(serde_json::to_vec(k).unwrap_or_default());
                     bytes.push(b':');
                     // 值遞歸處理
-                    bytes.extend(deterministic_value_bytes(v));
+                    bytes.extend(Self::deterministic_value_bytes(v));
                 }
                 bytes.push(b'}');
                 bytes
@@ -221,7 +223,7 @@ impl HistoryItemCache {
                     if i > 0 {
                         bytes.push(b',');
                     }
-                    bytes.extend(deterministic_value_bytes(v));
+                    bytes.extend(Self::deterministic_value_bytes(v));
                 }
                 bytes.push(b']');
                 bytes
@@ -737,6 +739,7 @@ pub enum AgentError {
     UnsupportedImageInput(String),
     Mcp(String),
     Cancelled,
+    Other(String),
 }
 
 impl std::fmt::Display for AgentError {
@@ -750,11 +753,30 @@ impl std::fmt::Display for AgentError {
             Self::UnsupportedImageInput(s) => write!(f, "llm image input unsupported: {s}"),
             Self::Mcp(s) => write!(f, "mcp: {s}"),
             Self::Cancelled => write!(f, "cancelled"),
+            Self::Other(s) => write!(f, "other: {s}"),
         }
     }
 }
 
 impl std::error::Error for AgentError {}
+
+impl From<serde_json::Error> for AgentError {
+    fn from(e: serde_json::Error) -> Self {
+        AgentError::Other(e.to_string())
+    }
+}
+
+impl From<TagError> for AgentError {
+    fn from(e: TagError) -> Self {
+        AgentError::Other(e.to_string())
+    }
+}
+
+impl From<WsError> for AgentError {
+    fn from(e: WsError) -> Self {
+        AgentError::Other(e.to_string())
+    }
+}
 
 impl AgentError {
     pub fn json_rpc_code(&self) -> i32 {
@@ -783,6 +805,9 @@ pub fn clamp(mut s: String, max: usize) -> String {
     }
     s
 }
+
+/// Type alias for agent's Nostr keys (used in daemon mode)
+pub type AgentKeys = nostr::Keys;
 
 #[cfg(test)]
 mod tests {

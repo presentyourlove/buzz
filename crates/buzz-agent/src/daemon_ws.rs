@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
+use futures_util::stream::StreamExt as StreamExt2;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -15,7 +16,7 @@ use nostr::{Event, EventBuilder, Keys, Kind, Tag};
 
 /// WebSocket client for connecting to Nostr Relay.
 pub struct WebSocketClient {
-    relay_url: String,
+    pub(crate) relay_url: String,
     ws_sender: Option<Arc<mpsc::UnboundedSender<Message>>>,
     event_tx: mpsc::UnboundedSender<nostr::Event>,
     event_rx: Option<mpsc::UnboundedReceiver<nostr::Event>>,
@@ -90,9 +91,7 @@ impl WebSocketClient {
                         break;
                     }
                     Ok(Message::Ping(data)) => {
-                        if let Some(sender) = &tx_arc {
-                            let _ = sender.send(Message::Pong(data));
-                        }
+                        let _ = tx_arc.send(Message::Pong(data));
                     }
                     Ok(Message::Pong(_)) => {
                         // Heartbeat response
@@ -130,7 +129,7 @@ impl WebSocketClient {
             .sign_with_keys(keys.as_ref())
             .map_err(|e| AgentError::Other(format!("auth event sign failed: {e}")))?;
 
-        self.send(Message::Text(serde_json::to_string(&auth_event)?))
+        self.send(Message::Text(serde_json::to_string(&auth_event)?.into()))
             .await
             .map_err(|e| AgentError::Other(format!("auth send failed: {e}")))?;
 
@@ -147,7 +146,7 @@ impl WebSocketClient {
 
     /// Publish an event to the relay via WebSocket.
     pub async fn publish(&self, event: &Event) -> Result<(), AgentError> {
-        let msg = Message::Text(serde_json::json!(["EVENT", event]).to_string());
+        let msg = Message::Text(serde_json::json!(["EVENT", event]).to_string().into());
         self.send(msg).await
             .map_err(|e| AgentError::Other(format!("WebSocket publish failed: {e}")))?;
         debug!("Event published via WebSocket: {}", event.id);
@@ -161,14 +160,14 @@ impl WebSocketClient {
             format!("sub_{}", uuid::Uuid::new_v4()),
             filter
         ]);
-        self.send(Message::Text(req.to_string())).await
+        self.send(Message::Text(req.to_string().into())).await
             .map_err(|e| AgentError::Other(format!("subscribe send failed: {e}")))?;
         debug!("Subscription sent: {:?}", filter);
         Ok(())
     }
 
     /// Send a message over WebSocket.
-    async fn send(&self, msg: Message) -> Result<(), anyhow::Error> {
+    pub async fn send(&self, msg: Message) -> Result<(), anyhow::Error> {
         if let Some(sender) = &self.ws_sender {
             sender.send(msg)?;
         }

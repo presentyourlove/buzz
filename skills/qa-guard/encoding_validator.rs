@@ -263,4 +263,23 @@ impl EncodingValidator {
                     if info.needs_conversion {
                         needs_conversion += 1;
                     }
-                    *enc
+                    *encoding_stats.entry(info.encoding.clone()).or_insert(0) += 1;
+                }
+                Err(_) => {}
+            }
+        }
+        ValidationStats {
+            total_files,
+            valid_files,
+            needs_conversion,
+            encoding_stats,
+        }
+    }
+}
+
+pub struct ValidationStats {
+    pub total_files: usize,
+    pub valid_files: usize,
+    pub needs_conversion: usize,
+    pub encoding_stats: std::collections::HashMap<String, usize>,
+}

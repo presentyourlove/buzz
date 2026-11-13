@@ -419,7 +419,7 @@ fn compute_message_idempotency_key(
     hasher.update(parent_event_id.unwrap_or("").as_bytes());
     hasher.update(b"|");
     hasher.update(signer_pubkey.as_bytes());
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 #[tauri::command]
@@ -486,6 +486,27 @@ pub async fn send_channel_message(
             created_at: chrono::Utc::now().timestamp(),
         });
     }
+
+    // 二層去重：檢查 Relay 上是否已有此 idempotency_key 標籤的事件（重啟快取遺失或跨端同步防護）
+    if let Ok(Some(existing)) = find_managed_agent_channel_message_by_marker(
+        &state,
+        Some(&signing_keys.public_key().to_hex()),
+        &channel_id,
+        &idempotency_key,
+    )
+    .await
+    {
+        state.confirm_message_dedup(&idempotency_key, &existing.id.to_hex());
+        let depth = if parent_event_id.is_some() { 1 } else { 0 };
+        return Ok(SendChannelMessageResponse {
+            event_id: existing.id.to_hex(),
+            root_event_id: root_event_id.or(parent_event_id.clone()),
+            parent_event_id,
+            depth,
+            created_at: existing.created_at.as_secs() as i64,
+        });
+    }
+
     let kind_num = kind.unwrap_or(buzz_core_pkg::kind::KIND_STREAM_MESSAGE);
     if sent_from_thread_tag.is_some() && kind_num != buzz_core_pkg::kind::KIND_STREAM_MESSAGE {
         return Err("sent-from-thread provenance requires a stream message".into());
@@ -542,7 +563,8 @@ pub async fn send_channel_message(
                 }
                 None => None,
             };
-            events::build_message(
+            let client_tags = vec![vec!["client".to_string(), idempotency_key.clone()]];
+            events::build_message_with_client_tags(
                 channel_uuid,
                 content.trim(),
                 thread_ref.as_ref(),
@@ -553,6 +575,7 @@ pub async fn send_channel_message(
                 &link_previews,
                 sent_from_thread_tag.as_deref(),
                 &relay_base,
+                &client_tags,
             )?
         }
     };
@@ -567,10 +590,44 @@ pub async fn send_channel_message(
     let (result, created_at) = match submit_res {
         Ok(res) => {
             state.confirm_message_dedup(&idempotency_key, &res.0.event_id);
+            let event_id_clone = res.0.event_id.clone();
+            let key_clone = idempotency_key.clone();
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                if let Ok(app_guard) = state.app_handle.lock() {
+                    if let Some(app) = app_guard.as_ref() {
+                        use tauri::Emitter;
+                        let _ = app.emit(
+                            "message_submit_completed",
+                            serde_json::json!({
+                                "idempotency_key": key_clone,
+                                "event_id": event_id_clone,
+                                "status": "confirmed",
+                            }),
+                        );
+                    }
+                }
+            }));
             res
         }
         Err(e) => {
             state.fail_message_dedup(&idempotency_key);
+            let key_clone = idempotency_key.clone();
+            let err_clone = e.clone();
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                if let Ok(app_guard) = state.app_handle.lock() {
+                    if let Some(app) = app_guard.as_ref() {
+                        use tauri::Emitter;
+                        let _ = app.emit(
+                            "message_submit_completed",
+                            serde_json::json!({
+                                "idempotency_key": key_clone,
+                                "status": "failed",
+                                "error": err_clone,
+                            }),
+                        );
+                    }
+                }
+            }));
             return Err(e);
         }
     };
@@ -809,6 +866,25 @@ pub async fn send_managed_agent_channel_message(
             created_at: chrono::Utc::now().timestamp(),
         });
     }
+
+    // 二層去重：檢查 Relay 上是否已有此 agent_dedup_key 標籤的事件
+    if let Ok(Some(existing)) = find_managed_agent_channel_message_by_marker(
+        &state,
+        Some(&requested_pubkey),
+        &channel_id,
+        &agent_dedup_key,
+    )
+    .await
+    {
+        state.confirm_message_dedup(&agent_dedup_key, &existing.id.to_hex());
+        return Ok(SendChannelMessageResponse {
+            event_id: existing.id.to_hex(),
+            parent_event_id: parent_event_id.clone(),
+            root_event_id: None,
+            depth: if parent_event_id.is_some() { 1 } else { 0 },
+            created_at: existing.created_at.as_secs() as i64,
+        });
+    }
     let thread_ref = match parent_event_id.as_deref() {
         Some(parent_id) => Some(
             // Same active-relay resolution as before — this path has no
@@ -852,6 +928,9 @@ pub async fn send_managed_agent_channel_message(
         .as_deref()
         .map(|marker| vec![vec!["client".to_string(), marker.to_string()]])
         .unwrap_or_default();
+    if !client_tags.iter().any(|t| t.len() >= 2 && t[1] == agent_dedup_key) {
+        client_tags.push(vec!["client".to_string(), agent_dedup_key.clone()]);
+    }
     for marker in additional_markers.unwrap_or_default() {
         let marker = marker.trim();
         if !marker.is_empty() {
@@ -875,10 +954,36 @@ pub async fn send_managed_agent_channel_message(
     let (result, created_at) = match submit_res {
         Ok(res) => {
             state.confirm_message_dedup(&agent_dedup_key, &res.0.event_id);
+            let event_id_clone = res.0.event_id.clone();
+            let key_clone = agent_dedup_key.clone();
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                use tauri::Emitter;
+                let _ = app.emit(
+                    "message_submit_completed",
+                    serde_json::json!({
+                        "idempotency_key": key_clone,
+                        "event_id": event_id_clone,
+                        "status": "confirmed",
+                    }),
+                );
+            }));
             res
         }
         Err(e) => {
             state.fail_message_dedup(&agent_dedup_key);
+            let key_clone = agent_dedup_key.clone();
+            let err_clone = e.clone();
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                use tauri::Emitter;
+                let _ = app.emit(
+                    "message_submit_completed",
+                    serde_json::json!({
+                        "idempotency_key": key_clone,
+                        "status": "failed",
+                        "error": err_clone,
+                    }),
+                );
+            }));
             return Err(e);
         }
     };

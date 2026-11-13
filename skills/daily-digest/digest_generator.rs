@@ -95,10 +95,9 @@ impl NoiseFilter {
     }
     
     fn is_noise(&self, content: &str) -> bool {
-        let lower_content = content.to_lowercase();nosecondcontent.contains(&self.spam_patterns.iter()
-            .any(|pattern| lower_content.contains(pattern)) ||
-            self.irrelevant_keywords.iter()
-            .any(|keyword| lower_content.contains(keyword))
+        let lower_content = content.to_lowercase();
+        self.spam_patterns.iter().any(|pattern| lower_content.contains(pattern)) ||
+            self.irrelevant_keywords.iter().any(|keyword| lower_content.contains(keyword))
     }
 }
 

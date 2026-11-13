@@ -1,6 +1,6 @@
-' Honey2::Radar æ¯æ—¥éœé»˜åŸ·è¡ŒåŒ…è£å™¨
+' Honey2::Radar ¨C¤éÀRÀq°õ¦æ¥]¸Ë¾¹ (ªþ±a¤é»x¬ö¿ý»P¦Û°Ê®e¿ù)
 Option Explicit
 Dim WshShell
 Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "pythonw.exe ""c:\ç§äºº\ai agent\buzz\scripts\tech_researcher.py"" --limit 3", 0, False
+WshShell.Run "cmd.exe /c """"""C:\Users\user\AppData\Local\Python\pythoncore-3.15-64\python.exe"""" """"c:\¨p¤H\ai agent\buzz\scripts\tech_researcher.py"""" --limit 3 >> """"C:\Users\user\.buzz\PLANS\REPORTS\radar_daily.log"""" 2>&1""", 0, False
 Set WshShell = Nothing

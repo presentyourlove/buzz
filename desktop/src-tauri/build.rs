@@ -153,13 +153,18 @@ fn main() {
         );
     }
 
-    tauri_build::try_build(
-        tauri_build::Attributes::new().plugin(
-            "websocket",
-            tauri_build::InlinedPlugin::new()
-                .commands(&["connect", "send", "disconnect", "disconnect_all"])
-                .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
-        ),
-    )
-    .expect("failed to build Tauri application");
+    let temp_icon = std::env::temp_dir().join("buzz_icon.ico");
+    let _ = std::fs::copy("icons/icon.ico", &temp_icon);
+
+    let mut attrs = tauri_build::Attributes::new().plugin(
+        "websocket",
+        tauri_build::InlinedPlugin::new()
+            .commands(&["connect", "send", "disconnect", "disconnect_all"])
+            .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
+    );
+    if temp_icon.exists() {
+        attrs = attrs.windows_attributes(tauri_build::WindowsAttributes::new().window_icon_path(&temp_icon));
+    }
+
+    tauri_build::try_build(attrs).expect("failed to build Tauri application");
 }

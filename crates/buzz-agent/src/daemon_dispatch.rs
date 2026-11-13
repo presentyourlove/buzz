@@ -48,7 +48,7 @@ impl EventDispatcher {
         let d_tag = event.tags.iter()
             .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("d"))
             .and_then(|t| t.as_slice().get(1))
-            .and_then(|v| v.as_str())
+            .and_then(|v| Some(v.as_str()))
             .ok_or_else(|| AgentError::Other("missing d-tag".into()))?;
 
         // Decrypt content (NIP-44 v2 self-decryption)
@@ -57,9 +57,8 @@ impl EventDispatcher {
         
         let plaintext = nostr::nips::nip44::decrypt(
             keys.secret_key(),
-            keys.public_key(),
+            &keys.public_key(),
             &event.content,
-            nostr::nips::nip44::Version::V2,
         ).map_err(|e| AgentError::Other(format!("NIP-44 decrypt failed: {e}")))?;
 
         // Parse reminder content
@@ -109,7 +108,7 @@ impl EventDispatcher {
         // Encrypt content to target using NIP-44 v2
         let encrypted_content = nostr::nips::nip44::encrypt(
             keys.secret_key(),
-            target_pk,
+            &target_pk,
             &dm_content,
             nostr::nips::nip44::Version::V2,
         ).map_err(|e| AgentError::Other(format!("NIP-44 encrypt failed: {e}")))?;

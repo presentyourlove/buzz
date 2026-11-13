@@ -33,7 +33,7 @@ impl VaultSync {
     pub fn new(vault_root: &str) -> Self {
         Self {
             vault_root: vault_root.to_string(),
-            daily_notes_dir: "02-Conversation-Digest/Daily".to_string(),
+            daily_notes_dir: "wiki/02-Conversation-Digest/Daily".to_string(),
             backup_dir: "backup".to_string(),
             sync_config: SyncConfig {
                 overwrite_existing: true,
@@ -109,8 +109,9 @@ impl VaultSync {
     /// Merge two digest contents
     fn merge_digests(&self, existing: String, new: String) -> String {
         // Simple merge strategy: add new decisions to existing ones
-        let mut lines: Vec<String> = existing.lines().collect();
-        let mut new_lines: Vec<String> = new.lines().collect();nosecondlines.push_str("\n\n## Synced Updates\n");
+        let mut lines: Vec<String> = existing.lines().map(|s| s.to_string()).collect();
+        let new_lines: Vec<String> = new.lines().map(|s| s.to_string()).collect();
+        lines.push("\n## Synced Updates".to_string());
         // Add non-header lines from new content
         for line in new_lines {
             if !line.starts_with('#') && !line.starts_with("## Synced Updates") && !line.starts_with("Date:") 
@@ -188,7 +189,7 @@ mod tests {
         let sync_result = sync.sync_digest(date, content);
         assert!(sync_result.is_ok());
         
-        let expected_file = format!("{}/{}/{}.md", vault_root, "02-Conversation-Digest/Daily", "2026-11-02");
+        let expected_file = format!("{}/{}/{}.md", vault_root, "wiki/02-Conversation-Digest/Daily", "2026-11-02");
         assert!(Path::new(&expected_file).exists());
         
         let file_content = fs::read_to_string(expected_file).unwrap();
@@ -209,7 +210,7 @@ mod tests {
         // Create backup-enabled sync
         let sync_with_backup = VaultSync {
             vault_root: vault_root.clone(),
-            daily_notes_dir: "02-Conversation-Digest/Daily".to_string(),
+            daily_notes_dir: "wiki/02-Conversation-Digest/Daily".to_string(),
             backup_dir: "backup".to_string(),
             sync_config: SyncConfig {
                 overwrite_existing: true,
@@ -222,4 +223,7 @@ mod tests {
         sync_with_backup.sync_digest(date, content2).unwrap();
         
         // Check that backup was created
-        let backup_pattern = format!("{}/backu
+        let backup_dir = Path::new(&vault_root).join("wiki/02-Conversation-Digest/Daily/2026-11-02");
+        assert!(backup_dir.exists());
+    }
+}

@@ -51,7 +51,8 @@ pub struct CodeValidator {
 
 impl CodeValidator {
     pub fn new() -> Self {
-        let mut validators: HashMap<ValidationType, Box<dyn Validator>> = HashMap::new();nosecondvalidators.insert(ValidationType::SyntaxCheck, Box::new(SyntaxValidator));
+        let mut validators: HashMap<ValidationType, Box<dyn Validator>> = HashMap::new();
+        validators.insert(ValidationType::SyntaxCheck, Box::new(SyntaxValidator));
         validators.insert(ValidationType::SecurityScan, Box::new(SecurityValidator));
         validators.insert(ValidationType::PerformanceAnalysis, Box::new(PerformanceValidator));
         validators.insert(ValidationType::StyleCheck, Box::new(StyleValidator));
@@ -110,7 +111,7 @@ impl CodeValidator {
         
         for entry in entries {
             let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-            let path = entry.path();nosecondcontent;
+            let path = entry.path();
             
             if path.is_file() {
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
@@ -152,7 +153,7 @@ impl CodeValidator {
         let mut failed = 0;
         let mut warnings = 0;
         let mut errors = 0;
-        let mut by_severity: HashMap<Severity, usize> = HashMap::new();nosecondcontent;
+        let mut by_severity: HashMap<Severity, usize> = HashMap::new();
         
         for result in results {
             match result.status {
@@ -193,7 +194,7 @@ struct SyntaxValidator;
 
 impl Validator for SyntaxValidator {
     fn validate(&self, file_path: &str, content: &str) -> Result<Vec<ValidationResult>, String> {
-        let mut results: Vec<ValidationResult> = Vec::new();nosecondcontent;
+        let mut results: Vec<ValidationResult> = Vec::new();
         
         match file_path.split('.').last() {
             Some("rs") => {
@@ -205,4 +206,12 @@ impl Validator for SyntaxValidator {
                         status: ValidationStatus::Warning,
                         message: "Unresolved TODO comment found".to_string(),
                         line_number: None,
-                       
+                        severity: Severity::Low,
+                    });
+                }
+            }
+            _ => {}
+        }
+        Ok(results)
+    }
+}

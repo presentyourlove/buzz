@@ -283,8 +283,36 @@ impl AppState {
             .lock()
             .map_err(|e| format!("dedup cache lock poisoned: {e}"))?;
         let now = std::time::Instant::now();
-        // Prune expired entries
-        cache.retain(|_, entry| now.duration_since(entry.created_at) < ttl);
+        const MAX_DEDUP_CACHE_SIZE: usize = 1000;
+
+        // 僅清除過期的 Confirmed 或 Failed 項目，嚴格保護正在進行中的 Pending 請求防誤刪
+        cache.retain(|_, entry| match entry.status {
+            DedupStatus::Pending => {
+                // 若 Pending 超過 5 分鐘安全閾值視為死鎖清理
+                now.duration_since(entry.created_at) < std::time::Duration::from_secs(300)
+            }
+            DedupStatus::Confirmed { .. } | DedupStatus::Failed => {
+                now.duration_since(entry.created_at) < ttl
+            }
+        });
+
+        // LRU 淘汰：若容量超出上限，僅淘汰最舊的 Confirmed 或 Failed 項目，禁止誤刪 Pending
+        if cache.len() >= MAX_DEDUP_CACHE_SIZE {
+            let mut evictable: Vec<(String, std::time::Instant)> = cache
+                .iter()
+                .filter_map(|(k, v)| match v.status {
+                    DedupStatus::Confirmed { .. } | DedupStatus::Failed => {
+                        Some((k.clone(), v.created_at))
+                    }
+                    DedupStatus::Pending => None,
+                })
+                .collect();
+            evictable.sort_by_key(|(_, t)| *t);
+            let to_remove = cache.len().saturating_sub(MAX_DEDUP_CACHE_SIZE - 100);
+            for (k, _) in evictable.into_iter().take(to_remove) {
+                cache.remove(&k);
+            }
+        }
 
         if let Some(entry) = cache.get(key) {
             match &entry.status {

@@ -24,7 +24,7 @@ if [[ ! -f "$PID_FILE" ]]; then
     log_warn "PID file not found: $PID_FILE"
     log_info "Attempting to find buzz-agent process..."
     
-    PIDS=$(pgrep -f "buzz-agent" 2>/dev/null || true)
+    PIDS=$(pgrep -f "buzz-agent" 2>/dev/null | grep -v "^$$\$" || true)
     if [[ -z "$PIDS" ]]; then
         log_info "No buzz-agent process found"
         exit 0
@@ -38,7 +38,7 @@ if [[ ! -f "$PID_FILE" ]]; then
     
     # Wait for graceful shutdown
     for i in {1..30}; do
-        PIDS=$(pgrep -f "buzz-agent" 2>/dev/null || true)
+        PIDS=$(pgrep -f "buzz-agent" 2>/dev/null | grep -v "^$$\$" || true)
         if [[ -z "$PIDS" ]]; then
             log_success "All buzz-agent processes stopped gracefully"
             exit 0

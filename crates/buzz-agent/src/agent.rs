@@ -22,6 +22,7 @@ use crate::types::{
     TurnTotalState,
 };
 use crate::wire::{self, WireSender};
+use nostr::Keys;
 
 const ERROR_REFLECTION_SUFFIX: &str =
     "\n\n[Reflect] Before retrying, identify the cause and change your approach.";
@@ -409,7 +410,7 @@ impl RunCtx<'_> {
                 tools.push(builtin::load_skill_def());
             }
             // Inject Mode B daemon tools when agent keys are available.
-            if ctx.agent_keys.is_some() {
+            if self.agent_keys.is_some() {
                 tools.push(builtin::sign_and_send_event_def());
                 tools.push(builtin::send_direct_message_def());
                 tools.push(builtin::create_reminder_def());
@@ -805,6 +806,11 @@ impl RunCtx<'_> {
             if let Some(stop) = self.execute_calls(&calls).await {
                 return Ok(stop);
             }
+
+            // Solution 3: Tool-call round pacing buffer to prevent burst rate-limit (429) on upstream LLM
+            if self.cfg.round_pacing_ms > 0 && !calls.is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(self.cfg.round_pacing_ms)).await;
+            }
         }
     }
 
@@ -878,7 +884,7 @@ impl RunCtx<'_> {
             // Built-in create_reminder: execute inline, no MCP round-trip.
             if call.name == builtin::CREATE_REMINDER_TOOL {
                 emit_in_progress(self.wire, self.session_id, call).await;
-                let mut result = builtin::call_create_reminder(&call.arguments, ctx).await;
+                let mut result = builtin::call_create_reminder(&call.arguments, self).await.ok()?;
                 result.provider_id = call.provider_id.clone();
                 emit_completed(self.wire, self.session_id, call, &result).await;
                 results[idx] = Some(result);
@@ -937,6 +943,7 @@ impl RunCtx<'_> {
         let limit = self.cfg.max_parallel_tools.max(1);
         let sem = Arc::new(Semaphore::new(limit));
         let mut set: JoinSet<(usize, InvokeOutcome)> = JoinSet::new();
+        let hook_reg = Arc::new(crate::hooks::HookRegistry::new());
 
         for &i in runnable {
             let call = calls[i].clone();
@@ -952,6 +959,7 @@ impl RunCtx<'_> {
             let sem = Arc::clone(&sem);
             let permissions = Arc::clone(self.permissions);
             let protocol_version = self.protocol_version;
+            let hook_reg = Arc::clone(&hook_reg);
             set.spawn(async move {
                 // Acquire a permit; if the semaphore is closed (cancel),
                 // emit a terminal wire update and skip the call.
@@ -970,6 +978,28 @@ impl RunCtx<'_> {
                     emit_failed(&wire, &session_id, &call, &msg).await;
                     return (i, InvokeOutcome::Failed(msg));
                 }
+
+                // PreToolUse Hook Guard (Sentry Gates)
+                let hook_ctx = crate::hooks::HookContext {
+                    tool_name: call.name.clone(),
+                    tool_arguments: call.arguments.clone(),
+                    session_id: session_id.clone(),
+                    working_dir: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                    trigger_event: crate::hooks::HookTrigger::PreToolUse,
+                };
+
+                match hook_reg.run_pre_tool_use(&hook_ctx).await {
+                    crate::hooks::HookResult::Block { reason } => {
+                        emit_failed(&wire, &session_id, &call, &reason).await;
+                        return (i, InvokeOutcome::Failed(reason));
+                    }
+                    crate::hooks::HookResult::Warn { message } => {
+                        tracing::warn!("PreToolUse warning for {}: {}", call.name, message);
+                    }
+                    crate::hooks::HookResult::Continue => {}
+                    _ => {}
+                }
+
                 // Ask the client to authorize this call. The broker owns the
                 // full correlation lifecycle and races cancellation internally;
                 // every non-authorizing outcome fails closed.
@@ -995,6 +1025,26 @@ impl RunCtx<'_> {
                 }
                 emit_in_progress(&wire, &session_id, &call).await;
                 let outcome = invoke_tool_inner(&mcp, &call, timeout, budget, cancel).await;
+
+                // PostToolUse Hook Guard
+                let outcome = match outcome {
+                    InvokeOutcome::Done(ref result) => {
+                        let mut post_ctx = hook_ctx;
+                        post_ctx.trigger_event = crate::hooks::HookTrigger::PostToolUse;
+                        match hook_reg.run_post_tool_use(&post_ctx, result).await {
+                            crate::hooks::HookResult::Block { reason } => {
+                                InvokeOutcome::Failed(reason)
+                            }
+                            crate::hooks::HookResult::Warn { message } => {
+                                tracing::warn!("PostToolUse warning for {}: {}", call.name, message);
+                                outcome
+                            }
+                            _ => outcome,
+                        }
+                    }
+                    other => other,
+                };
+
                 match &outcome {
                     InvokeOutcome::Done(result) => {
                         emit_completed(&wire, &session_id, &call, result).await;

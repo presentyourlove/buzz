@@ -80,3 +80,8 @@ nul
 *.7z
 dir_dump.txt
 buzz-target/
+
+# Local temporary test and build artifacts
+test_output.txt
+.agents/skills/**/target/
+.buzz/

@@ -17,32 +17,28 @@ impl Rule for JsonValidationRule {
     }
     
     async fn check(&self, ctx: &HookContext) -> Result<HookResult, Box<dyn std::error::Error>> {
-        // 驗證 arguments 必須為有效 JSON
+        // 驗證 arguments 必須為有效 JSON Object
         if !ctx.tool_arguments.is_object() {
             return Ok(HookResult::Block {
-                reason: "參數必須為有效 JSON".to_string()
+                reason: "參數必須為有效 JSON".to_string(),
             });
         }
-        
-        // 檢查是否為 Write 工具，驗證 JSON 語法
-        if ctx.tool_name == "Write" {
-            if let Some(args) = ctx.tool_arguments.get("arguments") {
-                if let Some(path) = args.get("path") {
-                    let path_str = path.as_str().unwrap_or("");
-                    if path_str.ends_with(".json") {
-                        if let Some(content) = args.get("content") {
-                            // 驗證 JSON 語法
-                            if let Err(_) = serde_json::from_str::<Value>(content.as_str().unwrap_or("")) {
-                                return Ok(HookResult::Block {
-                                    reason: "JSON 檔案語法無效".to_string()
-                                });
-                            }
+
+        // 檢查是否為寫入工具，驗證 JSON 語法
+        if ctx.matches_tool(&["write_file", "write", "Write"]) {
+            if let Some(path_str) = ctx.get_str_arg(&["path", "file_path", "Path", "target"]) {
+                if path_str.to_lowercase().ends_with(".json") {
+                    if let Some(content_str) = ctx.get_str_arg(&["content", "Content"]) {
+                        if serde_json::from_str::<Value>(&content_str).is_err() {
+                            return Ok(HookResult::Block {
+                                reason: "JSON 檔案語法無效".to_string(),
+                            });
                         }
                     }
                 }
             }
         }
-        
+
         Ok(HookResult::Continue)
     }
 }

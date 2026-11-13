@@ -58,11 +58,11 @@ impl Server {
             listener.local_addr().unwrap().port()
         );
         let (acceptor, cert) = if tls {
-            let _ = rustls::crypto::ring::default_provider().install_default();
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
             let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
             let der = cert.cert.der().clone();
             let config = rustls::ServerConfig::builder_with_provider(Arc::new(
-                rustls::crypto::ring::default_provider(),
+                rustls::crypto::aws_lc_rs::default_provider(),
             ))
             .with_safe_default_protocol_versions()
             .unwrap()

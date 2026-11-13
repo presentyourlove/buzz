@@ -33,7 +33,8 @@ pub struct CircuitBreakerConfig {
     /// 是否自动重置
     pub auto_reset: bool,
     /// 自定义状态变化回调
-    pub state_change_callback: Option<Box<dyn Fn(CircuitBreakerState)>>,n}
+    pub state_change_callback: Option<Box<dyn Fn(CircuitBreakerState)>>,
+}
 
 /// 熔断器状态枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -269,4 +270,11 @@ impl CircuitBreakerStats {
         Self {
             total_requests: 0,
             successful_requests: 0,
-            failed_reques
+            failed_requests: 0,
+            open_duration_ms: 0,
+            last_failure_time: None,
+            consecutive_failures: 0,
+            consecutive_successes: 0,
+        }
+    }
+}

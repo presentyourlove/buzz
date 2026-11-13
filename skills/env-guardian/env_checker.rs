@@ -337,4 +337,20 @@ impl EnvironmentChecker {
                 failed_count += 1;
                 error = Some(format!("安全策略 '{}' 未通过检查", policy.name));
             } else {
-                
+                passed_count += 1;
+            }
+            details.push(PolicyCheckResult {
+                policy_name: policy.name.clone(),
+                passed,
+                error,
+            });
+        }
+
+        SecurityPoliciesResult {
+            passed: failed_count == 0,
+            passed_count,
+            failed_count,
+            details,
+        }
+    }
+}

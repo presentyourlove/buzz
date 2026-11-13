@@ -32,16 +32,21 @@ from typing import List, Dict, Any, Optional
 # 常數設定
 DEFAULT_MODEL = "google/gemma-4-31b-it:free"
 FALLBACK_GEMMA_MODEL = "google/gemma-4-26b-a4b-it:free"
+FALLBACK_NVIDIA_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 TAVILY_URL = "https://api.tavily.com/search"
 GITHUB_SEARCH_URL = "https://api.github.com/search/repositories"
 
-BASE_BUZZ_DIR = r"C:\Users\user\.buzz"
+USER_HOME = os.path.expanduser("~")
+APPDATA_ROAMING = os.environ.get("APPDATA", os.path.join(USER_HOME, "AppData", "Roaming"))
+APPDATA_LOCAL = os.environ.get("LOCALAPPDATA", os.path.join(USER_HOME, "AppData", "Local"))
+
+BASE_BUZZ_DIR = os.environ.get("BUZZ_HOME", os.path.join(USER_HOME, ".buzz"))
 REPORTS_DIR = os.path.join(BASE_BUZZ_DIR, "PLANS", "REPORTS")
 DEFAULT_DB_PATH = os.path.join(BASE_BUZZ_DIR, "tech_research_history.db")
-MANAGED_AGENTS_PATH = r"C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json"
-GLOBAL_CONFIG_PATH = r"C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\global-agent-config.json"
-BUZZ_CLI_PATH = r"C:\Users\user\AppData\Local\Buzz\buzz.exe"
+MANAGED_AGENTS_PATH = os.path.join(APPDATA_ROAMING, "xyz.block.buzz.app", "agents", "managed-agents.json")
+GLOBAL_CONFIG_PATH = os.path.join(APPDATA_ROAMING, "xyz.block.buzz.app", "agents", "global-agent-config.json")
+BUZZ_CLI_PATH = os.path.join(APPDATA_LOCAL, "Buzz", "buzz.exe")
 DEFAULT_RELAY_URL = "wss://presentyourlove.communities.buzz.xyz"
 USER_PUBKEY = "2d29f28fd5106795c630120d7e5b062bc4f5caa8057b4a6a374b7468cdc5de8e"
 USER_DM_CHANNEL = "af946a63-dd43-4050-baea-65140d47fc42"
@@ -109,32 +114,29 @@ def load_honey2_credentials() -> tuple[Optional[str], Optional[str]]:
 def init_database(db_path: str = DEFAULT_DB_PATH) -> None:
     """初始化 SQLite 資料庫與去重紀錄表"""
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS researched_repos (
-            repo_full_name TEXT PRIMARY KEY,
-            stars INTEGER,
-            language TEXT,
-            description TEXT,
-            researched_at TEXT,
-            report_file TEXT
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS researched_repos (
+                repo_full_name TEXT PRIMARY KEY,
+                stars INTEGER,
+                language TEXT,
+                description TEXT,
+                researched_at TEXT,
+                report_file TEXT
+            )
+            """
         )
-        """
-    )
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
 def is_repo_researched(repo_full_name: str, db_path: str = DEFAULT_DB_PATH) -> bool:
     """檢查專案是否已在 SQLite 歷史中研究過"""
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM researched_repos WHERE repo_full_name = ?", (repo_full_name,))
-    exists = cur.fetchone() is not None
-    conn.close()
-    return exists
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM researched_repos WHERE repo_full_name = ?", (repo_full_name,))
+        return cur.fetchone() is not None
 
 
 def record_researched_repo(
@@ -146,19 +148,18 @@ def record_researched_repo(
     db_path: str = DEFAULT_DB_PATH
 ) -> None:
     """將已分析專案記錄至 SQLite"""
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
     now_str = datetime.now().isoformat()
-    cur.execute(
-        """
-        INSERT OR REPLACE INTO researched_repos 
-        (repo_full_name, stars, language, description, researched_at, report_file)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (repo_full_name, stars, language, description, now_str, report_file)
-    )
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO researched_repos 
+            (repo_full_name, stars, language, description, researched_at, report_file)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (repo_full_name, stars, language, description, now_str, report_file)
+        )
+        conn.commit()
 
 
 def fetch_trending_repos(limit: int = 3, db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
@@ -267,10 +268,13 @@ def analyze_repo_with_gemma(
         "max_tokens": 1500
     }
 
-    # 嘗試呼叫主模型 (預設 31B)
+    # 嘗試呼叫主模型 (預設 31B -> 26B -> NVIDIA Nemotron 三重容錯)
     models_to_try = [model]
-    if model == DEFAULT_MODEL and FALLBACK_GEMMA_MODEL not in models_to_try:
-        models_to_try.append(FALLBACK_GEMMA_MODEL)
+    if model == DEFAULT_MODEL:
+        if FALLBACK_GEMMA_MODEL not in models_to_try:
+            models_to_try.append(FALLBACK_GEMMA_MODEL)
+        if FALLBACK_NVIDIA_MODEL not in models_to_try:
+            models_to_try.append(FALLBACK_NVIDIA_MODEL)
 
     for current_model in models_to_try:
         payload["model"] = current_model
@@ -288,25 +292,34 @@ def analyze_repo_with_gemma(
                 }
             )
             try:
-                with urllib.request.urlopen(req, timeout=40) as resp:
+                with urllib.request.urlopen(req, timeout=45) as resp:
                     result = json.loads(resp.read().decode("utf-8"))
                     content = result["choices"][0]["message"]["content"]
                     return content
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode("utf-8", errors="ignore")
-                if e.code == 429 or e.code == 500:
-                    print(f"      [HTTP {e.code}] 模型 {current_model} 目前 Google 上游節點擁擠/維護中。")
+                if e.code in (429, 500, 502, 503, 504):
+                    print(f"      [HTTP {e.code}] 模型 {current_model} 目前上游節點擁擠/逾時。")
                     if current_model != models_to_try[-1]:
-                        print(f"      -> 自動無縫切換至同門姊妹模型 [{models_to_try[-1]}] 繼續執行...")
+                        next_idx = models_to_try.index(current_model) + 1
+                        print(f"      -> 自動無縫切換至備用模型 [{models_to_try[next_idx]}] 繼續執行...")
                         break
                     wait_sec = attempt * 8
                     print(f"      等待 {wait_sec} 秒後進行第 {attempt}/{max_retries} 次重試...")
                     time.sleep(wait_sec)
                 else:
                     print(f"      [HTTP 錯誤 {e.code}] {err_body}")
+                    if current_model != models_to_try[-1]:
+                        next_idx = models_to_try.index(current_model) + 1
+                        print(f"      -> 自動無縫切換至備用模型 [{models_to_try[next_idx]}] 繼續執行...")
+                        break
                     break
             except Exception as e:
                 print(f"      [請求例外] {e}")
+                if current_model != models_to_try[-1]:
+                    next_idx = models_to_try.index(current_model) + 1
+                    print(f"      -> 自動無縫切換至備用模型 [{models_to_try[next_idx]}] 繼續執行...")
+                    break
                 break
 
     return f"【評估暫緩】呼叫模型 {model} 遭遇暫時連線異常，請稍後重試。"

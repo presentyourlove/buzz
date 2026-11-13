@@ -16,30 +16,26 @@ impl Rule for SkillChangeTestRule {
     }
     
     async fn check(&self, ctx: &HookContext) -> Result<HookResult, Box<dyn std::error::Error>> {
-        let path_str = ctx.working_dir.to_string_lossy();
-        
-        if path_str.contains("skills/") && 
-           (path_str.ends_with(".md") || path_str.ends_with(".rs")) {
-            
-            if ctx.tool_name == "Write" || ctx.tool_name == "Edit" {
-                if let Some(args) = ctx.tool_arguments.get("arguments") {
-                    if let Some(content) = args.get("content") {
-                        let content_str = content.as_str().unwrap_or(&content.to_string());
-                        
-                        let skill_keywords = ["skill", "Skill", "SKILL", "prompt"];
-                        let has_skill_content = skill_keywords.iter()
-                            .any(|keyword| content_str.contains(keyword));
-                        
-                        if has_skill_content {
-                            return Ok(HookResult::Warn {
-                                message: "技能檔案/代碼修改後，請運行 `cargo test -p buzz-agent` 確保沒有問題".to_string()
-                            });
-                        }
-                    }
+        if !ctx.matches_tool(&["write_file", "write", "edit_file", "edit", "str_replace", "Write", "Edit"]) {
+            return Ok(HookResult::Continue);
+        }
+
+        let Some(path_str) = ctx.get_str_arg(&["path", "file_path", "Path", "target"]) else {
+            return Ok(HookResult::Continue);
+        };
+
+        let normalized = path_str.replace('\\', "/");
+        if normalized.contains("skills/") && (normalized.ends_with(".md") || normalized.ends_with(".rs")) {
+            if let Some(content_str) = ctx.get_str_arg(&["content", "Content", "new_str", "Replacement"]) {
+                let skill_keywords = ["skill", "Skill", "SKILL", "prompt"];
+                if skill_keywords.iter().any(|keyword| content_str.contains(keyword)) {
+                    return Ok(HookResult::Warn {
+                        message: "技能檔案/代碼修改後，請運行 `cargo test -p buzz-agent` 確保沒有問題".to_string(),
+                    });
                 }
             }
         }
-        
+
         Ok(HookResult::Continue)
     }
 }

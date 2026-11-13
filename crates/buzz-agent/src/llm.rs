@@ -1932,15 +1932,36 @@ where
             )));
         }
         if status.is_server_error() || status == 429 || status.as_u16() == 499 {
+            let header_retry_after = if status == 429 {
+                parse_retry_after_header(resp.headers())
+            } else {
+                None
+            };
             let body = read_error_body(resp).await;
             if attempt + 1 < MAX_RETRIES {
+                let delay = if status == 429 {
+                    header_retry_after.unwrap_or_else(|| {
+                        std::time::Duration::from_secs(5 * (attempt as u64 + 1))
+                    })
+                } else {
+                    std::time::Duration::from_millis(
+                        BASE_BACKOFF_MS
+                            .saturating_mul(1u64 << attempt)
+                            .min(MAX_BACKOFF_MS),
+                    )
+                };
                 tracing::warn!(
                     attempt = attempt + 1,
                     max_attempts = MAX_RETRIES,
                     %status,
+                    delay_ms = delay.as_millis(),
                     "llm: retryable status, retrying"
                 );
-                backoff_with_jitter(attempt).await;
+                if status == 429 {
+                    tokio::time::sleep(delay).await;
+                } else {
+                    backoff_with_jitter(attempt).await;
+                }
                 continue;
             }
             return Err(PostError::Agent(terminal_llm_error(
@@ -2643,6 +2664,7 @@ mod tests {
             hook_timeout: Duration::from_secs(1),
             stop_max_rejections: 0,
             require_reply: false,
+            round_pacing_ms: 0,
             hook_servers: HookServers::None,
             databricks_model_filter: None,
             api_key: "key".into(),
@@ -2654,6 +2676,12 @@ mod tests {
             thinking_effort: None,
             thinking_summary: ThinkingSummary::Auto,
             prompt_caching: true,
+            agent_keys: None,
+            redis_url: String::new(),
+            relay_ws_url: String::new(),
+            history_cache_ttl_secs: 300,
+            history_cache_max_entries: 10_000,
+            health_guardian: None,
         }
     }
 

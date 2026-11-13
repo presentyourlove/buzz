@@ -1,0 +1,36 @@
+[package]
+name = "daily-digest-skill"
+version = "0.1.0"
+edition = "2021"
+authors = ["Honey2"]
+description = "生成每日對話摘要、決策複盤與 Obsidian Vault 雙向同步的 Rust 內建技能"
+license = "Apache-2.0"
+repository = "https://github.com/block/sprout"
+
+[dependencies]
+# Buzz Agent 核心依賴
+buzz-agent = { path = "../../crates/buzz-agent" }
+buzz-core = { path = "../../crates/buzz-core" }
+
+# Rust 標準依賴
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+
+[lib]
+name = "daily_digest"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+
+[profile.dev]
+opt-level = 1
+
+[profile.test]
+opt-level = 1
+

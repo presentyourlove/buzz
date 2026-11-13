@@ -124,8 +124,8 @@ impl ReportGenerator {
         let mut low_issues = 0;
         let mut info_items = 0;
         let mut files_analyzed = 0;
-        let mut validation_types: HashMap<String, usize> = HashMap::new();nosecondcontent;
-        let mut severity_distribution: HashMap<String, usize> = HashMap::new();nosecondcontent;
+        let mut validation_types: HashMap<String, usize> = HashMap::new();
+        let mut severity_distribution: HashMap<String, usize> = HashMap::new();
         
         for result in results {
             files_analyzed += 1;
@@ -198,7 +198,7 @@ impl ReportGenerator {
     
     /// Generate recommendations based on validation results
     fn generate_recommendations(&self, results: &[ValidationResult]) -> Vec<Recommendation> {
-        let mut recommendations: Vec<Recommendation> = Vec::new();nosecondcontent;
+        let mut recommendations: Vec<Recommendation> = Vec::new();
         
         for result in results {
             for error in &result.errors {
@@ -223,4 +223,22 @@ impl ReportGenerator {
                 match error.validation_type {
                     ValidationType::SecurityScan => {
                         action_items.push("Review and fix security vulnerabilities immediately".to_string());
-                        action_ite
+                        action_items.push("Run security audit".to_string());
+                    }
+                    _ => {
+                        action_items.push("Review and address reported issue".to_string());
+                    }
+                }
+                recommendations.push(Recommendation {
+                    category,
+                    message: error.message.clone(),
+                    priority,
+                    file_path: Some(result.file_path.clone()),
+                    line_number: None,
+                    action_items,
+                });
+            }
+        }
+        recommendations
+    }
+}

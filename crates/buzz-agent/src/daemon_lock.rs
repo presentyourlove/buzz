@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use deadpool_redis::{Config as RedisConfig, Pool, Runtime};
-use redis::AsyncCommands;
+use redis::{AsyncCommands, RedisError};
 use tracing::{debug, info, warn};
 
 use crate::types::AgentError;
@@ -178,7 +178,7 @@ impl Drop for DaemonLock {
                             return 0
                         end
                     "#);
-                    let _ = script.key(&lock_key).arg("1").invoke_async(&mut conn).await;
+                    let _: Result<(), RedisError> = script.key(&lock_key).arg("1").invoke_async(&mut conn).await;
                 }
             });
         }

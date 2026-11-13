@@ -14,7 +14,7 @@
 //! use qa_guard::patch_parser::{ParsedPatch, PatchParser};
 //! 
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let patch_content = "diff --git a/src/main.rs b/src/main.rs\nindex 1234567..89abcde 100644\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,5 +1,5 @@\n-fn main() {\n+async fn main() {\n     println!("Hello");\n }\n";
+//!     let patch_content = "diff --git a/src/main.rs b/src/main.rs\nindex 1234567..89abcde 100644\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,5 +1,5 @@\n-fn main()\n+async fn main() {\n     println!(\"Hello\");\n }\n";
 //!     
 //!     let parsed_patch = PatchParser::parse(patch_content)?;
 //!     println!("解析成功，共 {} 個檔案", parsed_patch.files.len());
@@ -99,7 +99,7 @@ impl ParsedPatch {
     /// use qa_guard::patch_parser::ParsedPatch;
     /// 
     /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let patch_content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main() {\n+async fn main() {\n     println!("Hello");\n }\n";
+    ///     let patch_content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main()\n+async fn main() {\n     println!(\"Hello\");\n }\n";
     ///     
     ///     let parsed_patch = ParsedPatch::parse(patch_content)?;
     ///     println!("成功解析了 {} 個檔案", parsed_patch.files.len());
@@ -123,7 +123,7 @@ impl ParsedPatch {
     /// use qa_guard::patch_parser::ParsedPatch;
     /// 
     /// fn main() {
-    ///     let parsed_patch = ParsedPatch::parse("diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main() {\n+async fn main() {\n     println!("Hello");\n }\n").unwrap();
+    ///     let parsed_patch = ParsedPatch::parse("diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main()\n+async fn main() {\n     println!(\"Hello\");\n }\n").unwrap();
     ///     
     ///     for file in parsed_patch.get_modified_files() {
     ///         println!("檔案: {:?}", file.old_path);
@@ -146,7 +146,7 @@ impl ParsedPatch {
     /// use qa_guard::patch_parser::ParsedPatch;
     /// 
     /// fn main() {
-    ///     let parsed_patch = ParsedPatch::parse("diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main() {\n+async fn main() {\n     println!("Hello");\n }\n").unwrap();
+    ///     let parsed_patch = ParsedPatch::parse("diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main()\n+async fn main() {\n     println!(\"Hello\");\n }\n").unwrap();
     ///     
     ///     let rust_files = parsed_patch.get_rust_files();
     ///     println!("找到 {} 個 Rust 檔案", rust_files.len());
@@ -196,7 +196,7 @@ impl PatchParser {
     /// use qa_guard::patch_parser::PatchParser;
     /// 
     /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let patch_content = "diff --git a/src/main.rs b/src/main.rs\nindex 1234567..89abcde 100644\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,5 +1,5 @@\n-fn main() {\n+async fn main() {\n     println!("Hello");\n }\n";
+    ///     let patch_content = "diff --git a/src/main.rs b/src/main.rs\nindex 1234567..89abcde 100644\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,5 +1,5 @@\n-fn main()\n+async fn main() {\n     println!(\"Hello\");\n }\n";
     ///     
     ///     let parsed_patch = PatchParser::parse(patch_content)?;
     ///     println!("解析成功，共 {} 個檔案", parsed_patch.files.len());
@@ -241,13 +241,33 @@ impl PatchParser {
                 // 跳過新的檔案頭部
                 continue;
             } else if line.starts_with("@@ ") {
-                // 保存上一個 Hunk
-                if let Some((file, hunk_lines)) = current_file.take() {
-                    if !hunk_lines.is_empty() {
-                        if let Some(hunk) = PatchParser::parse_hunk(&hunk_lines) {
-                            let mut patch_file = file;
-                            patch_file.hunks.push(hunk);
-                            files.push(patch_file);
-                        }
-                    }
-     
+                current_hunk_lines.push(line.to_string());
+            } else if line.starts_with('+') && !line.starts_with("+++") {
+                total_additions += 1;
+                current_hunk_lines.push(line.to_string());
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                total_deletions += 1;
+                current_hunk_lines.push(line.to_string());
+            } else if line.starts_with("Binary files") {
+                is_binary = true;
+            } else {
+                current_hunk_lines.push(line.to_string());
+            }
+        }
+
+        if let Some((mut file, _)) = current_file.take() {
+            if let Some(hunk) = PatchParser::parse_hunk(&current_hunk_lines) {
+                file.hunks.push(hunk);
+            }
+            files.push(file);
+        }
+
+        Ok(ParsedPatch::new(
+            files,
+            is_binary,
+            total_additions,
+            total_deletions,
+            patch_content.to_string(),
+        ))
+    }
+}

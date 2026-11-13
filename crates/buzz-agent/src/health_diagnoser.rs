@@ -58,17 +58,20 @@ pub enum OverallStatus {
     Critical,
 }
 
-/// 環境變數驗證規則
+/// 環境變數驗證規則（使用字元數與安全切片，避免多 Byte UTF-8 切割 Panic）
 fn validate_env_var(name: &str, value: &str) -> (bool, Option<String>) {
-    let masked = if value.len() > 8 {
-        Some(format!("{}***{}", &value[..4], &value[value.len()-4..]))
+    let chars: Vec<char> = value.chars().collect();
+    let masked = if chars.len() > 8 {
+        let prefix: String = chars[..4].iter().collect();
+        let suffix: String = chars[chars.len() - 4..].iter().collect();
+        Some(format!("{}***{}", prefix, suffix))
     } else {
         Some("****".to_string())
     };
     
     let valid = match name {
         "BUZZ_RELAY_URL" => value.starts_with("http://") || value.starts_with("https://") || value.starts_with("wss://"),
-        "BUZZ_PRIVATE_KEY" => value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()),
+        "BUZZ_PRIVATE_KEY" => chars.len() == 64 && chars.iter().all(|c| c.is_ascii_hexdigit()),
         "BUZZ_AUTH_TAG" => !value.is_empty(),
         "OPENROUTER_API_KEY" => value.starts_with("sk-or-"),
         "GITHUB_TOKEN" => value.starts_with("ghp_") || value.starts_with("github_pat_"),
@@ -118,7 +121,7 @@ fn now_timestamp() -> String {
 /// 執行完整健康檢查
 pub async fn run_health_check(config: &Config) -> Result<HealthCheckResult, AgentError> {
     let mut sys = System::new_all();
-    sys.refresh_processes(ProcessesToUpdate::All, ProcessRefreshKind::everything());
+    sys.refresh_processes(ProcessesToUpdate::All, true);
     
     // 1. CLI 版本檢查
     let cli_version = get_cli_version();
@@ -264,14 +267,16 @@ mod tests {
     
     #[test]
     fn test_validate_env_var() {
-        assert_eq!(validate_env_var("BUZZ_RELAY_URL", "wss://relay.example.com"), (true, Some("wss://***".into())));
-        assert_eq!(validate_env_var("BUZZ_RELAY_URL", "invalid"), (false, Some("inva***lid".into())));
-        assert_eq!(validate_env_var("BUZZ_PRIVATE_KEY", "abcd".repeat(16)), (true, Some("abcd***efgh".into())));
+        assert_eq!(validate_env_var("BUZZ_RELAY_URL", "wss://relay.example.com"), (true, Some("wss:***.com".into())));
+        assert_eq!(validate_env_var("BUZZ_RELAY_URL", "invalid"), (false, Some("****".into())));
+        assert_eq!(validate_env_var("BUZZ_PRIVATE_KEY", &"abcd".repeat(16)), (true, Some("abcd***abcd".into())));
         assert_eq!(validate_env_var("BUZZ_PRIVATE_KEY", "short"), (false, Some("****".into())));
         assert_eq!(validate_env_var("OPENROUTER_API_KEY", "sk-or-valid"), (true, Some("sk-o***alid".into())));
-        assert_eq!(validate_env_var("OPENROUTER_API_KEY", "invalid"), (false, Some("inva***lid".into())));
+        assert_eq!(validate_env_var("OPENROUTER_API_KEY", "invalid_long"), (false, Some("inva***long".into())));
         assert_eq!(validate_env_var("GITHUB_TOKEN", "ghp_valid"), (true, Some("ghp_***alid".into())));
-        assert_eq!(validate_env_var("GITHUB_TOKEN", "github_pat_valid"), (true, Some("github***alid".into())));
+        assert_eq!(validate_env_var("GITHUB_TOKEN", "github_pat_valid"), (true, Some("gith***alid".into())));
+        // 驗證多 Byte 中文與 Emoji 不會發生 UTF-8 切割 Panic
+        assert_eq!(validate_env_var("BUZZ_AUTH_TAG", "測試金鑰🔒12345"), (true, Some("測試金鑰***2345".into())));
     }
     
     #[test]
@@ -290,7 +295,7 @@ mod tests {
     #[test]
     fn test_scan_processes_by_name() {
         let mut sys = System::new_all();
-        sys.refresh_processes(ProcessesToUpdate::All, ProcessRefreshKind::everything());
+        sys.refresh_processes(ProcessesToUpdate::All, true);
         // Just verify it doesn't panic
         let _ = scan_processes_by_name(&sys, "nonexistent_process_xyz");
     }

@@ -14,7 +14,7 @@ use crate::daemon_ws::WebSocketClient;
 /// Manages dynamic REQ filters for kind:30300 events addressed to the agent.
 pub struct SubscriptionManager {
     agent_pubkey: PublicKey,
-    current_sub_id: Option<String>,
+    pub(crate) current_sub_id: Option<String>,
 }
 
 impl SubscriptionManager {
@@ -49,7 +49,7 @@ impl SubscriptionManager {
             filter
         ]);
 
-        ws_client.send(Message::Text(req.to_string())).await
+        ws_client.send(Message::Text(req.to_string().into())).await
             .map_err(|e| AgentError::Other(format!("subscribe send failed: {e}")))?;
 
         info!("Subscribed to kind:30300 for agent: {}", self.agent_pubkey);
@@ -63,7 +63,7 @@ impl SubscriptionManager {
             "CLOSE",
             sub_id
         ]);
-        ws_client.send(Message::Text(req.to_string())).await
+        ws_client.send(Message::Text(req.to_string().into())).await
             .map_err(|e| AgentError::Other(format!("unsubscribe send failed: {e}")))?;
         info!("Unsubscribed from {}", sub_id);
         Ok(())

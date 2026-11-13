@@ -293,4 +293,7 @@ impl ServiceHealthProbe {
         };
         
         // 缓存状态
-        self.service_status_cache.insert(s
+        self.service_status_cache.insert(service.name.clone(), status.clone());
+        status
+    }
+}

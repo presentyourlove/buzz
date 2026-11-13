@@ -19,9 +19,14 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-# 加入 daily_evolution 模組路徑
+# 動態解析使用者目錄與環境變數（消除硬編碼路徑）
+USER_HOME = Path.home()
+APPDATA_ROAMING = Path(os.environ.get("APPDATA", str(USER_HOME / "AppData" / "Roaming")))
+APPDATA_LOCAL = Path(os.environ.get("LOCALAPPDATA", str(USER_HOME / "AppData" / "Local")))
+WORKSPACE_ROOT = os.environ.get("BUZZ_HOME", str(USER_HOME / ".buzz"))
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-EVOLUTION_MODULE_DIR = Path(r"C:\Users\user\.buzz\PLANS\daily_evolution")
+EVOLUTION_MODULE_DIR = Path(WORKSPACE_ROOT) / "PLANS" / "daily_evolution"
 if str(EVOLUTION_MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(EVOLUTION_MODULE_DIR))
 
@@ -31,12 +36,11 @@ except ImportError as e:
     print(f"[錯誤] 無法匯入 DailyEvolution 模組: {e}")
     sys.exit(1)
 
-MANAGED_AGENTS_PATH = r"C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json"
-BUZZ_CLI_PATH = r"C:\Users\user\AppData\Local\Buzz\buzz.exe"
+MANAGED_AGENTS_PATH = str(APPDATA_ROAMING / "xyz.block.buzz.app" / "agents" / "managed-agents.json")
+BUZZ_CLI_PATH = str(APPDATA_LOCAL / "Buzz" / "buzz.exe")
 DEFAULT_RELAY_URL = "wss://presentyourlove.communities.buzz.xyz"
 USER_DM_CHANNEL = "af946a63-dd43-4050-baea-65140d47fc42"
 ENGINEERING_CHANNEL = "5ca019f6-1a27-592a-b015-4baf0eb33572"
-WORKSPACE_ROOT = r"C:\Users\user\.buzz"
 
 
 def load_honey2_credentials():

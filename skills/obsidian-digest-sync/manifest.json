@@ -23,7 +23,7 @@
     "daily_note_folder": {
       "type": "string",
       "description": "每日筆記資料夾相對路徑",
-      "default": "02-Conversation-Digest/Daily"
+      "default": "wiki/02-Conversation-Digest/Daily"
     },
     "tags": {
       "type": "array",

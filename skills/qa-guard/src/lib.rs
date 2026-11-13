@@ -44,7 +44,7 @@ pub use report_generator::{QaGuardReport, QaGuardPatchResult};
 ///     let config = load_config();
 ///     
 ///     // 使用技能執行 QA-Guard 檢查
-///     let patch_content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main() {\n+async fn main() {\n     println!("Hello");\n }\n";
+///     let patch_content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main()\n+async fn main() {\n     println!(\"Hello\");\n }\n";
 ///     
 ///     match skill.check_patch(patch_content).await {
 ///         Ok(report) => println!("檢查報告:\n{}", report.generate_markdown()),
@@ -167,7 +167,7 @@ impl QaGuardSkill {
     /// async fn main() {
     ///     let skill = QaGuardSkill::new();
     ///     
-    ///     let patch_content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main() {\n+async fn main() {\n     println!("Hello");\n }\n";
+    ///     let patch_content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main()\n+async fn main() {\n     println!(\"Hello\");\n }\n";
     ///     
     ///     match skill.check_patch(patch_content).await {
     ///         Ok(report) => println!("檢查報告:\n{}", report.generate_markdown()),
@@ -278,5 +278,18 @@ impl QaGuardSkill {
             let report = self.syntax_checker.check_file(file_path);
             syntax_reports.push(report);
         }
-        
-      
+
+        let report = QaGuardReport::new(
+            Utc::now(),
+            report_generator::QaGuardPatchResult::new(rust_files.len()),
+            encoding_reports,
+            syntax_reports,
+            cargo_report,
+        );
+        Ok(report)
+    }
+
+    fn find_rust_files(&self) -> Vec<std::path::PathBuf> {
+        Vec::new()
+    }
+}

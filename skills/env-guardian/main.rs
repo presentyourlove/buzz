@@ -245,4 +245,5 @@ impl SecurityCheckResult {
             health_result: service_health_probe::HealthCheckResult::new(),
             passed: false,
         }
- 
+    }
+}

@@ -31,8 +31,8 @@ if [[ ! -d "$CONFIG_DIR" ]]; then
     log_error "Config directory not found: $CONFIG_DIR"
     log_info "Create it and copy .env.example files:"
     log_info "  mkdir -p $CONFIG_DIR"
-    log_info("  cp $PROJECT_ROOT/deploy/config/*.env.example $CONFIG_DIR/")
-    log_info("  # Then edit the files with your configuration")
+    log_info "  cp $PROJECT_ROOT/deploy/config/*.env.example $CONFIG_DIR/"
+    log_info "  # Then edit the files with your configuration"
     exit 1
 fi
 

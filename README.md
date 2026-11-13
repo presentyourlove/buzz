@@ -346,6 +346,95 @@ just reset          # ⚠️  Wipe data + recreate
   - 主幹 `main` 保持 100% 潔淨對齊官方最新上游 (`origin/main`)。
   - 所有客製化與自研功能完整收斂維護於 `feature/custom-local-core` 特徵分支。
 
+### 5. 每日對話摘要微調計畫 (Daily Digest Micro-Adjustment Implementation)
+- **三層演進架構落地 (Daily Digest Micro-Adjustment)**：
+  - **Evolution 1 雜訊過濾器 v2 (`noise_filter.rs`)**：
+    - 引入啟發式評分系統 (`score_line` / `filter_lines_with_scores`)，支援可配置 `signal_threshold` 訊號閾值。
+    - 擴充問答、閒聊、社交客套與狀態回執（如「已收到」、「感謝分享」）多語系正規過濾，精準保留高價值技術決策與具體指派行動項。
+  - **Evolution 2 規格前檢驗證器 (`spec_validator.rs`)**：
+    - 實作 YAML Front-matter 元數據規範檢查（支援 strict 模式校驗檔名與 `date` 一致性、`type: daily-digest`、`agent: buzz-agent` 等必要欄位）。
+    - 實作 DoD (Definition of Done) 查檢表與格式完整性檢驗，杜絕不合規摘要寫入儲存庫。
+  - **Evolution 3 結構化分組渲染器 (`markdown_renderer.rs` & `digest_generator.rs`)**：
+    - 實作執行緒主題分類器 (`ThreadCategory`：`Engineering`、`Hardware`、`Consult`、`Ops`、`Other`)。
+    - 支援分組渲染、統計區塊、決策複盤與行動清單匯總，完美適配 Obsidian 雙向鏈結與標籤生態。
+- **檔案變更清單 (File Inventory)**：
+  - **新增檔案 (Added)**：
+    - `.agents/skills/daily-digest/src/spec_validator.rs`
+    - `skills/daily-digest/src/spec_validator.rs`
+    - `skills/daily-digest/Cargo.toml`
+    - `skills/daily-digest/tests/digest_generator_tests.rs`
+  - **修改檔案 (Modified)**：
+    - `Cargo.toml`（排除技能目錄獨立編譯）
+    - `.agents/skills/daily-digest/src/lib.rs` / `skills/daily-digest/src/lib.rs`
+    - `.agents/skills/daily-digest/src/noise_filter.rs` / `skills/daily-digest/src/noise_filter.rs`
+    - `.agents/skills/daily-digest/src/markdown_renderer.rs` / `skills/daily-digest/src/markdown_renderer.rs`
+    - `.agents/skills/daily-digest/src/digest_generator.rs` / `skills/daily-digest/src/digest_generator.rs`
+    - `.agents/skills/daily-digest/src/vault_sync.rs` / `skills/daily-digest/src/vault_sync.rs`
+    - `.agents/skills/daily-digest/tests/digest_generator_tests.rs`
+- **測試驗證 (Testing & QA)**：
+  - 單元測試 (Unit Tests)：16/16 100% 通過。
+  - 整合測試 (Integration Tests)：15/15 100% 通過。
+  - 文件測試 (Doc Tests)：3/3 100% 通過。
+  - 雙端技能目錄 (`.agents/skills/daily-digest` 與 `skills/daily-digest`) 雙向 100% 對齊無差異。
+
+### 6. 訊息去重與回報閉環最小可行實作 (Message Dedup & Callback v2.1)
+- **核心架構落地**：
+  - **AppState 去重快取與三態狀態機 (`desktop/src-tauri/src/app_state.rs`)**：
+    - 實作 `try_reserve_message_dedup`、`confirm_message_dedup`、`fail_message_dedup`。
+    - 狀態轉移：`Pending` (鎖定中) ➔ `Confirmed` (已上鏈入庫) / `Failed` (發送失敗解鎖，允許重試)。
+    - LRU 容量上限（1,000 筆紀錄）、5 分鐘 `Pending` 超時防死結釋放機制，並強制保護 `filter != Pending`，杜絕執行中訊息遭誤淘汰。
+  - **雙層 Relay 去重與客戶端標籤標記 (`desktop/src-tauri/src/commands/messages.rs`)**：
+    - 於 `send_channel_message` 與 `send_managed_agent_channel_message` 實施兩階段去重防禦：
+      - 第一階段：端側記憶體快取預約。
+      - 第二階段：Relay 已存事件比對 (`find_managed_agent_channel_message_by_marker`)。
+    - 使用 `build_message_with_client_tags` 壓印 `["client", idempotency_key]` 標籤至 Nostr 事件。
+    - 採用 `std::panic::catch_unwind` 封裝回調通知，安全派發 `message_submit_completed` Tauri 事件，確保執行狀態閉環回報前端。
+  - **Windows 建置修正 (`desktop/src-tauri/build.rs`)**：
+    - 解決 GNU MinGW `windres` 無法解析非 ASCII 原始碼路徑問題，透過暫存目錄中繼 `icon.ico`。
+- **檔案變更清單**：
+  - `desktop/src-tauri/src/app_state.rs`
+  - `desktop/src-tauri/src/commands/messages.rs`
+  - `desktop/src-tauri/src/app_state_tests.rs`
+  - `desktop/src-tauri/build.rs`
+- **測試驗證**：
+  - `test_message_dedup_three_state_machine_and_concurrency` (三態轉換與並發防禦)
+  - `test_message_dedup_failed_allows_retry` (失敗解鎖與安全重試)
+  - `test_message_dedup_lru_protects_pending` (LRU 邊界條件與 Pending 優先保護)
+  - `cargo check --tests` 語法、型別、生命週期與借用檢查 100% 通過。
+
+### 7. Phase 2：GitHub 11/3 開源專案架構吸收落地 (Mika 三檔安全門禁 + DeepSeek 工單目錄隔離 + unslop 美學清潔門禁)
+- **Mika / dsh-Go 式端側三檔安全門禁 (`crates/buzz-agent/src/hooks/rules/three_tier_gate.rs`)**：
+  - 實作 `ThreeTierGateRule` 預執行門禁（`PreToolUse`），建立操作權限三級實體隔離機制：
+    - **Tier 1 (ReadOnly 唯讀)**：讀檔、目錄探索、唯讀 Shell 指令（`git status`, `ls`, `dir` 等），無條件放行。
+    - **Tier 2 (Restricted 受控操作)**：常規本地寫入、單元測試、編譯等日常開發，審計後放行。
+    - **Tier 3 (Elevated 高危操作)**：毀滅性刪除（`rm -rf`, `del /s`）、磁碟格式化、Git 強制覆寫（`git reset --hard`, `git clean -fd`, `git push -f`）以及寫入受保護檔案（`.env`, `managed-agents.json`, SSH/TLS 私鑰）。若無 `elevated_authorized` 標記或全域環境變數，強制予以阻斷（`Block`），徹底杜絕特工手滑破壞環境。
+- **DeepSeek 式工單目錄隔離 (`crates/buzz-agent/src/ticket_sandbox.rs`)**：
+  - 實作 `TicketSandbox` 獨立任務沙箱管理器：
+    - 自動建立任務私有沙箱目錄 `.buzz/.scratch/ticket_<clean_session_id>/`。
+    - 內建路徑穿越預防（阻斷包含 `..` 或絕對路徑之非法解析）。
+    - 支援任務完成後的原子化合流（`sync_to_workspace`）與臨時沙箱安全清理（`cleanup`），根絕多特工並行實作互相污染檔案。
+- **heydamir/unslop 式代碼美學與去 AI 味審查門禁 (`crates/buzz-agent/src/hooks/rules/unslop_guard.rs`)**：
+  - 實作 `UnslopGuardRule` 代碼清潔門禁（`PreToolUse`）：
+    - **嚴重偷懶佔位符阻斷 (Block)**：掃描寫入內容是否包含 `TODO: implement later`、`placeholder for actual`、`mock data for now` 等未完成樣板，強制特工落實完整代碼邏輯。
+    - **典型 UI 審美 Slop 警告 (Warn)**：偵測過度紫色漸層（`from-purple-500 to-indigo-600`）與發光陰影特效，導向簡約設計規範。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/src/hooks/rules/three_tier_gate.rs`
+    - `crates/buzz-agent/src/ticket_sandbox.rs`
+    - `crates/buzz-agent/src/hooks/rules/unslop_guard.rs`
+    - `crates/buzz-agent/tests/three_tier_gate_tests.rs`
+    - `crates/buzz-agent/tests/ticket_sandbox_tests.rs`
+    - `crates/buzz-agent/tests/unslop_guard_tests.rs`
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/hooks/rules/mod.rs` (註冊並導出 `ThreeTierGateRule`, `OperationTier`, `UnslopGuardRule`)
+    - `crates/buzz-agent/src/hooks/mod.rs` (將三檔門禁與 unslop 門禁加入預設規則佇列)
+    - `crates/buzz-agent/src/lib.rs` (導出 `ticket_sandbox` 模組)
+- **測試驗證 (Testing & QA)**：
+  - `cargo test --package buzz-agent --test three_tier_gate_tests` (5/5 100% 通過)
+  - `crates/buzz-agent/tests/ticket_sandbox_tests.rs` (3/3 100% 通過)
+  - `cargo test --package buzz-agent --test unslop_guard_tests` (5/5 100% 通過)
+  - 共計 13 項專屬單元測試與 check 0 錯誤全數通過。
+
 ---
 
 <p align="center">

@@ -276,4 +276,21 @@ impl QaGuardReport {
 /// # 示例
 /// 
 /// ```rust
-/// use qa_guard::report_generator::QaGuardPatchResu
+/// use qa_guard::report_generator::QaGuardPatchResult;
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QaGuardPatchResult {
+    pub files_count: usize,
+    pub total_additions: usize,
+    pub total_deletions: usize,
+}
+
+impl QaGuardPatchResult {
+    pub fn new(files_count: usize) -> Self {
+        Self {
+            files_count,
+            total_additions: 0,
+            total_deletions: 0,
+        }
+    }
+}

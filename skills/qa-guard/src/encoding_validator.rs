@@ -275,6 +275,35 @@ impl EncodingValidator {
                 b'\n' => {
                     if i > 0 && content[i - 1] == b'\r' {
                         crlf_count += 1;
-                        i += 1; // 跳過 CRLF
                     } else {
-     
+                        lf_count += 1;
+                    }
+                }
+                b'\r' => {
+                    if i + 1 >= content.len() || content[i + 1] != b'\n' {
+                        cr_count += 1;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        let kinds = (lf_count > 0) as u8 + (crlf_count > 0) as u8 + (cr_count > 0) as u8;
+        if kinds > 1 {
+            mixed = true;
+        }
+        if mixed {
+            LineEnding::Mixed
+        } else if crlf_count > 0 {
+            LineEnding::Crlf
+        } else if cr_count > 0 {
+            LineEnding::Cr
+        } else {
+            LineEnding::Lf
+        }
+    }
+
+    fn has_bom(&self, content: &[u8]) -> bool {
+        content.len() >= 3 && content[0] == 0xEF && content[1] == 0xBB && content[2] == 0xBF
+    }
+}

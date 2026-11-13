@@ -28,10 +28,10 @@ check_var() {
     if [[ -z "$var_value" ]]; then
         if [[ "$required" == "true" ]]; then
             log_error "Required variable $var_name is not set"
-            ((ERRORS++))
+            ERRORS=$((ERRORS + 1))
         else
             log_warn "Optional variable $var_name is not set"
-            ((WARNINGS++))
+            WARNINGS=$((WARNINGS + 1))
         fi
     else
         log_success "$var_name is set"
@@ -43,7 +43,7 @@ validate_provider_config() {
     
     if [[ -z "$provider" ]]; then
         log_error "BUZZ_AGENT_PROVIDER is required"
-        ((ERRORS++))
+        ERRORS=$((ERRORS + 1))
         return
     fi
     
@@ -64,7 +64,7 @@ validate_provider_config() {
             ;;
         *)
             log_error "Unknown provider: $provider"
-            ((ERRORS++))
+            ERRORS=$((ERRORS + 1))
             ;;
     esac
 }
@@ -87,19 +87,19 @@ validate_health_guardian() {
     
     if ! echo "$schedule" | grep -qE '^([\*/0-9,-]+ +){4}[\*/0-9,-]+$'; then
         log_warn "BUZZ_HEALTH_GUARDIAN_SCHEDULE may be invalid: $schedule"
-        ((WARNINGS++))
+        WARNINGS=$((WARNINGS + 1))
     fi
     
     if ! echo "$daily_deep" | grep -qE '^([\*/0-9,-]+ +){4}[\*/0-9,-]+$'; then
         log_warn "BUZZ_HEALTH_GUARDIAN_DAILY_DEEP may be invalid: $daily_deep"
-        ((WARNINGS++))
+        WARNINGS=$((WARNINGS + 1))
     fi
     
     # Validate paths
     local work_logs="${BUZZ_WORK_LOGS_PATH:-./.buzz/WORK_LOGS}"
     if [[ ! -d "$work_logs" ]]; then
         log_warn "WORK_LOGS path does not exist: $work_logs (will be created)"
-        ((WARNINGS++))
+        WARNINGS=$((WARNINGS + 1))
     fi
 }
 
@@ -113,13 +113,13 @@ validate_toml_config() {
     
     log_info "Validating TOML config: $toml_file"
     
-    # Check if toml is valid (basic syntax check)
+    # Check if toml is valid (safe sys.argv parameter passing + stdlib tomllib fallback)
     if command -v python3 >/dev/null 2>&1; then
-        if python3 -c "import tomli; tomli.load(open('$toml_file', 'rb'))" 2>/dev/null; then
+        if python3 -c "import sys, tomllib; tomllib.load(open(sys.argv[1], 'rb'))" "$toml_file" 2>/dev/null; then
             log_success "TOML syntax is valid"
         else
             log_error "TOML syntax is invalid"
-            ((ERRORS++))
+            ERRORS=$((ERRORS + 1))
         fi
     else
         log_warn "python3 not available, skipping TOML syntax check"

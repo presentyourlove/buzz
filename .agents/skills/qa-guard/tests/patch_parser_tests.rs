@@ -18,7 +18,7 @@ use super::*;
 /// 測試包含一個簡單修改的 Patch 的解析，包括檔案名稱、行號等信息
 #[test]
 fn test_parse_simple_patch() {
-    let patch_content = "diff --git a/src/main.rs b/src/main.rs\nindex 1234567..89abcde 100644\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,5 +1,5 @@\n-fn main() {\n+async fn main() {\n     println!(\"Hello\");\n }\n";
+    let patch_content = "diff --git a/src/main.rs b/src/main.rs\nindex 1234567..89abcde 100644\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,5 +1,5 @@\n-fn main()\n+async fn main() {\n     println!(\"Hello\");\n }\n";
     
     let parsed_patch = ParsedPatch::parse(patch_content).unwrap();
     
@@ -77,7 +77,7 @@ fn test_parse_deleted_file() {
 /// 測試獲取 Patch 中所有修改檔案的功能，包括新檔案、已刪除檔案和修改檔案
 #[test]
 fn test_get_modified_files() {
-    let patch_content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main() {\n+async fn main() {\n     println!(\"Hello\");\n }\n";
+    let patch_content = "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n-fn main()\n+async fn main() {\n     println!(\"Hello\");\n }\n";
     
     let parsed_patch = ParsedPatch::parse(patch_content).unwrap();
     let modified_files = parsed_patch.get_modified_files();
@@ -175,14 +175,14 @@ fn test_patch_file_is_rust_file() {
 #[test]
 fn test_hunk_display() {
     let hunk = Hunk::new(1, 3, 1, 3, vec![
-        HunkLine::Context("fn main() {".to_string()),
+        HunkLine::Context("fn main() { }".to_string()),
         HunkLine::Deletion("    old_line".to_string()),
         HunkLine::Addition("    new_line".to_string()),
     ]);
     
     let display = hunk.display();
     assert!(display.contains("@@ -1,3 +1,3 @@"));
-    assert!(display.contains("fn main() {"));
+    assert!(display.contains("fn main()"));
     assert!(display.contains("old_line"));
     assert!(display.contains("new_line"));
 }

@@ -281,4 +281,5 @@ fn test_syntax_checker_language_mapping() {
     assert_eq!(checker.language_mapping.get("README.md").unwrap(), &Language::Markdown);
     assert_eq!(checker.language_mapping.get("script.sh").unwrap(), &Language::Shell);
     // 假設沒有映射的檔案類型為 Unknown
-    assert!(checker.language_mapp
+    assert!(checker.language_mapping.get(".unknown").is_none());
+}

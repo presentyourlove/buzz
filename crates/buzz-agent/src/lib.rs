@@ -13,12 +13,18 @@ mod daemon_ws;
 mod databricks;
 mod databricks_label_grammar;
 mod handoff;
+mod health_analyzer;
+mod health_dashboard;
+mod health_diagnoser;
+mod health_guardian;
+mod health_reporter;
 mod hints;
 pub mod hooks;
 mod llm;
 mod mcp;
 pub mod model_capabilities;
 mod permission;
+pub mod ticket_sandbox;
 pub mod types;
 mod wire;
 
@@ -165,6 +171,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             .build()?
             .block_on(auth_subcommand(&args[2..]));
     }
+    if matches!(args.get(1).map(String::as_str), Some("health-check")) {
+        return tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(health_check_subcommand(&args[2..]));
+    }
+    if matches!(args.get(1).map(String::as_str), Some("health-dashboard")) {
+        return tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(health_dashboard_subcommand(&args[2..]));
+    }
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
@@ -209,6 +227,80 @@ async fn auth_subcommand(args: &[String]) -> Result<(), Box<dyn std::error::Erro
     }
 }
 
+/// `buzz-agent health-check` — run a one-time system health check and output report.
+/// Supports `--json` flag for JSON output.
+async fn health_check_subcommand(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let output_json = args.iter().any(|a| a == "--json");
+    
+    let cfg = Config::from_env().map_err(|e| format!("config: {e}"))?;
+    
+    let report = crate::health_guardian::phase_a_run_once(&cfg, output_json).await
+        .map_err(|e| format!("health check failed: {e}"))?;
+    
+    if output_json {
+        println!("{}", crate::health_reporter::render_json(&report)?);
+    } else {
+        println!("{}", crate::health_reporter::render_markdown(&report));
+    }
+    Ok(())
+}
+
+/// `buzz-agent health-dashboard` — start the health dashboard HTTP server.
+/// Supports `--port` flag (default: 8080) and `--host` flag (default: 127.0.0.1).
+async fn health_dashboard_subcommand(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut port = 8080u16;
+    let mut host = "127.0.0.1";
+    
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--port" => {
+                if i + 1 < args.len() {
+                    port = args[i + 1].parse().map_err(|_| "invalid port")?;
+                    i += 2;
+                } else {
+                    return Err("--port requires a value".into());
+                }
+            }
+            "--host" => {
+                if i + 1 < args.len() {
+                    host = &args[i + 1];
+                    i += 2;
+                } else {
+                    return Err("--host requires a value".into());
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    
+    let cfg = Arc::new(Config::from_env().map_err(|e| format!("config: {e}"))?);
+    
+    // Check if Health Guardian is enabled
+    if cfg.health_guardian.is_none() {
+        return Err("Health Guardian not enabled. Set BUZZ_HEALTH_GUARDIAN_ENABLED=1".into());
+    }
+    
+    let mut dashboard_state = crate::health_dashboard::DashboardState::new(cfg.clone());
+    
+    // Run initial health check to populate dashboard
+    let report = crate::health_guardian::phase_a_run_once(&cfg, false).await
+        .map_err(|e| format!("initial health check failed: {e}"))?;
+    dashboard_state.update_report(report).await;
+    
+    let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;
+    eprintln!("Starting Health Dashboard on http://{}", addr);
+    
+    dashboard_state.start_server(addr).await?;
+    
+    // Wait for shutdown signal
+    tokio::signal::ctrl_c().await?;
+    eprintln!("Shutting down Health Dashboard...");
+    dashboard_state.stop_server().await;
+    
+    Ok(())
+}
+
 async fn async_main() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
@@ -231,7 +323,7 @@ async fn async_main() {
     });
 
     // Start Agent Daemon for Mode B if agent keys are configured
-    let mut daemon = crate::daemon::Daemon::new(app.cfg.clone());
+    let mut daemon = crate::daemon::Daemon::new(Arc::new(app.cfg.clone()));
     if app.cfg.agent_keys.is_some() {
         if let Err(e) = daemon.start().await {
             tracing::error!("Failed to start agent daemon: {}", e);
@@ -1197,7 +1289,7 @@ mod dispatcher_tests {
 
         let ciphertext = nostr::nips::nip44::encrypt(
             keys.secret_key(),
-            keys.public_key(),
+            &keys.public_key(),
             &reminder_content.to_string(),
             nostr::nips::nip44::Version::V2,
         ).unwrap();
@@ -1211,9 +1303,8 @@ mod dispatcher_tests {
         // Verify we can decrypt
         let plaintext = nostr::nips::nip44::decrypt(
             keys.secret_key(),
-            keys.public_key(),
+            &keys.public_key(),
             &event.content,
-            nostr::nips::nip44::Version::V2,
         ).unwrap();
 
         let parsed: serde_json::Value = serde_json::from_str(&plaintext).unwrap();

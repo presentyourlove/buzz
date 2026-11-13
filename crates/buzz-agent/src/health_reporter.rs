@@ -6,9 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use hex;
-use rand::RngCore;
+use rand::{Rng, RngExt};
 
-use crate::health_analyzer::{AnalysisResult, FailureLogEntry, CircuitBreakerStatus};
+use crate::health_analyzer::{AnalysisResult, FailureLogEntry, CircuitBreakerStatus, Severity};
 use crate::health_diagnoser::{HealthCheckResult, OverallStatus, ProcessStatus};
 use crate::health_guardian::RemediationAction;
 
@@ -23,6 +23,12 @@ pub struct HealthReport {
     pub circuit_breakers: Vec<CircuitBreakerStatus>,
     pub remediations: Vec<RemediationAction>,
     pub recommendations: Vec<String>,
+}
+
+impl std::fmt::Display for HealthReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", render_markdown(self))
+    }
 }
 
 /// 產出 Markdown 格式報告
@@ -176,12 +182,12 @@ fn format_timestamp(ts: &str) -> String {
 /// 產生檢查 ID
 pub fn generate_check_id() -> String {
     let mut bytes = [0u8; 8];
-    rand::rng().fill_bytes(&mut bytes);
+    rand::rng().fill(&mut bytes);
     format!("hc_{}", hex::encode(bytes))
 }
 
 /// 取得當前時間戳
-fn now_timestamp() -> String {
+pub fn now_timestamp() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()

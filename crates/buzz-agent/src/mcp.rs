@@ -937,8 +937,10 @@ pub(crate) fn truncate_middle(s: &str, max: usize) -> String {
         // Budget too small for head + marker + tail; degrade to a head cut.
         return truncate_at_boundary(s, max).to_owned();
     }
-    let head = truncate_at_boundary(s, keep.div_ceil(2));
-    let mut tail_start = s.len() - keep / 2;
+    let head_budget = (keep / 4).min(1500);
+    let tail_budget = keep.saturating_sub(head_budget);
+    let head = truncate_at_boundary(s, head_budget);
+    let mut tail_start = s.len().saturating_sub(tail_budget);
     while tail_start < s.len() && !s.is_char_boundary(tail_start) {
         tail_start += 1;
     }

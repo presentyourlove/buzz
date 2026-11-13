@@ -285,7 +285,19 @@ impl EnvChecker {
     }
     
     /// 載入 .env 檔案
-    /// 
-    /// # 參數
-    /// 
-    /
+    fn load_env_file(&self, key: &str) -> Option<String> {
+        let content = fs::read_to_string(".env").ok()?;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if let Some((k, v)) = trimmed.split_once('=') {
+                if k.trim() == key {
+                    return Some(v.trim().trim_matches('"').to_string());
+                }
+            }
+        }
+        None
+    }
+}

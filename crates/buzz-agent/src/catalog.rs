@@ -395,6 +395,7 @@ fn catalog_error_kind(error: &AgentError) -> &'static str {
         AgentError::UnsupportedImageInput(_) => "unsupported-image",
         AgentError::Mcp(_) => "mcp",
         AgentError::Cancelled => "cancelled",
+        AgentError::Other(_) => "other",
     }
 }
 

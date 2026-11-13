@@ -50,7 +50,8 @@ pub struct SyntaxChecker {
 
 impl SyntaxChecker {
     pub fn new() -> Self {
-        let mut language_detectors: HashMap<String, Box<dyn LanguageDetector>> = HashMap::new();nosecondlanguage_detectors.insert("rs".to_string(), Box::new(RustDetector));
+        let mut language_detectors: HashMap<String, Box<dyn LanguageDetector>> = HashMap::new();
+        language_detectors.insert("rs".to_string(), Box::new(RustDetector));
         language_detectors.insert("js".to_string(), Box::new(JavaScriptDetector));
         language_detectors.insert("ts".to_string(), Box::new(TypeScriptDetector));
         language_detectors.insert("py".to_string(), Box::new(PythonDetector));
@@ -60,7 +61,8 @@ impl SyntaxChecker {
         language_detectors.insert("html".to_string(), Box::new(HTMLDetector));
         language_detectors.insert("md".to_string(), Box::new(MarkdownDetector));
         
-        let mut error_patterns: HashMap<String, Vec<ErrorPattern>> = HashMap::new();noseconderror_patterns.insert("rs".to_string(), vec![
+        let mut error_patterns: HashMap<String, Vec<ErrorPattern>> = HashMap::new();
+        error_patterns.insert("rs".to_string(), vec![
             ErrorPattern {
                 pattern: r"let\s+\w+\s*:\s*\w+\s*=\s*.*;".to_string(),
                 error_code: "E001".to_string(),
@@ -109,7 +111,8 @@ impl SyntaxChecker {
             },
         ]);
         
-        let mut fix_providers: HashMap<String, Box<dyn FixProvider>> = HashMap::new();nosecondfix_providers.insert("rs".to_string(), Box::new(RustFixProvider));
+        let mut fix_providers: HashMap<String, Box<dyn FixProvider>> = HashMap::new();
+        fix_providers.insert("rs".to_string(), Box::new(RustFixProvider));
         fix_providers.insert("js".to_string(), Box::new(JavaScriptFixProvider));
         fix_providers.insert("py".to_string(), Box::new(PythonFixProvider));
         
@@ -205,5 +208,10 @@ impl SyntaxChecker {
             .and_then(|ext| ext.to_str())
             .unwrap_or("");
         
-        let fix_provider = self.fix_providers.get(extension);
-        if 
+        if let Some(provider) = self.fix_providers.get(extension) {
+            Ok(provider.apply_fixes(content))
+        } else {
+            Ok(content.to_string())
+        }
+    }
+}

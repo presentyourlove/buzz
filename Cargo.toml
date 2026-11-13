@@ -36,7 +36,7 @@ members = [
     "crates/buzz-datastore-tracing",
     "examples/countdown-bot",
 ]
-exclude = ["desktop/src-tauri"]
+exclude = ["desktop/src-tauri", ".agents/skills/daily-digest", ".agents/skills/env-guardian", ".agents/skills/qa-guard"]
 resolver = "2"
 
 [workspace.package]
@@ -63,13 +63,14 @@ sqlx = { version = "=0.9.0", features = [
 ] }
 
 # Redis
-redis        = { version = "1.0", features = ["tokio-comp", "tokio-rustls-comp"] }
+redis        = { version = "1.0", features = ["tokio-comp", "connection-manager", "tokio-native-tls-comp"] }
+deadpool-redis = { version = "0.23", features = ["rt_tokio_1"] }
 
 # Kubernetes (buzz-backend-kubernetes provider). No `ring` feature here: the
 # process-level CryptoProvider is installed explicitly at startup, matching
 # buzz-cli/buzz-acp/buzz-admin/buzz-relay/buzz-dev-mcp — see the comment on the
 # crate's own rustls dependency.
-kube = { version = "2.0", default-features = false, features = ["client", "rustls-tls"] }
+kube = { version = "2.0", default-features = false, features = ["client", "rustls-tls", "aws-lc-rs"] }
 k8s-openapi = { version = "0.26", features = ["v1_31"] }
 
 # Nostr
@@ -80,7 +81,7 @@ serde       = { version = "1", features = ["derive"] }
 postcard    = { version = "1", default-features = false, features = ["use-std"] }
 
 # Inter-relay mesh transport (buzz-relay-mesh)
-iroh = { version = "1.0.0-rc.0", default-features = false, features = ["tls-ring"] }
+iroh = { version = "1.0.0-rc.0", default-features = false }
 serde_json  = { version = "1", features = ["raw_value"] }
 serde_yaml  = "0.9"
 evalexpr    = "11"
@@ -106,10 +107,10 @@ chrono  = { version = "0.4", features = ["serde"] }
 httpdate = "1"
 
 # JWT / JWS verification (NIP-FI federated identity assertions)
-jsonwebtoken = { version = "10.4.0", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "10.4.0", default-features = false, features = ["rand"] }
 
 # HTTP client (webhook delivery)
-reqwest = { version = "0.13", features = ["json", "rustls", "stream"], default-features = false }
+reqwest = { version = "0.13", features = ["json", "native-tls", "stream"], default-features = false }
 
 # Cryptography
 sha2      = "0.11"
@@ -132,7 +133,7 @@ lru     = "0.16"
 futures-util = "0.3"
 
 # WebSocket client (test client)
-tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 url = "2"
 
 # Property-based testing (dev-only)
@@ -199,6 +200,7 @@ strip = true
 # allowlist for the auth token). Revert to crates.io once #449 lands upstream.
 [patch.crates-io]
 aws-creds = { git = "https://github.com/tlongwell-block/rust-s3", rev = "c9fce3620dd434c1f810101d672cf384268dbb0f" }
+negentropy = { git = "https://github.com/rust-nostr/negentropy", branch = "master" }
 # SQLx: pin every crate together; these crates share types. This unreleased
 # revision includes the whole-return deadline from the open upstream PR #4407
 # and retains the fixes below. Return to a released version once it includes

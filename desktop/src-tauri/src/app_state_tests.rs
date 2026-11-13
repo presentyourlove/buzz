@@ -1415,3 +1415,65 @@ fn corrupt_keyring_no_marker_no_file_generates_fresh() {
         "fresh key must be stored after generate_and_persist"
     );
 }
+
+#[test]
+fn test_message_dedup_three_state_machine_and_concurrency() {
+    let state = build_app_state();
+    let key = "test_channel|hello world||author_hex";
+    let ttl = std::time::Duration::from_secs(60);
+
+    // 1. 初次請求成功預約 (Pending)
+    let res = state.try_reserve_message_dedup(key, ttl);
+    assert_eq!(res, Ok(None));
+
+    // 2. 併發防重入：處理中再次請求應拒絕
+    let duplicate_res = state.try_reserve_message_dedup(key, ttl);
+    assert!(duplicate_res.is_err());
+    assert!(duplicate_res.unwrap_err().contains("duplicate"));
+
+    // 3. 提交確認 (Confirmed)
+    state.confirm_message_dedup(key, "event_id_12345");
+
+    // 4. 確認後再次請求應直接回傳已確認之 event_id
+    let cached_res = state.try_reserve_message_dedup(key, ttl);
+    assert_eq!(cached_res, Ok(Some("event_id_12345".to_string())));
+}
+
+#[test]
+fn test_message_dedup_failed_allows_retry() {
+    let state = build_app_state();
+    let key = "test_channel|fail test||author_hex";
+    let ttl = std::time::Duration::from_secs(60);
+
+    // 1. 預約 slot
+    assert_eq!(state.try_reserve_message_dedup(key, ttl), Ok(None));
+
+    // 2. 模擬 Relay 或網路失敗
+    state.fail_message_dedup(key);
+
+    // 3. 失敗後應允許重試 (Pending)
+    let retry_res = state.try_reserve_message_dedup(key, ttl);
+    assert_eq!(retry_res, Ok(None));
+}
+
+#[test]
+fn test_message_dedup_lru_protects_pending() {
+    let state = build_app_state();
+    let ttl = std::time::Duration::from_secs(60);
+
+    // 預約一個正在進行中的重要 Pending 請求
+    let pending_key = "pending_key";
+    assert_eq!(state.try_reserve_message_dedup(pending_key, ttl), Ok(None));
+
+    // 灌入大量 Confirmed 項目觸發 LRU 淘汰
+    for i in 0..1050 {
+        let k = format!("key_{i}");
+        let _ = state.try_reserve_message_dedup(&k, ttl);
+        state.confirm_message_dedup(&k, &format!("event_{i}"));
+    }
+
+    // 檢驗 Pending 項目絕對不可被 LRU 誤刪
+    let cache = state.message_dedup_cache.lock().unwrap();
+    assert!(cache.contains_key(pending_key));
+    assert!(matches!(cache.get(pending_key).unwrap().status, DedupStatus::Pending));
+}

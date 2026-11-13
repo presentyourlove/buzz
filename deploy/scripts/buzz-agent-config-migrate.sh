@@ -33,8 +33,8 @@ fi
 
 escape_toml() {
     local input="$1"
-    # Escape quotes and backslashes
-    echo "$input" | sed 's/\/\\/g; s/"/\\"/g'
+    # Escape quotes and backslashes safely
+    printf '%s' "$input" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
 generate_toml() {
@@ -105,7 +105,9 @@ main() {
         cp "$OUTPUT_FILE" "$OUTPUT_FILE.bak.$(date +%s)"
     fi
     
+    umask 077
     generate_toml > "$OUTPUT_FILE"
+    chmod 600 "$OUTPUT_FILE"
     
     log_success "Configuration migrated to $OUTPUT_FILE"
     log_info "Review the generated file and adjust as needed"

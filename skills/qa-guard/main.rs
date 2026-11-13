@@ -72,8 +72,8 @@ impl QAGuardSkill {
         project_path: Option<&str>,
     ) -> Result<QAGuardResult, String> {
         let mut results: Vec<ValidationResult> = Vec::new();
-        let mut errors: Vec<String> = Vec::new();nosecondcontent;
-        let mut warnings: Vec<String> = Vec::new();nosecondcontent;
+        let mut errors: Vec<String> = Vec::new();
+        let mut warnings: Vec<String> = Vec::new();
         
         // Step 1: Parse patch if enabled
         if self.config.enable_patch_validation {
@@ -213,4 +213,23 @@ impl QAGuardSkill {
             0.0f32
         };
         
-        let is_valid = errors.is_emp
+        let is_valid = errors.is_empty();
+        QAGuardResult {
+            file_path: file_path.to_string(),
+            is_valid,
+            overall_score,
+            total_issues,
+            errors,
+            warnings,
+        }
+    }
+}
+
+pub struct QAGuardResult {
+    pub file_path: String,
+    pub is_valid: bool,
+    pub overall_score: f32,
+    pub total_issues: usize,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}

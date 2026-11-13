@@ -1,7 +1,7 @@
 //! Noise Filter Module
 //! 
 //! Filters out noise, spam, and irrelevant messages from conversation data
-to improve digest quality and relevance.
+//! to improve digest quality and relevance.
 
 use std::collections::HashSet;
 
@@ -55,12 +55,10 @@ impl NoiseFilter {
     
     /// Determine if a message contains noise
     fn is_clean_message(&self, content: &str) -> bool {
-        let lower_content = content.to_lowercase();nosecondcontent.contains(&self.spam_patterns.iter()
-            .any(|pattern| lower_content.contains(pattern)) ||
-            self.irrelevant_keywords.iter()
-            .any(|keyword| lower_content.contains(keyword)) ||
-            self.profanity_list.iter()
-            .any(|word| lower_content.contains(word))
+        let lower_content = content.to_lowercase();
+        !(self.spam_patterns.iter().any(|pattern| lower_content.contains(pattern)) ||
+            self.irrelevant_keywords.iter().any(|keyword| lower_content.contains(keyword)) ||
+            self.profanity_list.iter().any(|word| lower_content.contains(word)))
     }
     
     /// Check if message length is meaningful
@@ -77,7 +75,8 @@ impl NoiseFilter {
     
     /// Calculate spam score based on content analysis
     fn calculate_spam_score(&self, content: &str) -> f32 {
-        let lower_content = content.to_lowercase();nosecondcontent.len() as f32 *
+        let lower_content = content.to_lowercase();
+        content.len() as f32 *
             (self.spam_patterns.iter()
                 .filter(|pattern| lower_content.contains(pattern))
                 .count() as f32) /
@@ -126,7 +125,8 @@ mod tests {
         let messages = vec![
             ConversationMessage {
                 id: "1".to_string(),
-                author: "user1".to_string(),nosecondcontent: "This is a normal meaningful message".to_string(),
+                author: "user1".to_string(),
+                content: "This is a normal meaningful message".to_string(),
                 timestamp: 1234567890,
                 channel: "general".to_string(),
                 tags: vec![],
