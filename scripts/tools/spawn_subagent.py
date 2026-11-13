@@ -64,7 +64,7 @@ def load_parent_agent_config(parent_name: str) -> Dict[str, Any]:
     從 managed-agents.json 載入父特工的配置（模型與憑證），若找不到則使用環境變數或預設值。
     """
     config: Dict[str, Any] = {
-        "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "model": "cohere/north-mini-code:free",
         "api_key": "",
         "base_url": "https://openrouter.ai/api/v1",
     }

@@ -136,6 +136,32 @@ fn is_send_message_shaped(name: &str, arguments: &serde_json::Value) -> bool {
             })
 }
 
+/// Helper: inspect a tool result to determine if it represents genuine execution success.
+/// Checks `is_error`, JSON `exit_code != 0`, `timed_out`, and `error` field.
+fn is_tool_result_success(tr: &ToolResult) -> bool {
+    if tr.is_error {
+        return false;
+    }
+    for c in &tr.content {
+        if let ToolResultContent::Text(text) = c {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
+                if let Some(ec) = v.get("exit_code").and_then(|e| e.as_i64()) {
+                    if ec != 0 {
+                        return false;
+                    }
+                }
+                if v.get("timed_out").and_then(|t| t.as_bool()).unwrap_or(false) {
+                    return false;
+                }
+                if v.get("error").is_some() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 /// Extract channel UUID and optional reply-to event hex from a user prompt.
 pub fn extract_reply_target_from_prompt(text: &str) -> Option<(String, Option<String>)> {
     // 1. Extract reply-to (64 hex characters)
@@ -552,10 +578,11 @@ impl RunCtx<'_> {
         // only a genuine publish should suppress the WARN.
         let mut buzz_reply_call_seen = false;
         let mut buzz_reply_publish_count = 0usize;
+        let mut buzz_publish_attempt_count = 0usize;
         let mut last_failed_call: Option<ToolCall> = None;
         let mut identical_call_failures = 0usize;
         let mut total_consecutive_tool_failures = 0usize;
-        const MAX_IDENTICAL_TOOL_FAILURES: usize = 3;
+        const MAX_IDENTICAL_TOOL_FAILURES: usize = 5;
         const MAX_TOTAL_CONSECUTIVE_TOOL_FAILURES: usize = 8;
         let mut reply_nags = 0u32;
         let mut silent_turns = 0u32;
@@ -568,7 +595,20 @@ impl RunCtx<'_> {
         // refunded; this counter only bounds the default-unlimited case.
         let mut max_tokens_recoveries = 0u32;
         loop {
-            if self.cfg.max_rounds > 0 && round >= self.cfg.max_rounds {
+            // Safety cap: if max_rounds is 0 (unbounded), enforce a protective ceiling of 40
+            // rounds to terminate runaway tool call loops and orphan zombie sessions.
+            let effective_max_rounds = if self.cfg.max_rounds > 0 {
+                self.cfg.max_rounds
+            } else {
+                40
+            };
+            if round >= effective_max_rounds {
+                tracing::warn!(
+                    session_id = %self.session_id,
+                    round,
+                    effective_max_rounds,
+                    "terminating turn: reached maximum rounds safety ceiling"
+                );
                 return Ok(StopReason::MaxTurnRequests);
             }
             if *self.cancel.borrow() {
@@ -1035,17 +1075,33 @@ impl RunCtx<'_> {
             // Updated unconditionally (not gated on `require_reply`) so the
             // silent-turn diagnostic has a publish-aware turn-level signal
             // regardless of config.
-            if !buzz_reply_call_seen {
-                buzz_reply_call_seen = calls.iter().any(|c| is_buzz_reply_call(c, self.mcp));
-            }
             self.history.push(HistoryItem::Assistant {
                 text: response.text,
                 tool_calls: calls.clone(),
                 reasoning_details: response.reasoning_details,
             });
 
-            if let Some(stop) = self.execute_calls(&calls, &mut buzz_reply_publish_count).await {
+            if let Some(stop) = self.execute_calls(&calls, &mut buzz_reply_publish_count, &mut buzz_publish_attempt_count).await {
                 return Ok(stop);
+            }
+
+            // 更新實際成功回覆/發布狀態（以實際執行成功為準，避免失敗調用誤殺救援機制）
+            if !buzz_reply_call_seen {
+                if buzz_reply_publish_count > 0 {
+                    buzz_reply_call_seen = true;
+                } else {
+                    let recent_results = self.history.iter().rev().take(calls.len());
+                    for (c, item) in calls.iter().zip(recent_results) {
+                        if is_buzz_reply_call(c, self.mcp) {
+                            if let HistoryItem::ToolResult(tr) = item {
+                                if is_tool_result_success(tr) {
+                                    buzz_reply_call_seen = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // 智慧型死循環與連續工具錯誤硬熔斷煞車門禁
@@ -1091,7 +1147,7 @@ impl RunCtx<'_> {
                 );
                 let breaker_msg_id = format!("{}-breaker-tool-{round}", self.run_id);
                 let err_msg = if is_identical_loop {
-                    "【安全熔斷煞車】特工連續 3 次重複執行完全相同的失敗工具呼叫，已自動終止任務以防範無效死循環。請檢查工具參數與系統設定。"
+                    "【安全熔斷煞車】特工連續 5 次重複執行完全相同的失敗工具呼叫，已自動終止任務以防範無效死循環。請檢查工具參數與系統設定。"
                 } else {
                     "【安全熔斷煞車】特工累計連續 8 次工具執行失敗（如多個備選檔案路徑均不存在），已自動終止任務以防範無效重試。請檢查檔案路徑或系統設定。"
                 };
@@ -1159,7 +1215,12 @@ impl RunCtx<'_> {
     /// `max_parallel_tools = 1` makes phase 2 effectively sequential
     /// (one in-flight call at a time via the semaphore). Larger values
     /// run that many calls concurrently.
-    async fn execute_calls(&mut self, calls: &[ToolCall], reply_publish_count: &mut usize) -> Option<StopReason> {
+    async fn execute_calls(
+        &mut self,
+        calls: &[ToolCall],
+        reply_publish_count: &mut usize,
+        publish_attempt_count: &mut usize,
+    ) -> Option<StopReason> {
         let mut results: Vec<Option<ToolResult>> = vec![None; calls.len()];
         let mut runnable: Vec<usize> = Vec::with_capacity(calls.len());
 
@@ -1182,9 +1243,12 @@ impl RunCtx<'_> {
             emit_pending(self.wire, self.session_id, call).await;
 
             // 重複發布物理熔斷門禁 (Duplicate Publish Circuit Breaker)：
-            // 單一 Turn 內僅允許發送一次頻道訊息 (messages send)；若因 Handoff 或模型失憶重複發起發布，一律源頭攔截，
+            // 單一 Turn 內僅允許發送一次成功的頻道訊息 (messages send)；若因 Handoff 或模型失憶重複發起發布，一律源頭攔截，
             // 避免 Honey 發生連續回覆 12 次之重播洗版風暴。
-            // 注意：貼表情符號 (reactions add) 不受此限，亦不會消耗此回覆訊息計數，確保先貼表情再發訊息之正常流程不被誤殺。
+            // 注意：
+            // 1. 貼表情符號 (reactions add) 不受此限，亦不會消耗此回覆訊息計數。
+            // 2. 僅在先前已「成功發布」(*reply_publish_count > 0) 時進行防重放攔截。
+            // 3. 若前次發布失敗（如 Exit Code != 0），允許在同一 Turn 內修正重試（最多 3 次嘗試），避免首次失敗即被封口。
             if is_buzz_send_message_call(call, self.mcp) {
                 if *reply_publish_count > 0 {
                     tracing::warn!(
@@ -1199,8 +1263,21 @@ impl RunCtx<'_> {
                     emit_completed(self.wire, self.session_id, call, &result).await;
                     results[idx] = Some(result);
                     continue;
+                } else if *publish_attempt_count >= 3 {
+                    tracing::warn!(
+                        session_id = self.session_id,
+                        tool_name = %call.name,
+                        publish_attempt_count = *publish_attempt_count,
+                        "agent: publish attempts limit reached in turn"
+                    );
+                    let suppressed_text = "Notice: Message publish failed repeatedly (3 attempts). Conclude your turn now.";
+                    let mut result = synthetic_tool_result(call, suppressed_text.into());
+                    result.is_error = true;
+                    emit_completed(self.wire, self.session_id, call, &result).await;
+                    results[idx] = Some(result);
+                    continue;
                 } else {
-                    *reply_publish_count += 1;
+                    *publish_attempt_count += 1;
                 }
             }
 
@@ -1237,6 +1314,29 @@ impl RunCtx<'_> {
         }
 
         self.execute_parallel(calls, &runnable, &mut results).await;
+
+        // 執行完成後，檢視發布工具的實際執行結果：
+        // 只有在工具成功執行且無錯誤時，才累加 reply_publish_count
+        for (idx, call) in calls.iter().enumerate() {
+            if is_buzz_send_message_call(call, self.mcp) {
+                if let Some(res) = &results[idx] {
+                    if is_tool_result_success(res) {
+                        *reply_publish_count += 1;
+                        tracing::info!(
+                            session_id = self.session_id,
+                            reply_publish_count = *reply_publish_count,
+                            "agent: channel message successfully published"
+                        );
+                    } else {
+                        tracing::warn!(
+                            session_id = self.session_id,
+                            publish_attempt_count = *publish_attempt_count,
+                            "agent: channel message publish attempt failed; retry permitted"
+                        );
+                    }
+                }
+            }
+        }
 
         self.append_results(calls, &mut results);
 
@@ -2498,38 +2598,44 @@ mod tests {
 
     #[test]
     fn test_duplicate_publish_counter_logic() {
-        let mut publish_count = 0usize;
-        // First publish call: should increment count and proceed
-        if publish_count == 0 {
-            publish_count += 1;
-        }
-        assert_eq!(publish_count, 1);
+        let mut publish_success_count = 0usize;
+        let mut publish_attempt_count = 0usize;
 
-        // Second publish call in same turn: should be detected as duplicate
-        let is_duplicate = publish_count > 0;
-        assert!(is_duplicate, "subsequent publish in same turn must be identified as duplicate");
+        // First publish attempt (failed): success count remains 0, attempt count increments
+        publish_attempt_count += 1;
+        assert_eq!(publish_success_count, 0);
+        assert_eq!(publish_attempt_count, 1);
+        // Retry is allowed because publish_success_count == 0
+        assert_eq!(publish_success_count, 0);
+
+        // Second publish attempt (succeeded): success count becomes 1
+        publish_attempt_count += 1;
+        publish_success_count += 1;
+        assert_eq!(publish_success_count, 1);
+
+        // Third publish attempt in same turn: detected as duplicate because publish_success_count > 0
+        let is_duplicate = publish_success_count > 0;
+        assert!(is_duplicate, "subsequent publish after success in same turn must be identified as duplicate");
     }
 
     #[test]
     fn test_consecutive_tool_failures_logic() {
         let mut total_failures = 0usize;
         let mut identical_failures = 0usize;
-        const MAX_IDENTICAL: usize = 3;
+        const MAX_IDENTICAL: usize = 5;
         const MAX_TOTAL: usize = 8;
 
-        // 3 different failures do NOT trigger identical breaker
-        total_failures += 1;
-        identical_failures = 1; // call 1
-        total_failures += 1;
-        identical_failures = 1; // call 2 (different arg)
-        total_failures += 1;
-        identical_failures = 1; // call 3 (different arg)
-        assert_eq!(total_failures, 3);
+        // 4 different failures do NOT trigger identical breaker
+        for _ in 0..4 {
+            total_failures += 1;
+            identical_failures = 1;
+        }
+        assert_eq!(total_failures, 4);
         assert!(identical_failures < MAX_IDENTICAL);
         assert!(total_failures < MAX_TOTAL);
 
-        // 3 identical failures DO trigger identical breaker
-        identical_failures = 3;
+        // 5 identical failures DO trigger identical breaker
+        identical_failures = 5;
         assert!(identical_failures >= MAX_IDENTICAL);
 
         // Reset on success

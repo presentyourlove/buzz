@@ -7,7 +7,7 @@ Honey2::Radar - GitHub 開源專案技術研究員 Sub-Agent
 - 每日從 GitHub Trending / Search API 挑選 3-5 個熱門開源專案（最近 7-14 天建立或快速增長）
 - 透過 SQLite 本地歷史庫 (tech_research_history.db) 確保「絕不重複研究相同專案」
 - 整合 Tavily Search API 抓取專案背景與社群評價
-- 使用 Google Gemma 4 31B (google/gemma-4-31b-it:free) 模型進行深度結構化分析：
+- 使用 Cohere North Mini Code (cohere/north-mini-code:free) 模型進行深度結構化分析：
   1. 用途（有咩用 - 痛點與核心功能）
   2. 用處（用在哪 - 架構定位與生態）
   3. 啱唔啱主理人/Buzz用（契合度與落地建議）
@@ -30,7 +30,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
 # 常數設定
-DEFAULT_MODEL = "google/gemma-4-31b-it:free"
+DEFAULT_MODEL = "cohere/north-mini-code:free"
 FALLBACK_GEMMA_MODEL = "google/gemma-4-26b-a4b-it:free"
 FALLBACK_NVIDIA_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
