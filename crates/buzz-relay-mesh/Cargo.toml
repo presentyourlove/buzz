@@ -13,7 +13,7 @@ buzz-pubsub  = { workspace = true }
 serde        = { workspace = true }
 serde_json   = { workspace = true }
 postcard     = { workspace = true }
-iroh         = { workspace = true }
+iroh         = { workspace = true, features = ["tls-ring"] }
 redis        = { workspace = true }
 thiserror    = { workspace = true }
 tracing      = { workspace = true }

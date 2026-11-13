@@ -2,7 +2,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use base64::Engine;
-use nostr::{EventBuilder, JsonUtil, Kind, PublicKey, Tag};
+use nostr::{EventBuilder, JsonUtil, Keys, Kind, PublicKey, Tag};
 use sha2::{Digest, Sha256};
 
 use crate::credentials::{
@@ -592,15 +592,21 @@ impl BuzzClient {
         &self.relay_url
     }
 
+    /// Returns the local keys if available (only for credentials created from a local key).
+    pub fn keys(&self) -> Option<&Keys> {
+        self.credentials.keys()
+    }
+
     /// Encrypt plaintext to self using NIP-44 v2 (self-encryption).
     ///
     /// Uses the client's own keys for both encryption and decryption.
     /// Returns the base64-encoded ciphertext suitable for event content.
     pub fn nip44_encrypt_to_self(&self, plaintext: &str) -> Result<String, CliError> {
         use nostr::nips::nip44::{encrypt, Version};
+        let keys = self.keys().ok_or_else(|| CliError::Auth("local keys required for NIP-44 encrypt".into()))?;
         let ciphertext = encrypt(
-            self.keys.secret_key(),
-            self.keys.public_key(),
+            keys.secret_key(),
+            &keys.public_key(),
             plaintext,
             Version::V2,
         )
@@ -613,12 +619,12 @@ impl BuzzClient {
     /// Uses the client's own keys for decryption.
     /// Returns the decrypted plaintext.
     pub fn nip44_decrypt_from_self(&self, ciphertext: &str) -> Result<String, CliError> {
-        use nostr::nips::nip44::{decrypt, Version};
+        use nostr::nips::nip44::decrypt;
+        let keys = self.keys().ok_or_else(|| CliError::Auth("local keys required for NIP-44 decrypt".into()))?;
         let plaintext = decrypt(
-            self.keys.secret_key(),
-            self.keys.public_key(),
+            keys.secret_key(),
+            &keys.public_key(),
             ciphertext,
-            Version::V2,
         )
         .map_err(|e| CliError::Other(format!("NIP-44 decrypt failed: {e}")))?;
         Ok(plaintext)

@@ -1,7 +1,6 @@
 use crate::error::CliError;
-use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use humantime::parse_duration;
-use std::str::FromStr;
 
 /// Maximum content size in bytes (64 KiB).
 pub const MAX_CONTENT_BYTES: usize = 65_536;
@@ -278,12 +277,12 @@ pub fn validate_not_before(not_before: i64) -> Result<i64, CliError> {
 
 /// Generate a cryptographically secure 128-bit entropy d-tag (32 hex chars).
 ///
-/// Uses `rand::rngs::OsRng` for CSPRNG. This satisfies NIP-ER line 58 requirement
+/// Uses `rand::rng()` for CSPRNG. This satisfies NIP-ER line 58 requirement
 /// for 128 bits of entropy. UUIDv4 only provides 122 bits and is NOT acceptable.
 pub fn generate_d_tag() -> String {
-    use rand::RngCore;
+    use rand::Rng;
     let mut bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 

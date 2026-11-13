@@ -393,6 +393,11 @@ impl Credentials {
         self.auth_tag.as_ref()
     }
 
+    /// Returns the local keys if available (only for credentials created from a local key).
+    pub fn keys(&self) -> Option<&Keys> {
+        self.local_keys.as_ref()
+    }
+
     /// The NIP-AE engram `d` tag for `slug` in the conversation with `peer`:
     /// HMAC-SHA256 over the NIP-44 conversation key, so it needs the key
     /// itself rather than a signature (`docs/nips/NIP-AE.md`).

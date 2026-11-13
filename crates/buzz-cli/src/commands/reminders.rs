@@ -5,9 +5,8 @@ use crate::{
     RemindersCmd,
 };
 use buzz_core::kind::KIND_EVENT_REMINDER;
-use chrono::{DateTime, Utc};
 use nostr::{EventBuilder, JsonUtil, Kind, Tag};
-use rand::RngCore;
+use rand::Rng;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -22,6 +21,7 @@ pub async fn dispatch(sub: RemindersCmd, client: &BuzzClient) -> Result<(), CliE
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn cmd_create(
     content: String,
     at: String,
@@ -68,16 +68,16 @@ async fn cmd_create(
 
     // Build reminder content JSON (will be NIP-44 encrypted)
     let mut target = json!({});
-    if let Some(ch) = channel_id {
+    if let Some(ref ch) = channel_id {
         target["channelId"] = json!(ch.to_string());
     }
-    if let Some(eid) = event_id {
+    if let Some(ref eid) = event_id {
         target["eventId"] = json!(eid);
     }
-    if let Some(p) = preview {
+    if let Some(ref p) = preview {
         target["preview"] = json!(p);
     }
-    if let Some(apk) = author_pubkey {
+    if let Some(ref apk) = author_pubkey {
         target["authorPubkey"] = json!(apk);
     }
     // If target is empty, omit it entirely (note-only reminder per NIP-ER)
@@ -97,7 +97,7 @@ async fn cmd_create(
     let ciphertext = client.nip44_encrypt_to_self(&content_json.to_string())?;
 
     // Build tags
-    let mut tags = vec![
+    let tags = vec![
         Tag::parse(["d", &d_tag]).map_err(|e| CliError::Other(format!("d tag error: {e}")))?,
         Tag::parse(["not_before", &not_before.to_string()])
             .map_err(|e| CliError::Other(format!("not_before tag error: {e}")))?,
@@ -106,9 +106,10 @@ async fn cmd_create(
     ];
 
     // Build event
+    let keys = client.keys().ok_or_else(|| CliError::Auth("local keys required for signing".into()))?;
     let event = EventBuilder::new(Kind::Custom(KIND_EVENT_REMINDER as u16), ciphertext)
         .tags(tags)
-        .sign_with_keys(client.keys())
+        .sign_with_keys(keys)
         .map_err(|e| CliError::Other(format!("sign event failed: {e}")))?;
 
     if dry_run {
@@ -118,7 +119,7 @@ async fn cmd_create(
 
     // Publish
     let response = client
-        .publish_event(event)
+        .submit_event(event)
         .await
         .map_err(|e| CliError::Other(format!("publish failed: {e}")))?;
 
@@ -171,7 +172,8 @@ async fn cmd_create(
 }
 
 async fn cmd_list(limit: u32, client: &BuzzClient) -> Result<(), CliError> {
-    let pubkey = client.keys().public_key().to_hex();
+    let keys = client.keys().ok_or_else(|| CliError::Auth("local keys required".into()))?;
+    let pubkey = keys.public_key().to_hex();
 
     // Build filter for kind:30300 authored by us
     let filter = json!({
@@ -195,7 +197,7 @@ async fn cmd_list(limit: u32, client: &BuzzClient) -> Result<(), CliError> {
         let d_tag = event
             .get("tags")
             .and_then(|t| t.as_array())
-            .and_then(|tags| tags.iter().find(|t| t.as_array().map(|a| a.get(0).and_then(|v| v.as_str()) == Some("d")).unwrap_or(false)))
+            .and_then(|tags| tags.iter().find(|t| t.as_array().map(|a| a.first().and_then(|v| v.as_str()) == Some("d")).unwrap_or(false)))
             .and_then(|t| t.as_array().and_then(|a| a.get(1)).and_then(|v| v.as_str()))
             .unwrap_or("?")
             .to_string();
@@ -203,7 +205,7 @@ async fn cmd_list(limit: u32, client: &BuzzClient) -> Result<(), CliError> {
         let not_before = event
             .get("tags")
             .and_then(|t| t.as_array())
-            .and_then(|tags| tags.iter().find(|t| t.as_array().map(|a| a.get(0).and_then(|v| v.as_str()) == Some("not_before")).unwrap_or(false)))
+            .and_then(|tags| tags.iter().find(|t| t.as_array().map(|a| a.first().and_then(|v| v.as_str()) == Some("not_before")).unwrap_or(false)))
             .and_then(|t| t.as_array().and_then(|a| a.get(1)).and_then(|v| v.as_str()))
             .and_then(|s| s.parse::<i64>().ok());
 
@@ -255,7 +257,8 @@ async fn cmd_cancel(d_tag: String, client: &BuzzClient) -> Result<(), CliError> 
     }
 
     // Fetch the existing reminder to get its content and created_at
-    let pubkey = client.keys().public_key().to_hex();
+    let keys = client.keys().ok_or_else(|| CliError::Auth("local keys required".into()))?;
+    let pubkey = keys.public_key().to_hex();
     let filter = json!({
         "kinds": [KIND_EVENT_REMINDER],
         "authors": [pubkey],
@@ -271,13 +274,13 @@ async fn cmd_cancel(d_tag: String, client: &BuzzClient) -> Result<(), CliError> 
             .and_then(|t| t.as_array())
             .map(|tags| tags.iter().any(|t| {
                 t.as_array()
-                    .map(|a| a.get(0).and_then(|v| v.as_str()) == Some("d") && a.get(1).and_then(|v| v.as_str()) == Some(&d_tag))
+                    .map(|a| a.first().and_then(|v| v.as_str()) == Some("d") && a.get(1).and_then(|v| v.as_str()) == Some(&d_tag))
                     .unwrap_or(false)
             }))
             .unwrap_or(false)
     });
 
-    let (original_content, created_at) = if let Some(ev) = existing {
+    let (original_content, _created_at) = if let Some(ev) = existing {
         let plaintext = client.nip44_decrypt_from_self(ev.get("content").and_then(|v| v.as_str()).unwrap_or("")).ok();
         let content = plaintext.and_then(|p| serde_json::from_str::<serde_json::Value>(&p).ok());
         let created = ev.get("created_at").and_then(|v| v.as_i64()).unwrap_or_else(|| chrono::Utc::now().timestamp());
@@ -310,7 +313,7 @@ async fn cmd_cancel(d_tag: String, client: &BuzzClient) -> Result<(), CliError> 
     let expiration = now + (30 * 86400) + (rand::rng().next_u64() % (60 * 86400)) as i64;
 
     // Build tags for NIP-33 replacement: same d-tag, no not_before, add expiration
-    let mut tags = vec![
+    let tags = vec![
         Tag::parse(["d", &d_tag]).map_err(|e| CliError::Other(format!("d tag error: {e}")))?,
         Tag::parse(["expiration", &expiration.to_string()])
             .map_err(|e| CliError::Other(format!("expiration tag error: {e}")))?,
@@ -319,14 +322,15 @@ async fn cmd_cancel(d_tag: String, client: &BuzzClient) -> Result<(), CliError> 
     ];
 
     // Build replacement event (same kind, same d-tag)
+    let keys = client.keys().ok_or_else(|| CliError::Auth("local keys required".into()))?;
     let event = EventBuilder::new(Kind::Custom(KIND_EVENT_REMINDER as u16), ciphertext)
         .tags(tags)
-        .sign_with_keys(client.keys())
+        .sign_with_keys(keys)
         .map_err(|e| CliError::Other(format!("sign event failed: {e}")))?;
 
     // Publish
     let response = client
-        .publish_event(event)
+        .submit_event(event)
         .await
         .map_err(|e| CliError::Other(format!("publish failed: {e}")))?;
 
