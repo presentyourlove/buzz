@@ -602,13 +602,52 @@ impl RunCtx<'_> {
             } else {
                 40
             };
+
+            // 機制二：第 35 輪逼近天花板主動預警 (Proximity Nag)
+            // 提醒特工在剩餘 5 輪內停止深入調用，完成檔案落盤並主動回報進度，杜絕悶頭苦幹失蹤
+            if round == effective_max_rounds.saturating_sub(5) {
+                tracing::info!(
+                    session_id = %self.session_id,
+                    round,
+                    effective_max_rounds,
+                    "injecting ceiling proximity nag to prompt agent to conclude and report"
+                );
+                self.history.push(HistoryItem::User(format!(
+                    "[系統警示]：您當前任務已推進至第 {round} 輪（上限 {effective_max_rounds} 輪）。請立即在接下來的 3 輪內停止展開新探測，將已完成的實體檔案落盤保存，並調用發話工具向主理人回報目前完成的進度清單！"
+                )));
+            }
+
+            // 機制一：第 40 輪撞頂強制造冊回報 (Ceiling Auto-Publish Fallback)
+            // 撞頂時嚴禁靜默退出，強制發布階段性成果與接力指引至討論串，杜絕做到一半失蹤
             if round >= effective_max_rounds {
                 tracing::warn!(
                     session_id = %self.session_id,
                     round,
                     effective_max_rounds,
-                    "terminating turn: reached maximum rounds safety ceiling"
+                    "terminating turn: reached maximum rounds safety ceiling — triggering auto-publish"
                 );
+                let ceiling_msg_id = format!("{}-ceiling-round-{round}", self.run_id);
+                let ceiling_notice = format!(
+                    "【階段里程碑到達】特工已連續執行 {effective_max_rounds} 回合深度實作任務。為確保系統穩定與記憶體安全，已自動完成階段性進度保存。請主理人檢閱或回覆『繼續』以無縫承接下一階段實作！"
+                );
+                wire::send(
+                    self.wire,
+                    wire::session_update(
+                        self.session_id,
+                        json!({
+                            "sessionUpdate": "agent_message_chunk",
+                            "messageId": &ceiling_msg_id,
+                            "content": { "type": "text", "text": &ceiling_notice }
+                        }),
+                    ),
+                )
+                .await;
+                self.history.push(HistoryItem::Assistant {
+                    text: ceiling_notice,
+                    tool_calls: Vec::new(),
+                    reasoning_details: None,
+                });
+                self.try_auto_publish_fallback().await;
                 return Ok(StopReason::MaxTurnRequests);
             }
             if *self.cancel.borrow() {
