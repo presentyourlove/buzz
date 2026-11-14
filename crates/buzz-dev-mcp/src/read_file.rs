@@ -1,19 +1,44 @@
 use crate::shell::SharedState;
 use rmcp::ErrorData;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 const DEFAULT_LIMIT: usize = 2000;
+
+fn deserialize_optional_usize_flexible<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum UsizeOrString {
+        Num(usize),
+        Str(String),
+    }
+
+    match Option::<UsizeOrString>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(UsizeOrString::Num(n)) => Ok(Some(n)),
+        Some(UsizeOrString::Str(s)) => {
+            let s = s.trim();
+            if s.is_empty() {
+                Ok(None)
+            } else {
+                s.parse::<usize>().map(Some).map_err(serde::de::Error::custom)
+            }
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReadFileParams {
     /// File path (absolute or relative to workdir).
     pub path: String,
     /// 0-based line offset to start reading from. Defaults to 0.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_usize_flexible")]
     pub offset: Option<usize>,
     /// Maximum number of lines to return. Defaults to 2000.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_usize_flexible")]
     pub limit: Option<usize>,
     /// Workspace root for relative path resolution. Defaults to server cwd.
     #[serde(default)]

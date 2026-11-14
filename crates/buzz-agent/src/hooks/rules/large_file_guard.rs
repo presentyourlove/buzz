@@ -52,7 +52,7 @@ impl Rule for LargeFileGuardRule {
 
                             return Ok(HookResult::Block {
                                 reason: format!(
-                                    "【PreToolUse 大檔防爆門禁】檔案 `{}` 實體大小為 {:.1} KB（超過 40 KB 門禁上限）。未指定分頁參數（如 offset/limit 或 StartLine/EndLine），全檔整讀已被攔截以防上下文雪球崩潰！請指定行數或位元組範圍分段讀取。",
+                                    "【PreToolUse 大檔防爆門禁】檔案 `{}` 實體大小為 {:.1} KB（超過 40 KB 門禁上限）。未指定分頁參數，全檔整讀已被攔截以防上下文雪球崩潰！請指定數值範圍分段讀取（例如：{{\"offset\": 0, \"limit\": 100}}）。",
                                     file_name, size_kb
                                 ),
                             });

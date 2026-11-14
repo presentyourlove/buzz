@@ -14,8 +14,33 @@
 use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::ErrorData;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::sync::Mutex;
+
+fn deserialize_optional_todos_flexible<'de, D>(deserializer: D) -> Result<Option<Vec<Item>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum TodosOrString {
+        Items(Vec<Item>),
+        Str(String),
+    }
+
+    match Option::<TodosOrString>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(TodosOrString::Items(items)) => Ok(Some(items)),
+        Some(TodosOrString::Str(s)) => {
+            let s = s.trim();
+            if s.is_empty() {
+                Ok(None)
+            } else {
+                serde_json::from_str::<Vec<Item>>(s).map(Some).map_err(serde::de::Error::custom)
+            }
+        }
+    }
+}
 
 const MAX_ITEMS: usize = 50;
 const MAX_TEXT_CHARS: usize = 200;
@@ -34,7 +59,7 @@ pub struct Item {
 pub struct TodoParams {
     /// Full replacement list (max 50 items). Omit to read.
     // Both omitted and explicit null mean "read current state".
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_todos_flexible")]
     #[schemars(length(max = 50))]
     pub todos: Option<Vec<Item>>,
 }
