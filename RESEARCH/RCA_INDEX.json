@@ -1,0 +1,14 @@
+[
+  {
+    "date": "20261110",
+    "report_file": "RCA_20261110.md",
+    "event_count": 5,
+    "generated_at": "2026-11-10T05:10:47.986815+00:00"
+  },
+  {
+    "date": "20261114",
+    "report_file": "RCA_20261114.md",
+    "event_count": 5,
+    "generated_at": "2026-11-14T01:19:01.901977+00:00"
+  }
+]

@@ -3386,6 +3386,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn idle_resets_on_stdout_activity() {
         assert_activity_resets_idle(serde_json::json!({
@@ -3645,6 +3646,7 @@ mod tests {
         assert_eq!(result.unwrap()["worked"], serde_json::json!(true));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn keepalive_resets_idle_past_deadline() {
         assert_activity_resets_idle(serde_json::json!({ "sessionUpdate": "keepalive" })).await;
@@ -4291,10 +4293,11 @@ sleep 1"#,
         capture_path: &std::path::Path,
         response: &str,
     ) -> AcpClient {
+        let quoted_capture = capture_path.to_string_lossy().replace('\\', "/");
         let script = format!(
-            "read -r line; printf '%s' \"$line\" > {capture}; \
+            "read -r line; printf '%s' \"$line\" > '{capture}'; \
              printf '%s\\n' '{response}'; sleep 10",
-            capture = capture_path.display(),
+            capture = quoted_capture,
             response = response,
         );
         spawn_script(&script).await

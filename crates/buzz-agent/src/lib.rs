@@ -4,6 +4,8 @@ pub mod auth;
 mod auth_http;
 mod builtin;
 mod catalog;
+pub mod checkpoint;
+pub mod compaction;
 pub mod config;
 mod daemon;
 mod daemon_dispatch;
@@ -120,6 +122,7 @@ struct Session {
     steer_tx: Option<mpsc::UnboundedSender<Vec<ContentBlock>>>,
     original_task: Option<String>,
     handoff_count: usize,
+    ledger: crate::compaction::WorkingSetLedger,
     /// Cache-summed input tokens the provider reported for this session's most
     /// recent request, or `None` before the first response (or after a handoff
     /// resets the context). Drives the token-based handoff gate; see
@@ -684,6 +687,7 @@ async fn session_new(app: &Arc<App>, id: Value, params: Value, wire_tx: &WireSen
             steer_tx: None,
             original_task: None,
             handoff_count: 0,
+            ledger: crate::compaction::WorkingSetLedger::default(),
             last_request_input_tokens: None,
             last_request_history_bytes: None,
             effective_system_prompt,
@@ -881,6 +885,7 @@ async fn run_prompt(app: Arc<App>, id: Value, params: Value, wire_tx: WireSender
         run_id,
         mut steer_rx,
         usage_baseline,
+        mut ledger,
     ) = match acquire_session(&app, &p.session_id).await {
         Ok(v) => v,
         Err(reason) => {
@@ -953,6 +958,7 @@ async fn run_prompt(app: Arc<App>, id: Value, params: Value, wire_tx: WireSender
         turn_total_state: &mut turn_total_state,
         turn_pricing_identity: &mut turn_pricing_identity,
         usage_baseline,
+        ledger: &mut ledger,
     };
     let result = ctx.run(p.prompt).await;
     if let Some(s) = app.sessions.lock().await.get_mut(&sid) {
@@ -965,6 +971,7 @@ async fn run_prompt(app: Arc<App>, id: Value, params: Value, wire_tx: WireSender
         s.handoff_count = handoff_count;
         s.last_request_input_tokens = last_request_input_tokens;
         s.last_request_history_bytes = last_request_history_bytes;
+        s.ledger = ledger;
     }
     // Update session-cumulative token counters and emit the usage notification
     // BEFORE sending the session/prompt response. buzz-acp's UsageTracker
@@ -1075,6 +1082,7 @@ async fn acquire_session(
         String,
         mpsc::UnboundedReceiver<Vec<ContentBlock>>,
         crate::types::SessionUsageBaseline,
+        crate::compaction::WorkingSetLedger,
     ),
     &'static str,
 > {
@@ -1129,6 +1137,7 @@ async fn acquire_session(
             cache_write_tokens: s.accumulated_cache_write_tokens,
             total_state: s.accumulated_total_state,
         },
+        std::mem::take(&mut s.ledger),
     ))
 }
 

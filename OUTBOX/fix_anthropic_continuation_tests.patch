@@ -1,0 +1,57 @@
+diff --git a/crates/buzz-agent/tests/anthropic_continuation.rs b/crates/buzz-agent/tests/anthropic_continuation.rs
+index 9fe4bd0f0..70e56cdce 100644
+--- a/crates/buzz-agent/tests/anthropic_continuation.rs
++++ b/crates/buzz-agent/tests/anthropic_continuation.rs
+@@ -11,16 +11,18 @@ async fn session(h: &mut Harness) -> String {
+             json!({"protocolVersion":1,"clientCapabilities":{}}),
+         )
+         .await;
+-    h.recv_until(|v| v["id"] == id).await;
++    let _init_resp = h.recv_until(|v| v["id"] == id).await;
++    let temp_dir = std::env::temp_dir();
+     let id = h
+         .send(
+             "session/new",
+-            json!({"cwd":"/tmp","mcpServers":[{
++            json!({"cwd":temp_dir.to_string_lossy(),"mcpServers":[{
+                 "name":"probe", "command":env!("CARGO_BIN_EXE_fake-mcp"), "args":[], "env":[]
+             }]}),
+         )
+         .await;
+-    h.recv_until(|v| v["id"] == id).await["result"]["sessionId"]
++    let session_resp = h.recv_until(|v| v["id"] == id).await;
++    session_resp["result"]["sessionId"]
+         .as_str()
+         .unwrap()
+         .to_owned()
+diff --git a/crates/buzz-agent/tests/common/mod.rs b/crates/buzz-agent/tests/common/mod.rs
+index d45fac498..50a2566be 100644
+--- a/crates/buzz-agent/tests/common/mod.rs
++++ b/crates/buzz-agent/tests/common/mod.rs
+@@ -35,11 +35,16 @@ pub async fn spawn_capturing_llm(responses: Vec<Value>) -> CapturingLlm {
+ /// 400) instead of only success bodies.
+ pub async fn spawn_capturing_llm_with_status(responses: Vec<(u16, Value)>) -> CapturingLlm {
+     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+-    let url = format!("http://{}", listener.local_addr().unwrap());
++    let addr = listener.local_addr().unwrap();
++    let url = format!("http://{}", addr);
+     let queue = Arc::new(Mutex::new(VecDeque::from(responses)));
+     let captured: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+     let cap2 = captured.clone();
++    let ready = Arc::new(tokio::sync::Notify::new());
++    let ready2 = ready.clone();
+     tokio::spawn(async move {
++        // Signal that we're ready to accept connections
++        ready2.notify_one();
+         loop {
+             let (mut sock, _) = match listener.accept().await {
+                 Ok(p) => p,
+@@ -99,6 +104,8 @@ pub async fn spawn_capturing_llm_with_status(responses: Vec<(u16, Value)>) -> Ca
+             });
+         }
+     });
++    // Wait for the server to be ready to accept connections
++    ready.notified().await;
+     CapturingLlm { url, captured }
+ }
+ 

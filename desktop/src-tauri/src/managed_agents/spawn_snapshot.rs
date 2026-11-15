@@ -197,10 +197,14 @@ impl SpawnConfigSnapshot {
             acp_command: record.acp_command.clone(),
             command: descriptor.command.clone(),
             args: descriptor.args.clone(),
-            mcp_command: known_acp_runtime(&descriptor.command)
-                .and_then(|runtime| runtime.mcp_command)
-                .unwrap_or("")
-                .to_string(),
+            mcp_command: if !record.mcp_command.trim().is_empty() {
+                record.mcp_command.clone()
+            } else {
+                known_acp_runtime(&descriptor.command)
+                    .and_then(|runtime| runtime.mcp_command)
+                    .unwrap_or("")
+                    .to_string()
+            },
             // Effort has ONE representation in the snapshot: `effort_level`
             // below, always holding the projected effective value. The keys
             // stripped here mirror EXACTLY what the launch projection suppressed

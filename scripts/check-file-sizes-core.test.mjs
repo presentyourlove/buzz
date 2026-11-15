@@ -177,12 +177,22 @@ test("surface entrypoints execute every production rule", () => {
   }
 });
 
-test("surface entrypoints execute through symlinked paths", () => {
+test("surface entrypoints execute through symlinked paths", (t) => {
   for (const fixture of entrypointCases) {
-    const { result, relativeFiles } = createEntrypointFixture({
-      ...fixture,
-      symlinkEntrypoint: true,
-    });
+    let fixtureData;
+    try {
+      fixtureData = createEntrypointFixture({
+        ...fixture,
+        symlinkEntrypoint: true,
+      });
+    } catch (err) {
+      if (process.platform === "win32" && (err.code === "EPERM" || err.code === "EACCES")) {
+        t.skip("Windows host requires elevated permissions for symlinks");
+        return;
+      }
+      throw err;
+    }
+    const { result, relativeFiles } = fixtureData;
     assert.equal(
       result.status,
       1,

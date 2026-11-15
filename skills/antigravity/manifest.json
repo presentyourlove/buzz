@@ -1,0 +1,62 @@
+{
+  "name": "antigravity",
+  "version": "1.0.0",
+  "description": "架構演進官 - 每日系統進化機制自動化分析與自癒",
+  "entry_point": "src/lib.rs",
+  "cli": {
+    "binary_name": "antigravity",
+    "arguments": [
+      {
+        "name": "date",
+        "short": "d",
+        "long": "date",
+        "help": "指定日期 YYYYMMDD",
+        "required": false
+      },
+      {
+        "name": "dry_run",
+        "long": "dry-run",
+        "help": "演練模式（不寫入資料庫、不發送事件）",
+        "required": false
+      },
+      {
+        "name": "skip",
+        "long": "skip",
+        "help": "跳過特定模組，如 --skip 01 02",
+        "required": false,
+        "multiple": true
+      },
+      {
+        "name": "only",
+        "long": "only",
+        "help": "僅執行特定模組，如 --only 04 05",
+        "required": false,
+        "multiple": true
+      },
+      {
+        "name": "json_only",
+        "long": "json-only",
+        "help": "純 JSON 輸出",
+        "required": false
+      }
+    ]
+  },
+  "dependencies": {
+    "nostr-sdk": "0.35",
+    "rusqlite": "0.31",
+    "serde": "1.0",
+    "serde_json": "1.0",
+    "tokio": "1.38",
+    "clap": "4.5",
+    "anyhow": "1.0",
+    "chrono": "0.4",
+    "uuid": "1.7",
+    "tracing": "0.1",
+    "tracing-subscriber": "0.3"
+  },
+  "buzz_integration": {
+    "nostr_kind": 30300,
+    "channel_id": "5ca019f6-1a27-592a-b015-4baf0eb33572",
+    "event_tags": ["daily-evolution", "architecture", "automation"]
+  }
+}

@@ -1,0 +1,5558 @@
+{
+  "timestamp": "2026-11-08T10:55:00Z",
+  "buzz_root": "C:\\私人\\ai agent\\buzz",
+  "total_nodes": 66,
+  "total_edges": 68,
+  "nodes": [
+    {
+      "id": "crate:buzz-acp",
+      "name": "buzz-acp",
+      "type": "rust_crate",
+      "path": "crates\\buzz-acp",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-sdk",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-persona",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../buzz-persona"
+        },
+        {
+          "name": "git-credential-nostr",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../git-credential-nostr"
+        },
+        {
+          "name": "git-sign-nostr",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../git-sign-nostr"
+        },
+        {
+          "name": "tempfile",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "zeroize",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rustls",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-subscriber",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "anyhow",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "clap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "toml",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "evalexpr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "axum",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "httparse",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:AcpError",
+        "enum:ChannelScope",
+        "enum:ConfigError",
+        "enum:DedupMode",
+        "enum:FilterError",
+        "enum:MultipleEventHandling",
+        "enum:PermissionMode",
+        "enum:RelayError",
+        "enum:RespondTo",
+        "enum:SessionPolicy",
+        "enum:SessionScope",
+        "enum:StopReason",
+        "enum:SubscribeMode",
+        "fn:accepts_steer",
+        "fn:as_wire_str"
+      ],
+      "description": "Rust crate: buzz-acp"
+    },
+    {
+      "id": "crate:buzz-admin",
+      "name": "buzz-admin",
+      "type": "rust_crate",
+      "path": "crates\\buzz-admin",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-db",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-deletion",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-auth",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-pubsub",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-search",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-audit",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-workflow",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-media",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "anyhow",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rustls",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sqlx",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "clap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "axum",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tempfile",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:CommunitiesCommand",
+        "enum:NipFiCommand",
+        "fn:run",
+        "struct:Args"
+      ],
+      "description": "Rust crate: buzz-admin"
+    },
+    {
+      "id": "crate:buzz-agent",
+      "name": "buzz-agent",
+      "type": "rust_crate",
+      "path": "crates\\buzz-agent",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "redis",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "deadpool-redis",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_yaml",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rmcp",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "arc-swap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "getrandom",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-subscriber",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "async-trait",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "axum",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "urlencoding",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "webbrowser",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "dirs",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rand",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sysinfo",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "cron",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "toml",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "fs2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "dashmap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "blake3",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "anyhow",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rcgen",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-rustls",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nix",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "axum",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tempfile",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:AuthError",
+        "enum:AuthIntent",
+        "enum:DatabricksV2Route",
+        "enum:HistoryItem",
+        "enum:HookResult",
+        "enum:HookTrigger",
+        "enum:Inbound",
+        "enum:NormalizationPolicy",
+        "enum:OperationTier",
+        "enum:OverallStatus",
+        "enum:PermissionDecision",
+        "enum:RemediationType",
+        "enum:Severity",
+        "enum:ThinkingEffort",
+        "enum:ThinkingMode"
+      ],
+      "description": "Rust crate: buzz-agent"
+    },
+    {
+      "id": "crate:buzz-audio-client",
+      "name": "buzz-audio-client",
+      "type": "rust_crate",
+      "path": "crates\\buzz-audio-client",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "neteq",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "opus",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "fn:audio_level_dbov",
+        "fn:connect",
+        "fn:encode",
+        "fn:get_audio",
+        "fn:insert_packet",
+        "fn:is_dtx",
+        "fn:is_empty",
+        "fn:new",
+        "fn:parse",
+        "fn:parse_peers",
+        "fn:parse_relay_frame",
+        "mod:connection",
+        "mod:encoder",
+        "mod:jitter",
+        "mod:wire"
+      ],
+      "description": "Rust crate: buzz-audio-client"
+    },
+    {
+      "id": "crate:buzz-audit",
+      "name": "buzz-audit",
+      "type": "rust_crate",
+      "path": "crates\\buzz-audit",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-db",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-datastore-tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sqlx",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:AuditAction",
+        "enum:AuditError",
+        "fn:as_str",
+        "fn:compute_hash",
+        "fn:get_entries",
+        "fn:log",
+        "fn:new",
+        "fn:to_storage_precision",
+        "fn:verify_chain",
+        "mod:action",
+        "mod:entry",
+        "mod:error",
+        "mod:hash",
+        "mod:service",
+        "struct:AuditEntry"
+      ],
+      "description": "Rust crate: buzz-audit"
+    },
+    {
+      "id": "crate:buzz-auth",
+      "name": "buzz-auth",
+      "type": "rust_crate",
+      "path": "crates\\buzz-auth",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "unicode-normalization",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "unicode-properties",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "dashmap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "jsonwebtoken",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rand",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "jsonwebtoken",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:AuthError",
+        "enum:AuthMethod",
+        "enum:BindRefusal",
+        "enum:ClientSubjectPosture",
+        "enum:CommandError",
+        "enum:CommandPolicyError",
+        "enum:CommunityBindingError",
+        "enum:CrossPodMergeResult",
+        "enum:DenialClass",
+        "enum:FreshnessClassDiscovery",
+        "enum:JwksFetchError",
+        "enum:LimitType",
+        "enum:NipFiMode",
+        "enum:NipFiStartupError",
+        "enum:Scope"
+      ],
+      "description": "Rust crate: buzz-auth"
+    },
+    {
+      "id": "crate:buzz-backend-kubernetes",
+      "name": "buzz-backend-kubernetes",
+      "type": "rust_crate",
+      "path": "crates\\buzz-backend-kubernetes",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "kube",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "k8s-openapi",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rand",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "http",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "http-body-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rustls",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tower",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:Action",
+        "enum:CreateOutcome",
+        "enum:DeleteOutcome",
+        "enum:PullFailure",
+        "enum:Request",
+        "enum:Response",
+        "enum:Startup",
+        "enum:StartupObservation",
+        "fn:as_str",
+        "fn:build_env",
+        "fn:build_pod",
+        "fn:build_secret",
+        "fn:classify",
+        "fn:condition",
+        "fn:config_schema"
+      ],
+      "description": "Rust crate: buzz-backend-kubernetes"
+    },
+    {
+      "id": "crate:buzz-cli",
+      "name": "buzz-cli",
+      "type": "rust_crate",
+      "path": "crates\\buzz-cli",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "clap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "httpdate",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-sdk",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "diffy",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "bytes",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "infer",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-persona",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../buzz-persona"
+        },
+        {
+          "name": "humantime",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "dirs",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-ws-client",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../buzz-ws-client"
+        },
+        {
+          "name": "rustls",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rand",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tempfile",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "axum",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:AgentsCmd",
+        "enum:ChannelJoinRoleArg",
+        "enum:ChannelType",
+        "enum:ChannelVisibility",
+        "enum:CliError",
+        "enum:EmojiScope",
+        "enum:OutputFormat",
+        "enum:PresenceStatus",
+        "enum:ProviderError",
+        "enum:RespondToArg",
+        "enum:Skip",
+        "fn:add_repos_to_own_project",
+        "fn:assertion",
+        "fn:auth_tag_owner_hex",
+        "fn:build_imeta_tag"
+      ],
+      "description": "Rust crate: buzz-cli"
+    },
+    {
+      "id": "crate:buzz-conformance",
+      "name": "buzz-conformance",
+      "type": "rust_crate",
+      "path": "crates\\buzz-conformance",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "proptest",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:SanitizedReason",
+        "enum:TransitionError",
+        "enum:Verdict",
+        "enum:Verdict_",
+        "fn:action_channel",
+        "fn:bootstrap",
+        "fn:check_step",
+        "fn:check_trace",
+        "fn:require",
+        "fn:unstructured",
+        "mod:checker",
+        "mod:transitions",
+        "struct:AbstractState",
+        "struct:ActorLabel",
+        "struct:ChannelLabel"
+      ],
+      "description": "Rust crate: buzz-conformance"
+    },
+    {
+      "id": "crate:buzz-core",
+      "name": "buzz-core",
+      "type": "rust_crate",
+      "path": "crates\\buzz-core",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hmac",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rand",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "subtle",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "zeroize",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "percent-encoding",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:AbortReason",
+        "enum:ArtifactOp",
+        "enum:ArtifactView",
+        "enum:Body",
+        "enum:ChannelJoinRole",
+        "enum:ChannelLabelError",
+        "enum:ChannelVisibility",
+        "enum:EngramError",
+        "enum:Error",
+        "enum:FilterRoute",
+        "enum:NormalizeRelayUrlError",
+        "enum:ObserverPayloadError",
+        "enum:PairingError",
+        "enum:PairingMessage",
+        "enum:PatternError"
+      ],
+      "description": "Rust crate: buzz-core"
+    },
+    {
+      "id": "crate:buzz-datastore-tracing",
+      "name": "buzz-datastore-tracing",
+      "type": "rust_crate",
+      "path": "crates\\buzz-datastore-tracing",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "proc-macro2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "quote",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "syn",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics-util",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "opentelemetry",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "opentelemetry_sdk",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-opentelemetry",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-subscriber",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "fn:datastore_span"
+      ],
+      "description": "Rust crate: buzz-datastore-tracing"
+    },
+    {
+      "id": "crate:buzz-db",
+      "name": "buzz-db",
+      "type": "rust_crate",
+      "path": "crates\\buzz-db",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-datastore-tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sqlx",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rand",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics-util",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:AcceptLeaseOutcome",
+        "enum:ApprovalStatus",
+        "enum:ArtifactOutcome",
+        "enum:ChannelCreate",
+        "enum:ClaimOutcome",
+        "enum:ClaimResult",
+        "enum:CreateCommunityWithOwnerResult",
+        "enum:DbConnectionOutcome",
+        "enum:DbConnectionStep",
+        "enum:DbError",
+        "enum:DbPoolRole",
+        "enum:DeletionRequestOrigin",
+        "enum:DeletionStage",
+        "enum:EnqueueWakeOutcome",
+        "enum:IntentOutcome"
+      ],
+      "description": "Rust crate: buzz-db"
+    },
+    {
+      "id": "crate:buzz-deletion",
+      "name": "buzz-deletion",
+      "type": "rust_crate",
+      "path": "crates\\buzz-deletion",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "anyhow",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-db",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-media",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-pubsub",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "clap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "redis",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sqlx",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:Command",
+        "enum:OwnedCommunityOutcome",
+        "fn:acquisition_is_fenced",
+        "fn:apply",
+        "fn:get_next_stage",
+        "fn:handle",
+        "fn:is_lease_lost",
+        "fn:lost",
+        "fn:new",
+        "fn:protect",
+        "fn:protect_landed",
+        "fn:rebuild",
+        "fn:run",
+        "fn:store",
+        "fn:submit_and_prepare"
+      ],
+      "description": "Rust crate: buzz-deletion"
+    },
+    {
+      "id": "crate:buzz-dev-mcp",
+      "name": "buzz-dev-mcp",
+      "type": "rust_crate",
+      "path": "crates\\buzz-dev-mcp",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-cli",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../buzz-cli"
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rmcp",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "schemars",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "similar",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tempfile",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "ignore",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-subscriber",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rustls",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "image",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "fn:artifact_dir",
+        "fn:handle_todo",
+        "fn:install",
+        "fn:new",
+        "fn:post_compact",
+        "fn:render",
+        "fn:run",
+        "fn:stop_objection",
+        "fn:text_result",
+        "struct:HookParams",
+        "struct:Item",
+        "struct:ReadFileParams",
+        "struct:SharedState",
+        "struct:ShellParams",
+        "struct:Shim"
+      ],
+      "description": "Rust crate: buzz-dev-mcp"
+    },
+    {
+      "id": "crate:buzz-feature-flags",
+      "name": "buzz-feature-flags",
+      "type": "rust_crate",
+      "path": "crates\\buzz-feature-flags",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "http",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "launchdarkly-server-sdk",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:EnvironmentDiagnostic",
+        "enum:InvalidRelayProxyEndpointReason",
+        "enum:LaunchDarklyInitError",
+        "enum:LaunchDarklyStartError",
+        "fn:from_pairs",
+        "fn:from_process_environment",
+        "fn:from_runtime_config",
+        "fn:initialized",
+        "fn:new",
+        "fn:start_with_default_executor_and_wait",
+        "fn:take_diagnostics",
+        "fn:with_relay_proxy_endpoint",
+        "mod:environment",
+        "mod:flags",
+        "mod:launchdarkly"
+      ],
+      "description": "Rust crate: buzz-feature-flags"
+    },
+    {
+      "id": "crate:buzz-media",
+      "name": "buzz-media",
+      "type": "rust_crate",
+      "path": "crates\\buzz-media",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "ulid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "axum",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "s3",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "infer",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "image",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "blurhash",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "webp",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "imagesize",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "bytes",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "mp4",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tempfile",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "quick-xml",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:BlossomDenialKind",
+        "enum:BlossomStrictness",
+        "enum:BlossomVerb",
+        "enum:KeyClass",
+        "enum:MediaError",
+        "enum:ObjectVersionKind",
+        "enum:S3AddressingStyle",
+        "enum:SweepError",
+        "fn:blossom_denial_kind",
+        "fn:classify_key",
+        "fn:finish",
+        "fn:fold",
+        "fn:fold_bucket_listing",
+        "fn:generate_image_metadata_sync",
+        "fn:get"
+      ],
+      "description": "Rust crate: buzz-media"
+    },
+    {
+      "id": "crate:buzz-mesh-smoke",
+      "name": "buzz-mesh-smoke",
+      "type": "rust_crate",
+      "path": "crates\\buzz-mesh-smoke",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "mesh-llm-sdk",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "mesh-llm-host-runtime",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-test-client",
+          "type": "dev-dependencies",
+          "is_internal": true,
+          "path": "../buzz-test-client"
+        },
+        {
+          "name": "ed25519-dalek",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "anyhow",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [],
+      "description": "Rust crate: buzz-mesh-smoke"
+    },
+    {
+      "id": "crate:buzz-pair-relay",
+      "name": "buzz-pair-relay",
+      "type": "rust_crate",
+      "path": "crates\\buzz-pair-relay",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "parking_lot",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hyper",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hyper-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "http-body-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "secp256k1",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-core",
+          "type": "dev-dependencies",
+          "is_internal": true,
+          "path": "../buzz-core"
+        },
+        {
+          "name": "nostr",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "zeroize",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "secp256k1",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "fn:new",
+        "fn:run_server",
+        "struct:Relay"
+      ],
+      "description": "Rust crate: buzz-pair-relay"
+    },
+    {
+      "id": "crate:buzz-pairing-cli",
+      "name": "buzz-pairing-cli",
+      "type": "rust_crate",
+      "path": "crates\\buzz-pairing-cli",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "clap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "zeroize",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rustls",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [],
+      "description": "Rust crate: buzz-pairing-cli"
+    },
+    {
+      "id": "crate:buzz-persona",
+      "name": "buzz-persona",
+      "type": "rust_crate",
+      "path": "crates\\buzz-persona",
+      "version": "0.1.0",
+      "dependencies": [
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_yaml",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tempfile",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:ManifestError",
+        "enum:PackError",
+        "enum:PersonaError",
+        "enum:ValidationDiagnostic",
+        "fn:error",
+        "fn:exit_code",
+        "fn:has_errors",
+        "fn:has_warnings",
+        "fn:load_pack",
+        "fn:merge_behavioral_config",
+        "fn:parse_manifest",
+        "fn:parse_manifest_file",
+        "fn:parse_persona_file",
+        "fn:parse_persona_md",
+        "fn:resolve_loaded_pack"
+      ],
+      "description": "Rust crate: buzz-persona"
+    },
+    {
+      "id": "crate:buzz-pubsub",
+      "name": "buzz-pubsub",
+      "type": "rust_crate",
+      "path": "crates\\buzz-pubsub",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-auth",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "redis",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "arc-swap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:CacheInvalidation",
+        "enum:ConnControl",
+        "enum:EventTopic",
+        "enum:PubSubError",
+        "fn:cache_invalidation_channel",
+        "fn:channel_key",
+        "fn:clear_presence",
+        "fn:clear_presence_many",
+        "fn:conn_control_channel",
+        "fn:decode_nip_fi_disconnect",
+        "fn:encode_nip_fi_disconnect",
+        "fn:from_context",
+        "fn:get_presence",
+        "fn:get_presence_bulk",
+        "fn:global_key"
+      ],
+      "description": "Rust crate: buzz-pubsub"
+    },
+    {
+      "id": "crate:buzz-push-gateway",
+      "name": "buzz-push-gateway",
+      "type": "rust_crate",
+      "path": "crates\\buzz-push-gateway",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "aes-gcm",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "aws-lc-rs",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "minicbor",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "p256",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rustls-pki-types",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "webpki",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "x509-parser",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "axum",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "async-trait",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "getrandom",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics-exporter-prometheus",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rand",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sqlx",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tower",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tower-http",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-subscriber",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "openssl",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "ciborium",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "proptest",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:Admission",
+        "enum:ApnsEnvironment",
+        "enum:ApnsError",
+        "enum:AppAttestEnvironment",
+        "enum:AppAttestError",
+        "enum:AuthorityError",
+        "enum:CertificateCheck",
+        "enum:ConfigError",
+        "enum:DeliveryDisposition",
+        "enum:DeliveryOutcome",
+        "enum:GrantError",
+        "enum:ReadinessFailure",
+        "enum:TokenError",
+        "fn:apply_migrations_and_grants",
+        "fn:build_test_assertion"
+      ],
+      "description": "Rust crate: buzz-push-gateway"
+    },
+    {
+      "id": "crate:buzz-relay",
+      "name": "buzz-relay",
+      "type": "rust_crate",
+      "path": "crates\\buzz-relay",
+      "version": "0.2.1",
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-conformance",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-db",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-feature-flags",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-datastore-tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-deletion",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-auth",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "jsonwebtoken",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-pubsub",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-audit",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-search",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-relay-mesh",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "async-trait",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "postcard",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "axum",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tungstenite",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tower",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tower-http",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_urlencoded",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-subscriber",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-opentelemetry",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "opentelemetry",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "opentelemetry_sdk",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "opentelemetry-otlp",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "anyhow",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "dashmap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "redis",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rustls",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sqlx",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-sdk",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-workflow",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-media",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "s3",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tempfile",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "bytes",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "infer",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_yaml",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hmac",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "subtle",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rand",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "moka",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "arc-swap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "lru",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics-exporter-prometheus",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "pulldown-cmark",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "async-compression",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "jsonwebtoken",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "http-body",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "http-body-util",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-core",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-auth",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "flate2",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "opentelemetry_sdk",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:AcceptError",
+        "enum:AcquireOutcome",
+        "enum:AcquireResult",
+        "enum:AdminAccess",
+        "enum:AdminAuth",
+        "enum:AdminRole",
+        "enum:AdminSource",
+        "enum:AdmissionError",
+        "enum:AuthState",
+        "enum:BanSource",
+        "enum:BindError",
+        "enum:BuildError",
+        "enum:CasError",
+        "enum:CasOutcome",
+        "enum:ChannelAuthzError"
+      ],
+      "description": "Rust crate: buzz-relay"
+    },
+    {
+      "id": "crate:buzz-relay-mesh",
+      "name": "buzz-relay-mesh",
+      "type": "rust_crate",
+      "path": "crates\\buzz-relay-mesh",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-pubsub",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "postcard",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "iroh",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "redis",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hmac",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "bytes",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "proptest",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics-util",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:ConnectionState",
+        "enum:GoodbyeReason",
+        "enum:GossipMessage",
+        "enum:MeshStreamFrame",
+        "enum:Profile",
+        "enum:StreamRole",
+        "fn:accept",
+        "fn:accept_bi",
+        "fn:addr",
+        "fn:apply_gossip_record",
+        "fn:apply_ready_records",
+        "fn:attestation_preimage",
+        "fn:bind",
+        "fn:bind_with_secret_key",
+        "fn:connect"
+      ],
+      "description": "Rust crate: buzz-relay-mesh"
+    },
+    {
+      "id": "crate:buzz-sdk",
+      "name": "buzz-sdk",
+      "type": "rust_crate",
+      "path": "crates\\buzz-sdk",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:Action",
+        "enum:BrokerTransportError",
+        "enum:SdkError",
+        "enum:VoteDirection",
+        "fn:action",
+        "fn:args",
+        "fn:as_str",
+        "fn:author",
+        "fn:build_agent_observer_frame",
+        "fn:build_delete_message",
+        "fn:build_diff_message",
+        "fn:build_edit",
+        "fn:build_forum_comment",
+        "fn:build_forum_post",
+        "fn:build_message"
+      ],
+      "description": "Rust crate: buzz-sdk"
+    },
+    {
+      "id": "crate:buzz-search",
+      "name": "buzz-search",
+      "type": "rust_crate",
+      "path": "crates\\buzz-search",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-db",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-datastore-tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sqlx",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "metrics",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:ChannelScope",
+        "enum:SearchError",
+        "enum:SearchMode",
+        "enum:SearchSort",
+        "fn:is_statement_cancelled",
+        "fn:kind",
+        "fn:new",
+        "fn:pool_options",
+        "fn:search",
+        "fn:search_profile_names",
+        "mod:cancel",
+        "mod:error",
+        "mod:query",
+        "struct:SearchHit",
+        "struct:SearchQuery"
+      ],
+      "description": "Rust crate: buzz-search"
+    },
+    {
+      "id": "crate:buzz-test-client",
+      "name": "buzz-test-client",
+      "type": "rust_crate",
+      "path": "crates\\buzz-test-client",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "anyhow",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-ws-client",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-subscriber",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rustls",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "clap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "toml",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-subscriber",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rand",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sqlx",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "s3",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-media",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "image",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-sdk",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:Op",
+        "enum:Role",
+        "enum:TestClientError",
+        "fn:abort_reason",
+        "fn:authenticate",
+        "fn:authenticate_with_nip_oa",
+        "fn:begin",
+        "fn:channel_creator",
+        "fn:channel_id",
+        "fn:connect",
+        "fn:connect_unauthenticated",
+        "fn:err",
+        "fn:find_roots",
+        "fn:get",
+        "fn:hot_root_keys"
+      ],
+      "description": "Rust crate: buzz-test-client"
+    },
+    {
+      "id": "crate:buzz-voice",
+      "name": "buzz-voice",
+      "type": "rust_crate",
+      "path": "crates\\buzz-voice",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "atomic-write-file",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "ort",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "ort-sys",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rand",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sentencepiece-model",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sherpa-onnx",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "symphonia",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokenizers",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tempfile",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "fn:delete",
+        "fn:find",
+        "fn:import_path",
+        "fn:load",
+        "fn:load_text_to_speech",
+        "fn:load_voice_style",
+        "fn:new",
+        "fn:resolve_file",
+        "fn:root",
+        "fn:split_text_for_playback",
+        "fn:split_text_into_chunks",
+        "fn:synth_chunk",
+        "fn:synth_chunk_streaming",
+        "mod:imported",
+        "mod:pocket"
+      ],
+      "description": "Rust crate: buzz-voice"
+    },
+    {
+      "id": "crate:buzz-workflow",
+      "name": "buzz-workflow",
+      "type": "rust_crate",
+      "path": "crates\\buzz-workflow",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "buzz-core",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-db",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz-deletion",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_yaml",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "dashmap",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "moka",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "evalexpr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "cron",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sqlx",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing-subscriber",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:ActionDef",
+        "enum:ActionSinkError",
+        "enum:StepResult",
+        "enum:TriggerDef",
+        "enum:WorkflowError",
+        "fn:build_eval_context",
+        "fn:check_owner_authority",
+        "fn:dispatch_action",
+        "fn:evaluate_condition",
+        "fn:execute_run",
+        "fn:get_field",
+        "fn:invalidate_channel_workflows",
+        "fn:log_text",
+        "fn:new",
+        "fn:parse_yaml"
+      ],
+      "description": "Rust crate: buzz-workflow"
+    },
+    {
+      "id": "crate:buzz-ws-client",
+      "name": "buzz-ws-client",
+      "type": "rust_crate",
+      "path": "crates\\buzz-ws-client",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "thiserror",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:RelayMessage",
+        "enum:WsClientError",
+        "fn:authenticate",
+        "fn:build_auth_event",
+        "fn:connect",
+        "fn:connect_authenticated",
+        "fn:connect_authenticated_with_headers",
+        "fn:connect_to_addr",
+        "fn:connect_with_headers",
+        "fn:next_event",
+        "fn:next_event_received",
+        "fn:parse_relay_message",
+        "fn:send_event",
+        "fn:upgrade_rejection",
+        "mod:connection"
+      ],
+      "description": "Rust crate: buzz-ws-client"
+    },
+    {
+      "id": "crate:git-credential-nostr",
+      "name": "git-credential-nostr",
+      "type": "rust_crate",
+      "path": "crates\\git-credential-nostr",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "zeroize",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "fn:run"
+      ],
+      "description": "Rust crate: git-credential-nostr"
+    },
+    {
+      "id": "crate:git-sign-nostr",
+      "name": "git-sign-nostr",
+      "type": "rust_crate",
+      "path": "crates\\git-sign-nostr",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "zeroize",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "fn:run"
+      ],
+      "description": "Rust crate: git-sign-nostr"
+    },
+    {
+      "id": "crate:ifc-core",
+      "name": "ifc-core",
+      "type": "rust_crate",
+      "path": "crates\\ifc-core",
+      "version": {
+        "workspace": true
+      },
+      "dependencies": [
+        {
+          "name": "proptest",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        }
+      ],
+      "symbols": [
+        "enum:ReaderSet",
+        "fn:can_flow_to",
+        "fn:explicit_count",
+        "fn:explicit_readers",
+        "fn:join",
+        "fn:meet",
+        "fn:public",
+        "fn:restricted",
+        "fn:restricted_to",
+        "struct:ConfidentialityLabel"
+      ],
+      "description": "Rust crate: ifc-core"
+    },
+    {
+      "id": "crate:sprig",
+      "name": "sprig",
+      "type": "rust_crate",
+      "path": "crates\\sprig",
+      "version": "0.1.0",
+      "dependencies": [
+        {
+          "name": "buzz-acp",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../buzz-acp"
+        },
+        {
+          "name": "buzz-agent",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../buzz-agent"
+        },
+        {
+          "name": "buzz-dev-mcp",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../buzz-dev-mcp"
+        }
+      ],
+      "symbols": [],
+      "description": "Rust crate: sprig"
+    },
+    {
+      "id": "crate:buzz-desktop-tauri",
+      "name": "buzz-desktop-tauri",
+      "type": "tauri_core",
+      "path": "desktop\\src-tauri",
+      "version": "0.5.28",
+      "dependencies": [
+        {
+          "name": "atomic-write-file",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "anyhow",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "dirs",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri-plugin-deep-link",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri-plugin-opener",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri-plugin-single-instance",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri-plugin-window-state",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri-plugin-dialog",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri-plugin-updater",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri-plugin-process",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "infer",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "hex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "ed25519-dalek",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-tungstenite",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "bytes",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "futures-util",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_json",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "serde_yaml",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "toml",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "nostr",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "getrandom",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "zeroize",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "percent-encoding",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "reqwest",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rustls",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "url",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz_core_pkg",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../../crates/buzz-core"
+        },
+        {
+          "name": "buzz_persona_pkg",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../../crates/buzz-persona"
+        },
+        {
+          "name": "buzz_sdk_pkg",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../../crates/buzz-sdk"
+        },
+        {
+          "name": "buzz_agent_pkg",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../../crates/buzz-agent"
+        },
+        {
+          "name": "buzz_audio_client",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../../crates/buzz-audio-client"
+        },
+        {
+          "name": "buzz_voice_pkg",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../../crates/buzz-voice"
+        },
+        {
+          "name": "buzz_terminal",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "crates/buzz-terminal"
+        },
+        {
+          "name": "buzz_ws_client_pkg",
+          "type": "dependencies",
+          "is_internal": true,
+          "path": "../../crates/buzz-ws-client"
+        },
+        {
+          "name": "portable-pty",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "iroh",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "mesh-llm-sdk",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "mesh-llm-host-runtime",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "mesh-llm-client",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "mesh-llm-node",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "mesh-llm-system",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "mesh-llm-events",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "base64",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sha2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tar",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "bzip2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "chrono",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri-plugin-global-shortcut",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri-plugin-notification",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "uuid",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "png",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "arboard",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "image",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "zip",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "flate2",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "sherpa-onnx",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "regex",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rusqlite",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "axum",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rodio",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "earshot",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "rubato",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "audioadapter-buffers",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tempfile",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "strip-ansi-escapes",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tracing",
+          "type": "dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tauri-utils",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "tokio",
+          "type": "dev-dependencies",
+          "is_internal": false,
+          "path": null
+        },
+        {
+          "name": "buzz_media_pkg",
+          "type": "dev-dependencies",
+          "is_internal": true,
+          "path": "../../crates/buzz-media"
+        }
+      ],
+      "description": "Buzz Desktop Tauri App Backend"
+    },
+    {
+      "id": "desktop_feature:admin-console",
+      "name": "admin-console",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\admin-console",
+      "description": "Buzz Desktop Feature: admin-console"
+    },
+    {
+      "id": "desktop_feature:agent-memory",
+      "name": "agent-memory",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\agent-memory",
+      "description": "Buzz Desktop Feature: agent-memory"
+    },
+    {
+      "id": "desktop_feature:agents",
+      "name": "agents",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\agents",
+      "description": "Buzz Desktop Feature: agents"
+    },
+    {
+      "id": "desktop_feature:channel-templates",
+      "name": "channel-templates",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\channel-templates",
+      "description": "Buzz Desktop Feature: channel-templates"
+    },
+    {
+      "id": "desktop_feature:channels",
+      "name": "channels",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\channels",
+      "description": "Buzz Desktop Feature: channels"
+    },
+    {
+      "id": "desktop_feature:chat",
+      "name": "chat",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\chat",
+      "description": "Buzz Desktop Feature: chat"
+    },
+    {
+      "id": "desktop_feature:communities",
+      "name": "communities",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\communities",
+      "description": "Buzz Desktop Feature: communities"
+    },
+    {
+      "id": "desktop_feature:community-members",
+      "name": "community-members",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\community-members",
+      "description": "Buzz Desktop Feature: community-members"
+    },
+    {
+      "id": "desktop_feature:custom-emoji",
+      "name": "custom-emoji",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\custom-emoji",
+      "description": "Buzz Desktop Feature: custom-emoji"
+    },
+    {
+      "id": "desktop_feature:forum",
+      "name": "forum",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\forum",
+      "description": "Buzz Desktop Feature: forum"
+    },
+    {
+      "id": "desktop_feature:gifs",
+      "name": "gifs",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\gifs",
+      "description": "Buzz Desktop Feature: gifs"
+    },
+    {
+      "id": "desktop_feature:home",
+      "name": "home",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\home",
+      "description": "Buzz Desktop Feature: home"
+    },
+    {
+      "id": "desktop_feature:huddle",
+      "name": "huddle",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\huddle",
+      "description": "Buzz Desktop Feature: huddle"
+    },
+    {
+      "id": "desktop_feature:identity-archive",
+      "name": "identity-archive",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\identity-archive",
+      "description": "Buzz Desktop Feature: identity-archive"
+    },
+    {
+      "id": "desktop_feature:local-archive",
+      "name": "local-archive",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\local-archive",
+      "description": "Buzz Desktop Feature: local-archive"
+    },
+    {
+      "id": "desktop_feature:mesh-compute",
+      "name": "mesh-compute",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\mesh-compute",
+      "description": "Buzz Desktop Feature: mesh-compute"
+    },
+    {
+      "id": "desktop_feature:messages",
+      "name": "messages",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\messages",
+      "description": "Buzz Desktop Feature: messages"
+    },
+    {
+      "id": "desktop_feature:moderation",
+      "name": "moderation",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\moderation",
+      "description": "Buzz Desktop Feature: moderation"
+    },
+    {
+      "id": "desktop_feature:notifications",
+      "name": "notifications",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\notifications",
+      "description": "Buzz Desktop Feature: notifications"
+    },
+    {
+      "id": "desktop_feature:onboarding",
+      "name": "onboarding",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\onboarding",
+      "description": "Buzz Desktop Feature: onboarding"
+    },
+    {
+      "id": "desktop_feature:presence",
+      "name": "presence",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\presence",
+      "description": "Buzz Desktop Feature: presence"
+    },
+    {
+      "id": "desktop_feature:profile",
+      "name": "profile",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\profile",
+      "description": "Buzz Desktop Feature: profile"
+    },
+    {
+      "id": "desktop_feature:projects",
+      "name": "projects",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\projects",
+      "description": "Buzz Desktop Feature: projects"
+    },
+    {
+      "id": "desktop_feature:pulse",
+      "name": "pulse",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\pulse",
+      "description": "Buzz Desktop Feature: pulse"
+    },
+    {
+      "id": "desktop_feature:reminders",
+      "name": "reminders",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\reminders",
+      "description": "Buzz Desktop Feature: reminders"
+    },
+    {
+      "id": "desktop_feature:search",
+      "name": "search",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\search",
+      "description": "Buzz Desktop Feature: search"
+    },
+    {
+      "id": "desktop_feature:settings",
+      "name": "settings",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\settings",
+      "description": "Buzz Desktop Feature: settings"
+    },
+    {
+      "id": "desktop_feature:sidebar",
+      "name": "sidebar",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\sidebar",
+      "description": "Buzz Desktop Feature: sidebar"
+    },
+    {
+      "id": "desktop_feature:terminal",
+      "name": "terminal",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\terminal",
+      "description": "Buzz Desktop Feature: terminal"
+    },
+    {
+      "id": "desktop_feature:user-status",
+      "name": "user-status",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\user-status",
+      "description": "Buzz Desktop Feature: user-status"
+    },
+    {
+      "id": "desktop_feature:workflows",
+      "name": "workflows",
+      "type": "desktop_feature",
+      "path": "desktop\\src\\features\\workflows",
+      "description": "Buzz Desktop Feature: workflows"
+    }
+  ],
+  "edges": [
+    {
+      "source": "crate:buzz-acp",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-acp",
+      "target": "crate:buzz-sdk",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-acp",
+      "target": "crate:buzz-persona",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-acp",
+      "target": "crate:git-credential-nostr",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-acp",
+      "target": "crate:git-sign-nostr",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-admin",
+      "target": "crate:buzz-db",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-admin",
+      "target": "crate:buzz-deletion",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-admin",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-admin",
+      "target": "crate:buzz-auth",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-admin",
+      "target": "crate:buzz-pubsub",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-admin",
+      "target": "crate:buzz-search",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-admin",
+      "target": "crate:buzz-audit",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-admin",
+      "target": "crate:buzz-workflow",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-admin",
+      "target": "crate:buzz-media",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-audit",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-audit",
+      "target": "crate:buzz-db",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-audit",
+      "target": "crate:buzz-datastore-tracing",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-auth",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-cli",
+      "target": "crate:buzz-sdk",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-cli",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-cli",
+      "target": "crate:buzz-persona",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-cli",
+      "target": "crate:buzz-ws-client",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-db",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-db",
+      "target": "crate:buzz-datastore-tracing",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-deletion",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-deletion",
+      "target": "crate:buzz-db",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-deletion",
+      "target": "crate:buzz-media",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-deletion",
+      "target": "crate:buzz-pubsub",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-dev-mcp",
+      "target": "crate:buzz-cli",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-dev-mcp",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-feature-flags",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-media",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-mesh-smoke",
+      "target": "crate:buzz-test-client",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-pair-relay",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-pairing-cli",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-pubsub",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-pubsub",
+      "target": "crate:buzz-auth",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-conformance",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-db",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-feature-flags",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-datastore-tracing",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-deletion",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-auth",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-pubsub",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-audit",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-search",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-relay-mesh",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-sdk",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-workflow",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-media",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay",
+      "target": "crate:buzz-auth",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-relay-mesh",
+      "target": "crate:buzz-pubsub",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-sdk",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-search",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-search",
+      "target": "crate:buzz-db",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-search",
+      "target": "crate:buzz-datastore-tracing",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-test-client",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-test-client",
+      "target": "crate:buzz-ws-client",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-test-client",
+      "target": "crate:buzz-media",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-test-client",
+      "target": "crate:buzz-sdk",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-workflow",
+      "target": "crate:buzz-core",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-workflow",
+      "target": "crate:buzz-db",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:buzz-workflow",
+      "target": "crate:buzz-deletion",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:sprig",
+      "target": "crate:buzz-acp",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:sprig",
+      "target": "crate:buzz-agent",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    },
+    {
+      "source": "crate:sprig",
+      "target": "crate:buzz-dev-mcp",
+      "type": "cargo_dependency",
+      "label": "depends_on"
+    }
+  ],
+  "agent_locks": {}
+}

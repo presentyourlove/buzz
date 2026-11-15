@@ -35,8 +35,12 @@ members = [
     "crates/buzz-backend-kubernetes",
     "crates/buzz-datastore-tracing",
     "examples/countdown-bot",
+    "skills/daily-digest",
+    "skills/qa-guard",
+    "skills/env-guardian",
+    "skills/antigravity",
 ]
-exclude = ["desktop/src-tauri", ".agents/skills/daily-digest", ".agents/skills/env-guardian", ".agents/skills/qa-guard"]
+exclude = ["desktop/src-tauri"]
 resolver = "2"
 
 [workspace.package]

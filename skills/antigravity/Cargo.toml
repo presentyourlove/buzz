@@ -1,0 +1,72 @@
+[package]
+name = "antigravity"
+version = "1.0.0"
+edition = "2021"
+description = "架構演進官 - 每日系統進化機制自動化分析與自癒"
+authors = ["Honey2 <honey2@buzz>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/buzz/buzz"
+
+[lib]
+name = "antigravity"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Buzz 核心依賴
+buzz-core = { path = "../../crates/buzz-core" }
+
+# Nostr 協議
+nostr = { version = "0.44", features = ["nip44"] }
+
+# 異步運行時
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time", "full"] }
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# 日期時間
+chrono = { version = "0.4", features = ["serde"] }
+
+# 錯誤處理
+anyhow = "1.0"
+thiserror = "1.0"
+
+# 日誌
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# UUID
+uuid = { version = "1.7", features = ["v7", "serde", "fast-rng"] }
+
+# 資料庫
+rusqlite = { version = "0.40", features = ["vtab", "functions", "extra_check", "modern_sqlite", "serde_json"] }
+
+# 並發
+dashmap = "5.5"
+once_cell = "1.19"
+
+# 異步特徵
+async-trait = "0.1"
+
+# 檔案系統遍歷
+walkdir = "2.5"
+
+[dev-dependencies]
+tempfile = "3.9"
+pretty_assertions = "1.4"
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true

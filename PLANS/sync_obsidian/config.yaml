@@ -1,0 +1,97 @@
+---
+# Obsidian Memory Sync - 正式實作設定檔
+# 生成日期：2026-10-25
+# 依據：OBSIDIAN_MEMORY_SYNC.md 第 10 節已確認事項
+---
+
+vault_path: "c:/私人/ai agent/buzz-obsidian"
+
+buzz:
+  relay_url: "wss://presentyourlove.communities.buzz.xyz"
+  # 環境變數需預先設定：
+  #   BUZZ_PRIVATE_KEY
+  #   BUZZ_AUTH_TAG
+
+sync_intervals:
+  core_memory: 300        # 秒 (5 分鐘) - 覆寫模式
+  cold_memory: 600        # 秒 (10 分鐘) - 增量合併模式
+  conversation_digest: 1800  # 秒 (30 分鐘) - 追加模式
+
+conversation_digest:
+  enabled: true
+  min_messages: 3         # 少於此數不生成摘要
+  summarizer: "wax-agent" # 委派給 Wax Agent 處理語意提煉與雙向連結生成
+  wax_agent_name: "Wax"   # 記憶清潔工 Agent 顯示名稱
+
+git:
+  auto_commit: true
+  auto_push: true         # 自動推送到 GitHub 私有倉庫
+  remote: "origin"        # 遠端倉庫名稱
+  branch: "main"
+  init_if_missing: true   # 首次運行自動 git init
+
+filters:
+  exclude_channels: []    # 不同步的頻道 ID 列表
+  exclude_tags:
+    - "private"
+    - "secret"
+    - "tmp"
+    - "nosync"
+    - "個人"
+  # 敏感資料正則遮罩（寫入 Vault 前套用）
+  secret_patterns:
+    - pattern: "(?i)(api[_-]?key|access[_-]?token|secret[_-]?key|password|passwd|bearer)[\"']?\s*[:=]\s*[\"']?([a-zA-Z0-9._-]{20,})"
+      replacement: "[PROTECTED_SECRET]"
+    - pattern: "(?i)(sk|pk|api)[_-]?[a-zA-Z0-9]{32,}"
+      replacement: "[PROTECTED_SECRET]"
+    - pattern: "eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*"
+      replacement: "[PROTECTED_SECRET]"  # JWT
+
+# 同步狀態持久化
+state_store:
+  path: "sync-meta/state.json"
+  conflict_log: "sync-meta/conflict-log.json"
+  last_sync: "sync-meta/last-sync.json"
+
+# 記憶類型對應的 Vault 相對路徑
+vault_structure:
+  core_memory: "wiki/00-Core-Memory/core-memory.md"
+  cold_memory_dir: "wiki/01-Cold-Memory"
+  cold_memory_index: "wiki/01-Cold-Memory/INDEX.md"
+  conversation_digest_dir: "wiki/02-Conversation-Digest"
+  conversation_digest_index: "wiki/02-Conversation-Digest/INDEX.md"
+  daily_dir: "wiki/02-Conversation-Digest/Daily"
+  weekly_dir: "wiki/02-Conversation-Digest/Weekly"
+  monthly_dir: "wiki/02-Conversation-Digest/Monthly"
+  entities_dir: "wiki/03-Entities"
+  sync_meta_dir: "wiki/00-Core-Memory/sync-meta"
+
+# Wax 執行身分與憑證（用於自主從 Relay 撈取頻道滾動紀錄）
+wax_auth:
+  private_key: "nsec1ly388ent2cvr7f9rscxffxgmvuljggxx374sjkfvwee4zrl3p89sqfjmce"
+  auth_tag: '["auth","2d29f28fd5106795c630120d7e5b062bc4f5caa8057b4a6a374b7468cdc5de8e","","6f67f68423fe1877d312046cc63cf0106b7f31f284eb51d586dc036a235aeb8433d159d97c37e2b927b40fdc68eff0e1071fdaf56c497494d1779a8bc7fc6118"]'
+  channel_id: "5ca019f6-1a27-592a-b015-4baf0eb33572" # general channel
+
+# 日誌設定
+logging:
+  level: "INFO"
+  file: "sync-meta/sync.log"
+  max_size_mb: 10
+  backup_count: 5
+
+# 監控與健康檢查
+health_check:
+  enabled: true
+  heartbeat_file: "sync-meta/heartbeat.json"
+  max_stale_seconds: 600  # 超過 10 分鐘無心跳視為異常
+
+# Wax Agent 整合（階段二：語意深度提煉）
+wax_integration:
+  enabled: true
+  trigger_on_digest: true
+  buzz_channel: "general"  # Wax 運作的頻道
+  # Wax 負責：
+  # 1. 讀取 conversation-digest 新檔案
+  # 2. 語意分析、實體抽取、概念連結
+  # 3. 生成/更新 cold-memory 檔案並加入 [[WikiLink]]
+  # 4. 透過 buzz mem set 寫回 Cold Memory

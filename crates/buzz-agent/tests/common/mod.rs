@@ -35,11 +35,16 @@ pub async fn spawn_capturing_llm(responses: Vec<Value>) -> CapturingLlm {
 /// 400) instead of only success bodies.
 pub async fn spawn_capturing_llm_with_status(responses: Vec<(u16, Value)>) -> CapturingLlm {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
+    let addr = listener.local_addr().unwrap();
+    let url = format!("http://{}", addr);
     let queue = Arc::new(Mutex::new(VecDeque::from(responses)));
     let captured: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
     let cap2 = captured.clone();
+    let ready = Arc::new(tokio::sync::Notify::new());
+    let ready2 = ready.clone();
     tokio::spawn(async move {
+        // Signal that we're ready to accept connections
+        ready2.notify_one();
         loop {
             let (mut sock, _) = match listener.accept().await {
                 Ok(p) => p,
@@ -99,6 +104,8 @@ pub async fn spawn_capturing_llm_with_status(responses: Vec<(u16, Value)>) -> Ca
             });
         }
     });
+    // Wait for the server to be ready to accept connections
+    ready.notified().await;
     CapturingLlm { url, captured }
 }
 

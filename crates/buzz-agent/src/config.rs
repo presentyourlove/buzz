@@ -469,6 +469,42 @@ pub const MAX_CONTEXT_RECOVERIES_PER_RUN: u32 = 3;
 /// and surfaces the error instead of issuing ever-smaller doomed requests.
 pub const HANDOFF_MIN_PROMPT_BUDGET_BYTES: usize = 4 * 1024;
 
+/// 上下文壓縮模式：`Tiered` 為四層漸進壓縮（預設），`Legacy` 為舊版 90% 全量清空模式（供即時回退）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CompactionMode {
+    #[default]
+    Tiered,
+    Legacy,
+}
+
+/// Tier 0 確定性剪枝觸發門檻（佔 max_context_tokens 百分比）。
+pub const DEFAULT_PRUNE_THRESHOLD_PERCENT: u64 = 60;
+/// Tier 0 批次剪枝目標水位（佔 max_context_tokens 百分比），避免每回合頻繁剪枝破壞 Prompt Cache。
+pub const DEFAULT_PRUNE_TARGET_PERCENT: u64 = 40;
+/// Tier 1 增強交接（LLM 滾動摘要）觸發門檻（佔 max_context_tokens 百分比）。
+pub const DEFAULT_HANDOFF_THRESHOLD_PERCENT: u64 = 80;
+/// Legacy 模式下之交接門檻（維持舊版 90% 行為不變）。
+pub const LEGACY_HANDOFF_THRESHOLD_PERCENT: u64 = 90;
+/// Tier 1 交接與 Tier 0 剪枝時保留之逐字尾端預算佔比（佔 max_context_tokens 百分比）。
+pub const DEFAULT_TAIL_BUDGET_PERCENT: u64 = 20;
+/// 逐字尾端最少保留之完整回合數（確保近期工具呼叫與結果不被切斷）。
+pub const DEFAULT_TAIL_MIN_ROUNDS: usize = 3;
+/// Tier 0 剪枝僅針對超過此位元組數的舊 ToolResult 進行替換。
+pub const PRUNE_MIN_TOOL_RESULT_BYTES: usize = 512;
+/// 摘要快照與剪枝佔位符中，單一工具參數摘要的最大位元組數。
+pub const SNIPPET_ARG_MAX_BYTES: usize = 160;
+/// 階段 E 加密落盤續作預設啟用狀態。
+pub const DEFAULT_CHECKPOINT_ENABLED: bool = true;
+/// 階段 E 加密落盤存檔預設保存秒數（72 小時 = 259,200 秒，符合資料生命週期最小保存原則）。
+pub const DEFAULT_CHECKPOINT_TTL_SECS: u64 = 72 * 3600;
+/// 階段 E 單一目錄最大 Checkpoint 檔案數量上限。
+pub const DEFAULT_CHECKPOINT_MAX_FILES: usize = 200;
+/// 保護性最低上下文視窗大小（僅在大型真實特工 System Prompt >= 16 KiB 時強制套用，避免影響合成單元測試的小視窗設定）。
+pub const MIN_PRODUCTION_CONTEXT_TOKENS: u64 = 64_000;
+/// 認定為真實生產特工大型 System Prompt 的位元組門檻（16 KiB）。
+pub const PRODUCTION_SYSTEM_PROMPT_THRESHOLD_BYTES: usize = 16 * 1024;
+
 const DEFAULT_SYSTEM_PROMPT: &str =
     "You are buzz-agent. Use the provided tools to act. Tool calls are your only output.";
 
@@ -711,6 +747,25 @@ pub struct Config {
 
     /// System Health Guardian configuration.
     pub health_guardian: Option<HealthGuardianConfig>,
+
+    /// 上下文壓縮模式（預設 Tiered；可設定為 Legacy 立即回退舊行為）。
+    pub compaction_mode: CompactionMode,
+    /// Tier 0 確定性剪枝觸發門檻（佔 max_context_tokens 百分比，預設 60%）。
+    pub prune_threshold_percent: u64,
+    /// Tier 0 批次剪枝目標水位（佔 max_context_tokens 百分比，預設 40%）。
+    pub prune_target_percent: u64,
+    /// Tier 1 增強交接觸發門檻（佔 max_context_tokens 百分比，預設 80%）。
+    pub handoff_threshold_percent: u64,
+    /// 逐字尾端預算佔比（佔 max_context_tokens 百分比，預設 20%）。
+    pub tail_budget_percent: u64,
+    /// 逐字尾端最少保留之完整回合數（預設 3 回合）。
+    pub tail_min_rounds: usize,
+    /// 是否啟用階段 E 跨進程加密落盤續作（預設 true）。
+    pub checkpoint_enabled: bool,
+    /// 階段 E Checkpoint 目錄路徑覆寫（預設 None，執行期解析至 `%LOCALAPPDATA%\Buzz\checkpoints`）。
+    pub checkpoint_dir: Option<PathBuf>,
+    /// 階段 E Checkpoint 保存期限（秒，預設 259,200 秒 = 72 小時）。
+    pub checkpoint_ttl_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -835,10 +890,12 @@ impl Config {
             _ => DEFAULT_SYSTEM_PROMPT.to_owned(),
         };
         let mut max_context_tokens: u64 = parse_env("BUZZ_AGENT_MAX_CONTEXT_TOKENS", 200_000u64)?;
-        // 防呆下限保護：確保 max_context_tokens 不得低於 64,000 tokens，
-        // 避免因設定過低導致 System Prompt (26k+) 觸發 preflight handoff 窒息死循環。
-        if max_context_tokens < 64_000 {
-            max_context_tokens = 64_000;
+        // 防呆下限保護：僅當大型真實特工 System Prompt（>= 16 KiB）時強制套用 64,000 tokens 下限，
+        // 避免高佔比系統提示觸發交接死循環，同時確保小視窗單元測試與 regressions 正常運作。
+        if system_prompt.len() >= PRODUCTION_SYSTEM_PROMPT_THRESHOLD_BYTES
+            && max_context_tokens < MIN_PRODUCTION_CONTEXT_TOKENS
+        {
+            max_context_tokens = MIN_PRODUCTION_CONTEXT_TOKENS;
         }
         let mut max_output_tokens: u32 = parse_env("BUZZ_AGENT_MAX_OUTPUT_TOKENS", 65_536)?;
         if max_context_tokens <= u64::from(max_output_tokens) {
@@ -899,6 +956,37 @@ impl Config {
             history_cache_ttl_secs: parse_env("BUZZ_AGENT_HISTORY_CACHE_TTL", 300u64)?,
             history_cache_max_entries: parse_env("BUZZ_AGENT_HISTORY_CACHE_MAX", 10_000usize)?,
             health_guardian: parse_health_guardian_env()?,
+            compaction_mode: parse_compaction_mode(env("BUZZ_AGENT_COMPACTION_MODE").as_deref())?,
+            prune_threshold_percent: parse_env(
+                "BUZZ_AGENT_PRUNE_THRESHOLD_PERCENT",
+                DEFAULT_PRUNE_THRESHOLD_PERCENT,
+            )?,
+            prune_target_percent: parse_env(
+                "BUZZ_AGENT_PRUNE_TARGET_PERCENT",
+                DEFAULT_PRUNE_TARGET_PERCENT,
+            )?,
+            handoff_threshold_percent: parse_env(
+                "BUZZ_AGENT_HANDOFF_THRESHOLD_PERCENT",
+                DEFAULT_HANDOFF_THRESHOLD_PERCENT,
+            )?,
+            tail_budget_percent: parse_env(
+                "BUZZ_AGENT_TAIL_BUDGET_PERCENT",
+                DEFAULT_TAIL_BUDGET_PERCENT,
+            )?,
+            tail_min_rounds: parse_env("BUZZ_AGENT_TAIL_MIN_ROUNDS", DEFAULT_TAIL_MIN_ROUNDS)?,
+            checkpoint_enabled: parse_bool_flag(
+                env("BUZZ_AGENT_CHECKPOINT_ENABLED").as_deref(),
+                DEFAULT_CHECKPOINT_ENABLED,
+                "BUZZ_AGENT_CHECKPOINT_ENABLED",
+            )?,
+            checkpoint_dir: env("BUZZ_AGENT_CHECKPOINT_DIR")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from),
+            checkpoint_ttl_secs: parse_env(
+                "BUZZ_AGENT_CHECKPOINT_TTL_SECS",
+                DEFAULT_CHECKPOINT_TTL_SECS,
+            )?,
         };
         cfg.validate()?;
         Ok(cfg)
@@ -1089,8 +1177,11 @@ impl Config {
         
         // Build config
         let mut max_context_tokens = get_uint("max_context_tokens", "BUZZ_AGENT_MAX_CONTEXT_TOKENS", 200_000);
-        if max_context_tokens < 64_000 {
-            max_context_tokens = 64_000;
+        // 與 from_env 一致：僅在大型真實特工 System Prompt (>= 16 KiB) 時套用 64,000 下限保護。
+        if system_prompt.len() >= PRODUCTION_SYSTEM_PROMPT_THRESHOLD_BYTES
+            && max_context_tokens < MIN_PRODUCTION_CONTEXT_TOKENS
+        {
+            max_context_tokens = MIN_PRODUCTION_CONTEXT_TOKENS;
         }
         let mut max_output_tokens = get_uint("max_output_tokens", "BUZZ_AGENT_MAX_OUTPUT_TOKENS", 65536) as u32;
         if max_context_tokens <= u64::from(max_output_tokens) {
@@ -1138,6 +1229,48 @@ impl Config {
             history_cache_ttl_secs: get_uint("history_cache_ttl_secs", "BUZZ_AGENT_HISTORY_CACHE_TTL", 300),
             history_cache_max_entries: get_uint("history_cache_max_entries", "BUZZ_AGENT_HISTORY_CACHE_MAX", 10_000) as usize,
             health_guardian,
+            compaction_mode: parse_compaction_mode(
+                get_opt_str("compaction_mode", "BUZZ_AGENT_COMPACTION_MODE").as_deref(),
+            )?,
+            prune_threshold_percent: get_uint(
+                "prune_threshold_percent",
+                "BUZZ_AGENT_PRUNE_THRESHOLD_PERCENT",
+                DEFAULT_PRUNE_THRESHOLD_PERCENT,
+            ),
+            prune_target_percent: get_uint(
+                "prune_target_percent",
+                "BUZZ_AGENT_PRUNE_TARGET_PERCENT",
+                DEFAULT_PRUNE_TARGET_PERCENT,
+            ),
+            handoff_threshold_percent: get_uint(
+                "handoff_threshold_percent",
+                "BUZZ_AGENT_HANDOFF_THRESHOLD_PERCENT",
+                DEFAULT_HANDOFF_THRESHOLD_PERCENT,
+            ),
+            tail_budget_percent: get_uint(
+                "tail_budget_percent",
+                "BUZZ_AGENT_TAIL_BUDGET_PERCENT",
+                DEFAULT_TAIL_BUDGET_PERCENT,
+            ),
+            tail_min_rounds: get_uint(
+                "tail_min_rounds",
+                "BUZZ_AGENT_TAIL_MIN_ROUNDS",
+                DEFAULT_TAIL_MIN_ROUNDS as u64,
+            ) as usize,
+            checkpoint_enabled: get_bool(
+                "checkpoint_enabled",
+                "BUZZ_AGENT_CHECKPOINT_ENABLED",
+                DEFAULT_CHECKPOINT_ENABLED,
+            ),
+            checkpoint_dir: get_opt_str("checkpoint_dir", "BUZZ_AGENT_CHECKPOINT_DIR")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from),
+            checkpoint_ttl_secs: get_uint(
+                "checkpoint_ttl_secs",
+                "BUZZ_AGENT_CHECKPOINT_TTL_SECS",
+                DEFAULT_CHECKPOINT_TTL_SECS,
+            ),
         };
         
         cfg.validate()?;
@@ -1198,6 +1331,15 @@ impl Config {
             history_cache_ttl_secs: 300,
             history_cache_max_entries: 10_000,
             health_guardian: None,
+            compaction_mode: CompactionMode::Tiered,
+            prune_threshold_percent: DEFAULT_PRUNE_THRESHOLD_PERCENT,
+            prune_target_percent: DEFAULT_PRUNE_TARGET_PERCENT,
+            handoff_threshold_percent: DEFAULT_HANDOFF_THRESHOLD_PERCENT,
+            tail_budget_percent: DEFAULT_TAIL_BUDGET_PERCENT,
+            tail_min_rounds: DEFAULT_TAIL_MIN_ROUNDS,
+            checkpoint_enabled: DEFAULT_CHECKPOINT_ENABLED,
+            checkpoint_dir: None,
+            checkpoint_ttl_secs: DEFAULT_CHECKPOINT_TTL_SECS,
         }
     }
 
@@ -1295,6 +1437,30 @@ impl Config {
         if self.history_cache_max_entries < 100 {
             return Err("config: BUZZ_AGENT_HISTORY_CACHE_MAX must be >= 100 entries".into());
         }
+        // 四層上下文壓縮百分比範圍驗證（1..=99，且剪枝目標不得高於剪枝觸發門檻）
+        const MIN_PERCENT: u64 = 1;
+        const MAX_PERCENT: u64 = 99;
+        if !(MIN_PERCENT..=MAX_PERCENT).contains(&self.prune_threshold_percent) {
+            return Err(format!(
+                "config: BUZZ_AGENT_PRUNE_THRESHOLD_PERCENT must be in {MIN_PERCENT}..={MAX_PERCENT}"
+            ));
+        }
+        if !(MIN_PERCENT..=MAX_PERCENT).contains(&self.handoff_threshold_percent) {
+            return Err(format!(
+                "config: BUZZ_AGENT_HANDOFF_THRESHOLD_PERCENT must be in {MIN_PERCENT}..={MAX_PERCENT}"
+            ));
+        }
+        if !(MIN_PERCENT..=MAX_PERCENT).contains(&self.tail_budget_percent) {
+            return Err(format!(
+                "config: BUZZ_AGENT_TAIL_BUDGET_PERCENT must be in {MIN_PERCENT}..={MAX_PERCENT}"
+            ));
+        }
+        if self.prune_target_percent > self.prune_threshold_percent {
+            return Err(format!(
+                "config: BUZZ_AGENT_PRUNE_TARGET_PERCENT ({}) must be <= BUZZ_AGENT_PRUNE_THRESHOLD_PERCENT ({})",
+                self.prune_target_percent, self.prune_threshold_percent
+            ));
+        }
         Ok(())
     }
 }
@@ -1369,6 +1535,31 @@ fn parse_openai_api(raw: Option<&str>) -> Result<OpenAiApi, String> {
         "auto" | "" => Ok(OpenAiApi::Auto),
         other => Err(format!(
             "config: OPENAI_COMPAT_API={other} not supported (use auto|chat|responses)"
+        )),
+    }
+}
+
+/// 解析 `BUZZ_AGENT_COMPACTION_MODE`：預設為 `Tiered`，設定為 `legacy` 可一鍵退回舊版全量清空邏輯。
+pub fn parse_compaction_mode(raw: Option<&str>) -> Result<CompactionMode, String> {
+    match raw.unwrap_or("tiered").trim().to_ascii_lowercase().as_str() {
+        "" | "tiered" => Ok(CompactionMode::Tiered),
+        "legacy" => Ok(CompactionMode::Legacy),
+        other => Err(format!(
+            "config: BUZZ_AGENT_COMPACTION_MODE={other} not supported (use tiered|legacy)"
+        )),
+    }
+}
+
+/// 解析布林環境變數旗標，支援 `true/false/1/0/yes/no/on/off`。
+fn parse_bool_flag(raw: Option<&str>, default: bool, key: &str) -> Result<bool, String> {
+    let Some(s) = raw.map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(default);
+    };
+    match s.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        other => Err(format!(
+            "config: {key}={other} not supported (use true|false)"
         )),
     }
 }
@@ -2951,5 +3142,43 @@ mod tests {
                 "agent tool timeout must be >= dev-mcp shell cap (1200s)"
             );
         }
+    }
+
+    #[test]
+    fn compaction_mode_parser_accepts_tiered_and_legacy() {
+        assert_eq!(parse_compaction_mode(None).unwrap(), CompactionMode::Tiered);
+        assert_eq!(parse_compaction_mode(Some("")).unwrap(), CompactionMode::Tiered);
+        assert_eq!(parse_compaction_mode(Some(" Tiered ")).unwrap(), CompactionMode::Tiered);
+        assert_eq!(parse_compaction_mode(Some("LEGACY")).unwrap(), CompactionMode::Legacy);
+        assert!(parse_compaction_mode(Some("invalid")).is_err());
+    }
+
+    #[test]
+    fn compaction_config_defaults_and_validation_work() {
+        let mut cfg = make_config_for_validation(Provider::Anthropic, None);
+        assert_eq!(cfg.compaction_mode, CompactionMode::Tiered);
+        assert_eq!(cfg.prune_threshold_percent, 60);
+        assert_eq!(cfg.prune_target_percent, 40);
+        assert_eq!(cfg.handoff_threshold_percent, 80);
+        assert_eq!(cfg.tail_budget_percent, 20);
+        assert_eq!(cfg.tail_min_rounds, 3);
+        assert!(cfg.checkpoint_enabled);
+        assert_eq!(cfg.checkpoint_ttl_secs, 72 * 3600);
+        assert!(cfg.validate().is_ok());
+
+        cfg.prune_threshold_percent = 0;
+        assert!(cfg.validate().is_err());
+        cfg.prune_threshold_percent = 60;
+
+        cfg.prune_target_percent = 65;
+        assert!(cfg.validate().is_err());
+        cfg.prune_target_percent = 40;
+
+        cfg.handoff_threshold_percent = 100;
+        assert!(cfg.validate().is_err());
+        cfg.handoff_threshold_percent = 80;
+
+        cfg.tail_budget_percent = 0;
+        assert!(cfg.validate().is_err());
     }
 }

@@ -33,7 +33,7 @@ const UNSUPPORTED_IMAGE_TOOL_MESSAGE: &str = "The current model does not support
 /// its output-token limit. This is a user message rather than a synthetic tool
 /// result because truncation can happen without a tool call (and an unpaired
 /// tool result is invalid on every provider wire format).
-const MAX_TOKENS_RECOVERY_MESSAGE: &str = "Your previous response reached the model's output token limit and was truncated. Any incomplete tool calls were discarded and were not run. Stop prolonged internal reasoning now. Use the available tools immediately: write a script or artifact to a file and run it in small, verifiable steps instead of emitting the entire solution inline. Continue the task concisely from the preserved text.";
+pub(crate) const MAX_TOKENS_RECOVERY_MESSAGE: &str = "Your previous response reached the model's output token limit and was truncated. Any incomplete tool calls were discarded and were not run. Stop prolonged internal reasoning now. Use the available tools immediately: write a script or artifact to a file and run it in small, verifiable steps instead of emitting the entire solution inline. Continue the task concisely from the preserved text.";
 
 /// Remove image blocks that the provider has explicitly rejected while keeping
 /// their surrounding tool result (and therefore the tool-call/result pairing)
@@ -299,7 +299,7 @@ pub fn denoise_prompt_markdown_links(input: &str) -> String {
     result
 }
 
-fn is_valid_uuid(s: &str) -> bool {
+pub(crate) fn is_valid_uuid(s: &str) -> bool {
     if s.len() != 36 {
         return false;
     }
@@ -449,6 +449,8 @@ pub struct RunCtx<'a> {
     /// the `turn_*` accumulators above to report a cumulative figure mid-turn;
     /// the session's own copy is only advanced once, after the turn returns.
     pub usage_baseline: SessionUsageBaseline,
+    /// 確定性工作集帳本（修復 D8）：隨回合自動記錄讀寫改檔案、指令與錯誤。
+    pub ledger: &'a mut crate::compaction::WorkingSetLedger,
 }
 
 /// Fold one round's proven identity into the per-turn identity accumulator.
@@ -539,10 +541,15 @@ impl RunCtx<'_> {
         // Denoise markdown links that frontends mistakenly attach to local filenames and paths
         user_text = denoise_prompt_markdown_links(&user_text);
 
+        // 階段 E：若為重啟／休眠後的新 Session 首輪且歷史為空，先嘗試由磁碟加密 Checkpoint 還原續作上下文
+        let restored_same_tail = self.restore_checkpoint_if_scoped(&user_text);
+
         if self.original_task.is_none() {
             *self.original_task = Some(user_text.clone());
         }
-        self.history.push(HistoryItem::User(user_text));
+        if !restored_same_tail {
+            self.history.push(HistoryItem::User(user_text));
+        }
 
         // Reset per-turn token accumulators for this prompt.
         *self.turn_input_tokens = TurnIOState::Unseen;
@@ -586,6 +593,8 @@ impl RunCtx<'_> {
         const MAX_TOTAL_CONSECUTIVE_TOOL_FAILURES: usize = 8;
         let mut reply_nags = 0u32;
         let mut silent_turns = 0u32;
+        let mut successful_tool_rounds = 0u32;
+        let mut dynamic_extended_budget = 40u32;
         // Per-`run()` reactive context-recovery budget. Per-turn, not
         // per-session: a fresh prompt deserves a fresh chance to recover, and
         // `max_rounds` defaults to 0 (unbounded) so it cannot bound this.
@@ -595,17 +604,37 @@ impl RunCtx<'_> {
         // refunded; this counter only bounds the default-unlimited case.
         let mut max_tokens_recoveries = 0u32;
         loop {
-            // Safety cap: if max_rounds is 0 (unbounded), enforce a protective ceiling of 40
-            // rounds to terminate runaway tool call loops and orphan zombie sessions.
-            let effective_max_rounds = if self.cfg.max_rounds > 0 {
+            // 智慧動態預算天花板 (Smart Dynamic Budget Ceiling)
+            // 若使用者明確設定了 max_rounds > 0 則尊重設定；
+            // 否則初始預算為 40 輪。若特工持續有實質進展（無死循環、無連續故障），自動展期 40 輪，無需主理人批准；
+            // 僅當偵測到卡死、死循環或達到全域絕對安全天花板 (160 輪) 時，才暫停請求核准。
+            let mut effective_max_rounds = if self.cfg.max_rounds > 0 {
                 self.cfg.max_rounds
             } else {
-                40
+                dynamic_extended_budget
             };
 
-            // 機制二：第 35 輪逼近天花板主動預警 (Proximity Nag)
-            // 提醒特工在剩餘 5 輪內停止深入調用，完成檔案落盤並主動回報進度，杜絕悶頭苦幹失蹤
-            if round == effective_max_rounds.saturating_sub(5) {
+            if self.cfg.max_rounds == 0 && round >= effective_max_rounds {
+                let is_truly_stuck = identical_call_failures >= 3 || total_consecutive_tool_failures >= 4;
+                let is_absolute_ceiling = round >= 160;
+
+                if !is_truly_stuck && !is_absolute_ceiling && successful_tool_rounds > 0 {
+                    // 真係做緊嘢！自動展期 40 輪，不打擾主理人
+                    dynamic_extended_budget = dynamic_extended_budget.saturating_add(40);
+                    effective_max_rounds = dynamic_extended_budget;
+                    tracing::info!(
+                        session_id = %self.session_id,
+                        round,
+                        new_budget = dynamic_extended_budget,
+                        successful_tool_rounds,
+                        "smart turn budget: active progress detected — auto-extending turn budget by 40 rounds without user interruption"
+                    );
+                }
+            }
+
+            // 機制二：第 35 輪（或逼近當前階梯天花板剩餘 5 輪時）主動落盤預警 (Proximity Nag)
+            // 僅在真的卡死或接近絕對天花板 (160 輪) 剩餘 5 輪時才注入警示
+            if round == effective_max_rounds.saturating_sub(5) && (effective_max_rounds >= 160 || identical_call_failures >= 2 || total_consecutive_tool_failures >= 3) {
                 tracing::info!(
                     session_id = %self.session_id,
                     round,
@@ -613,12 +642,11 @@ impl RunCtx<'_> {
                     "injecting ceiling proximity nag to prompt agent to conclude and report"
                 );
                 self.history.push(HistoryItem::User(format!(
-                    "[系統警示]：您當前任務已推進至第 {round} 輪（上限 {effective_max_rounds} 輪）。請立即在接下來的 3 輪內停止展開新探測，將已完成的實體檔案落盤保存，並調用發話工具向主理人回報目前完成的進度清單！"
+                    "[系統警示]：您當前任務已推進至第 {round} 輪（上限 {effective_max_rounds} 輪）。若已完成任務，請將實體檔案落盤保存並向主理人回報進度！"
                 )));
             }
 
-            // 機制一：第 40 輪撞頂強制造冊回報 (Ceiling Auto-Publish Fallback)
-            // 撞頂時嚴禁靜默退出，強制發布階段性成果與接力指引至討論串，杜絕做到一半失蹤
+            // 機制一：撞頂強制造冊回報 (Ceiling Auto-Publish Fallback)
             if round >= effective_max_rounds {
                 tracing::warn!(
                     session_id = %self.session_id,
@@ -626,10 +654,17 @@ impl RunCtx<'_> {
                     effective_max_rounds,
                     "terminating turn: reached maximum rounds safety ceiling — triggering auto-publish"
                 );
+                let is_stuck = identical_call_failures >= 3 || total_consecutive_tool_failures >= 4;
                 let ceiling_msg_id = format!("{}-ceiling-round-{round}", self.run_id);
-                let ceiling_notice = format!(
-                    "【階段里程碑到達】特工已連續執行 {effective_max_rounds} 回合深度實作任務。為確保系統穩定與記憶體安全，已自動完成階段性進度保存。請主理人檢閱或回覆『繼續』以無縫承接下一階段實作！"
-                );
+                let ceiling_notice = if is_stuck {
+                    format!(
+                        "【任務受阻自動防護】特工偵測到工具調用連續失敗或相同參數重複受阻（已執行第 {round} 輪）。為免無效空轉，已自動保存現場。請主理人檢閱排查後回覆『繼續』以解鎖下一階段！"
+                    )
+                } else {
+                    format!(
+                        "【階段里程碑到達】特工已連續完成 {effective_max_rounds} 回合長程深度實作任務。為確保系統穩定與記憶體安全，已自動完成階段性進度保存。請主理人檢閱或回覆『繼續』以無縫承接下一階段實作！"
+                    )
+                };
                 wire::send(
                     self.wire,
                     wire::session_update(
@@ -648,6 +683,7 @@ impl RunCtx<'_> {
                     reasoning_details: None,
                 });
                 self.try_auto_publish_fallback().await;
+                self.save_checkpoint_if_scoped();
                 return Ok(StopReason::MaxTurnRequests);
             }
             if *self.cancel.borrow() {
@@ -658,20 +694,8 @@ impl RunCtx<'_> {
             // its next request — the turn continues, it is not restarted. Drain
             // non-blocking; an empty queue is the common case.
             self.drain_steers();
-            match self.maybe_handoff(&mut handoff_attempts).await {
-                HandoffOutcome::Cancelled => return Ok(StopReason::Cancelled),
-                // Context was just reset — the prior request's token count no
-                // longer describes the (now much smaller) history. Clear both
-                // the token count and its byte baseline so a stale over-
-                // threshold reading can't immediately re-fire the handoff
-                // before the next response reports fresh usage.
-                HandoffOutcome::Performed => {
-                    *self.last_request_input_tokens = None;
-                    *self.last_request_history_bytes = None;
-                }
-                HandoffOutcome::Skipped => {
-                    truncate_history(self.history, self.cfg.max_history_bytes)
-                }
+            if self.run_preflight_compaction(&mut handoff_attempts).await {
+                return Ok(StopReason::Cancelled);
             }
 
             let mut tools = self.mcp.tools();
@@ -1053,6 +1077,7 @@ impl RunCtx<'_> {
                             *text = SILENT_EARLY_STOP_BREAKER_MSG.to_string();
                         }
                     }
+                    self.save_checkpoint_if_scoped();
                     return Ok(StopReason::EndTurn);
                 }
                 // Only gate genuine end_turn — don't override max_tokens/refusal.
@@ -1061,6 +1086,7 @@ impl RunCtx<'_> {
                         if !buzz_reply_call_seen {
                             self.try_auto_publish_fallback().await;
                         }
+                        self.save_checkpoint_if_scoped();
                         return Ok(stop);
                     }
                     let mut objections = self
@@ -1097,6 +1123,7 @@ impl RunCtx<'_> {
                         self.try_auto_publish_fallback().await;
                     }
                 }
+                self.save_checkpoint_if_scoped();
                 return Ok(stop);
             }
 
@@ -1171,6 +1198,9 @@ impl RunCtx<'_> {
                 total_consecutive_tool_failures = 0;
                 identical_call_failures = 0;
                 last_failed_call = None;
+                if !calls.is_empty() {
+                    successful_tool_rounds = successful_tool_rounds.saturating_add(1);
+                }
             }
 
             let is_identical_loop = identical_call_failures >= MAX_IDENTICAL_TOOL_FAILURES;
@@ -1209,6 +1239,7 @@ impl RunCtx<'_> {
                 });
                 // 無條件兜底發布，確保熔斷原因送入 Buzz 討論串
                 self.try_auto_publish_fallback().await;
+                self.save_checkpoint_if_scoped();
                 return Ok(StopReason::EndTurn);
             }
 
@@ -1409,7 +1440,169 @@ impl RunCtx<'_> {
                     .content
                     .push(ToolResultContent::Text(ERROR_REFLECTION_SUFFIX.to_string()));
             }
+            self.ledger.record_tool_execution(call, &result);
             self.history.push(HistoryItem::ToolResult(result));
+        }
+    }
+
+    /// 執行每回合壓縮閘門（Tier 0 剪枝 → Tier 1 增強交接 → Tier 2 無 LLM 備援）。
+    /// 回傳 `true` 代表使用者在交接過程中主動取消了本回合。
+    async fn run_preflight_compaction(&mut self, handoff_attempts: &mut usize) -> bool {
+        let is_tiered = self.cfg.compaction_mode == crate::config::CompactionMode::Tiered;
+        if is_tiered {
+            let prune_threshold = crate::handoff::token_threshold_for_percent(
+                self.cfg.max_context_tokens,
+                self.cfg.prune_threshold_percent,
+            );
+            if self.projected_handoff_input_tokens() >= prune_threshold {
+                let stats = crate::compaction::prune_old_tool_results(
+                    self.history,
+                    self.cfg.max_context_tokens,
+                    self.cfg.prune_threshold_percent,
+                    self.cfg.prune_target_percent,
+                    self.cfg.tail_budget_percent,
+                    self.cfg.tail_min_rounds,
+                );
+                // 僅當實際剪枝修改了歷史內容時才清零舊用量基準，以免影響未修改小歷史的既有測試語義
+                if stats.pruned_count > 0 {
+                    *self.last_request_input_tokens = None;
+                    *self.last_request_history_bytes = None;
+                }
+            }
+        }
+
+        let handoff_warranted = is_tiered && self.should_handoff();
+        match self.maybe_handoff(handoff_attempts).await {
+            HandoffOutcome::Cancelled => return true,
+            // Context was just reset — clear token count and byte baseline so stale readings
+            // do not immediately re-trigger compaction before fresh provider usage arrives.
+            HandoffOutcome::Performed => {
+                *self.last_request_input_tokens = None;
+                *self.last_request_history_bytes = None;
+                self.save_checkpoint_if_scoped();
+            }
+            HandoffOutcome::Skipped => {
+                if handoff_warranted
+                    && crate::compaction::compact_without_llm(
+                        self.history,
+                        self.ledger,
+                        self.original_task.as_deref(),
+                        self.cfg.max_context_tokens,
+                        self.cfg.prune_threshold_percent,
+                        self.cfg.tail_budget_percent,
+                        self.cfg.tail_min_rounds,
+                    )
+                {
+                    *self.last_request_input_tokens = None;
+                    *self.last_request_history_bytes = None;
+                    self.save_checkpoint_if_scoped();
+                }
+                truncate_history(self.history, self.cfg.max_history_bytes);
+            }
+        }
+        false
+    }
+
+    /// 階段 E：於新建立的空白 Session 首輪嘗試從磁碟解密並還原相同討論串的 Checkpoint。
+    fn restore_checkpoint_if_scoped(&mut self, incoming_user_text: &str) -> bool {
+        if !self.cfg.checkpoint_enabled || !self.history.is_empty() {
+            return false;
+        }
+        let Some(scope) = crate::checkpoint::CheckpointScope::from_prompt_and_system(
+            incoming_user_text,
+            self.system_prompt,
+        ) else {
+            return false;
+        };
+        let store = crate::checkpoint::EncryptedCheckpointStore::from_config(
+            self.cfg,
+            self.system_prompt,
+        );
+        match store.load(&scope.scope_key) {
+            Ok(Some(payload)) => {
+                self.history.extend(payload.history);
+                // 防禦性確保不會遺留未配對 ToolResult 的懸空 Assistant tool_calls
+                while matches!(
+                    self.history.last(),
+                    Some(HistoryItem::Assistant { tool_calls, .. }) if !tool_calls.is_empty()
+                ) {
+                    self.history.pop();
+                }
+                *self.original_task = payload
+                    .original_task
+                    .or_else(|| Some(incoming_user_text.to_owned()));
+                *self.handoff_count = payload.handoff_count;
+                *self.ledger = payload.ledger;
+                let same_tail = matches!(
+                    self.history.last(),
+                    Some(HistoryItem::User(s)) if s == incoming_user_text
+                );
+                tracing::info!(
+                    target: "buzz_agent::checkpoint",
+                    session_id = %self.session_id,
+                    scope_key = %scope.scope_key,
+                    restored_items = self.history.len(),
+                    "restored encrypted session checkpoint from disk"
+                );
+                same_tail
+            }
+            Ok(None) => false,
+            Err(err) => {
+                tracing::warn!(
+                    target: "buzz_agent::checkpoint",
+                    session_id = %self.session_id,
+                    scope_key = %scope.scope_key,
+                    error = %err,
+                    "failed to load encrypted checkpoint; starting fresh"
+                );
+                false
+            }
+        }
+    }
+
+    /// 階段 E：將當前討論串濃縮狀態去敏並以 AES-256-GCM 寫入磁碟（失敗不阻斷回合）。
+    pub(crate) fn save_checkpoint_if_scoped(&self) {
+        if !self.cfg.checkpoint_enabled {
+            return;
+        }
+        let Some(prompt_anchor) = self
+            .original_task
+            .clone()
+            .or_else(|| crate::compaction::find_latest_real_user_prompt(self.history, None))
+        else {
+            return;
+        };
+        let Some(scope) = crate::checkpoint::CheckpointScope::from_prompt_and_system(
+            &prompt_anchor,
+            self.system_prompt,
+        ) else {
+            return;
+        };
+        let store = crate::checkpoint::EncryptedCheckpointStore::from_config(
+            self.cfg,
+            self.system_prompt,
+        );
+        let condensed = crate::checkpoint::compact_history_for_checkpoint(
+            self.history,
+            self.original_task.as_deref(),
+            self.cfg.max_context_tokens,
+            self.cfg.tail_budget_percent,
+            self.cfg.tail_min_rounds,
+        );
+        if let Err(err) = store.save(
+            &scope,
+            self.original_task.clone(),
+            *self.handoff_count,
+            self.ledger.clone(),
+            condensed,
+        ) {
+            tracing::warn!(
+                target: "buzz_agent::checkpoint",
+                session_id = %self.session_id,
+                scope_key = %scope.scope_key,
+                error = %err,
+                "failed to persist encrypted checkpoint"
+            );
         }
     }
 
@@ -1674,15 +1867,12 @@ impl RunCtx<'_> {
             }
         };
 
-        let user_prompt = self.history.iter().rev().find_map(|item| {
-            if let HistoryItem::User(text) = item {
-                Some(text.as_str())
-            } else {
-                None
-            }
-        });
-
-        let (channel_id, maybe_reply_to) = match user_prompt.and_then(extract_reply_target_from_prompt) {
+        // 修 D9：跳過第 35 輪 [系統警示] 與 MAX_TOKENS_RECOVERY_MESSAGE 等合成 User 訊息，
+        // 逆向尋找含有 `<context>` 與 `channel_id` 的真實用戶提問（並於找不到時退回 original_task）。
+        let (channel_id, maybe_reply_to) = match crate::compaction::find_reply_target_in_history(
+            self.history,
+            self.original_task.as_deref(),
+        ) {
             Some(target) => target,
             None => {
                 tracing::warn!(session_id = self.session_id, "auto_publish_fallback: could not extract channel_id from prompt");

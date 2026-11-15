@@ -1,0 +1,76 @@
+# Daily Evolution Workflow (Cron-based)
+# This workflow runs daily at 22:30 Asia/Taipei using the trigger script directly.
+# No webhook server required - runs the trigger script on the relay host.
+#
+# To deploy:
+#   buzz workflows create --channel 5ca019f6-1a27-592a-b015-4baf0eb33572 \
+#     --yaml scripts/daily_evolution/daily_evolution_workflow_cron.yaml
+#
+# Required environment variables (set in relay/workflow secrets):
+#   BUZZ_RELAY_URL, BUZZ_PRIVATE_KEY, BUZZ_AUTH_TAG
+#   BUZZ_CHANNEL_ID (optional, defaults to workflow channel)
+
+name: "Daily Evolution Proposal Generator (Cron)"
+description: "Runs daily at 22:30 Asia/Taipei to analyze conversations and generate optimization proposals for boss approval using the local trigger script"
+trigger:
+  on: schedule
+  cron: "30 22 * * *"  # 22:30 Asia/Taipei daily
+  timezone: "Asia/Taipei"
+  misfire_policy: "run_once"  # If missed, run once when system recovers
+enabled: true
+
+# Workflow parameters
+params:
+  channel_id:
+    type: string
+    default: "5ca019f6-1a27-592a-b015-4baf0eb33572"
+    description: "Channel UUID to analyze"
+  workspace_root:
+    type: string
+    default: "/workspace"
+    description: "Workspace root directory on the relay host"
+
+steps:
+  - id: run_trigger_script
+    name: "Run Daily Evolution Trigger Script"
+    action: run_command
+    command: |
+      cd {{params.workspace_root}}
+      bash scripts/daily-evolution-trigger.sh
+    env:
+      BUZZ_RELAY_URL: "{{secrets.BUZZ_RELAY_URL}}"
+      BUZZ_PRIVATE_KEY: "{{secrets.BUZZ_PRIVATE_KEY}}"
+      BUZZ_AUTH_TAG: "{{secrets.BUZZ_AUTH_TAG}}"
+      BUZZ_CHANNEL_ID: "{{params.channel_id}}"
+    timeout_secs: 300
+    continue_on_error: false
+
+  - id: post_summary
+    name: "Post Proposal Summary to Channel"
+    if: "steps_run_trigger_script_output_success == true"
+    action: send_message
+    text: |
+      {{steps_run_trigger_script_output_summary}}
+    channel: "{{params.channel_id}}"
+    reply_in_thread: false
+
+  - id: post_error
+    name: "Post Error Notification"
+    if: "steps_run_trigger_script_output_success != true"
+    action: send_message
+    text: |
+      ## ❌ Daily Evolution Failed - {{trigger.timestamp}}
+
+      The daily evolution trigger encountered an error:
+
+      ```
+      {{steps_run_trigger_script_output_error}}
+      ```
+
+      Please check the logs and try running manually:
+      `bash scripts/daily-evolution-trigger.sh`
+    channel: "{{params.channel_id}}"
+    reply_in_thread: false
+
+# Manual trigger support (for misfire recovery)
+# To manually trigger: buzz workflow trigger --id <workflow-id>

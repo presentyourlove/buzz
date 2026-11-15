@@ -123,6 +123,7 @@ fn env_output_format(value: Option<&std::ffi::OsStr>) -> OutputFormat {
 #[derive(Parser)]
 #[command(
     name = "buzz",
+    version = env!("CARGO_PKG_VERSION"),
     about = "Buzz CLI — interact with a Buzz relay",
     long_about = "\
 Buzz CLI — interact with a Buzz relay

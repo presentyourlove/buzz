@@ -1,0 +1,32 @@
+[package]
+name = "env-guardian"
+version = "0.1.0"
+edition = "2021"
+authors = ["Pollen"]
+description = "环境变量检查与依赖工具管理技能 - 确保系统环境安全完整，依赖工具正常运行"
+license = "MIT"
+repository = "https://github.com/block/sprout"
+
+[dependencies]
+# Buzz Agent 核心依賴
+buzz-agent = { path = "../../crates/buzz-agent" }
+buzz-core = { path = "../../crates/buzz-core" }
+
+# Rust 標準依賴
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+thiserror = "1.0"
+
+[lib]
+name = "env_guardian"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[profile.dev]
+opt-level = 1
+
+[profile.test]
+opt-level = 1

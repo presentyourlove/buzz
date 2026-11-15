@@ -11,16 +11,18 @@ async fn session(h: &mut Harness) -> String {
             json!({"protocolVersion":1,"clientCapabilities":{}}),
         )
         .await;
-    h.recv_until(|v| v["id"] == id).await;
+    let _init_resp = h.recv_until(|v| v["id"] == id).await;
+    let temp_dir = std::env::temp_dir();
     let id = h
         .send(
             "session/new",
-            json!({"cwd":"/tmp","mcpServers":[{
+            json!({"cwd":temp_dir.to_string_lossy(),"mcpServers":[{
                 "name":"probe", "command":env!("CARGO_BIN_EXE_fake-mcp"), "args":[], "env":[]
             }]}),
         )
         .await;
-    h.recv_until(|v| v["id"] == id).await["result"]["sessionId"]
+    let session_resp = h.recv_until(|v| v["id"] == id).await;
+    session_resp["result"]["sessionId"]
         .as_str()
         .unwrap()
         .to_owned()

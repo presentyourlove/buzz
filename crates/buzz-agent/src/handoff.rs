@@ -1,7 +1,9 @@
 use crate::agent::RunCtx;
+use crate::compaction::clamp_bytes;
 use crate::config::{
-    HANDOFF_MAX_OUTPUT_TOKENS, HANDOFF_MAX_TOOL_NAMES, HANDOFF_MIN_PROMPT_BUDGET_BYTES,
-    HANDOFF_ORIGINAL_TASK_MAX_BYTES, MAX_CONTEXT_RECOVERIES_PER_RUN,
+    CompactionMode, HANDOFF_MAX_OUTPUT_TOKENS, HANDOFF_MAX_TOOL_NAMES,
+    HANDOFF_MIN_PROMPT_BUDGET_BYTES, HANDOFF_ORIGINAL_TASK_MAX_BYTES,
+    LEGACY_HANDOFF_THRESHOLD_PERCENT, MAX_CONTEXT_RECOVERIES_PER_RUN, SNIPPET_ARG_MAX_BYTES,
 };
 use crate::llm::summary_completion_cap;
 use crate::types::{HistoryItem, HistoryItemCache};
@@ -59,7 +61,10 @@ impl RunCtx<'_> {
         }
         if *handoff_attempts >= self.cfg.max_handoffs {
             let projected = self.projected_handoff_input_tokens();
-            let threshold = token_threshold(self.cfg.max_context_tokens);
+            let threshold = token_threshold_for_percent(
+                self.cfg.max_context_tokens,
+                self.effective_handoff_threshold_percent(),
+            );
             tracing::warn!(
                 session_id = self.session_id,
                 reason = "preflight",
@@ -77,6 +82,13 @@ impl RunCtx<'_> {
         // be bypassed by a flaky summarizer.
         *handoff_attempts += 1;
         self.handoff(None).await
+    }
+
+    fn effective_handoff_threshold_percent(&self) -> u64 {
+        match self.cfg.compaction_mode {
+            CompactionMode::Tiered => self.cfg.handoff_threshold_percent,
+            CompactionMode::Legacy => LEGACY_HANDOFF_THRESHOLD_PERCENT,
+        }
     }
 
     /// Handoff forced by a provider context-window rejection, bypassing both
@@ -140,7 +152,7 @@ impl RunCtx<'_> {
                 tracing::error!(
                     "context recovery budget spent ({MAX_CONTEXT_RECOVERIES_PER_RUN} attempts this turn); surfacing provider error"
                 );
-                return ContextRecovery::Exhausted;
+                return self.try_tier3_emergency_fallback(attempts);
             }
             // Shift by `attempts + 1`: the first rung already halves, since
             // rebuilding the rejected size would just fail again.
@@ -153,7 +165,7 @@ impl RunCtx<'_> {
                      the {HANDOFF_MIN_PROMPT_BUDGET_BYTES}-byte floor (history {rejected_bytes} \
                      bytes); surfacing provider error"
                 );
-                return ContextRecovery::Exhausted;
+                return self.try_tier3_emergency_fallback(attempts);
             }
             match self.forced_handoff(budget).await {
                 HandoffOutcome::Performed => return ContextRecovery::Recovered,
@@ -169,6 +181,32 @@ impl RunCtx<'_> {
                 }
             }
         }
+    }
+
+    /// Tier 3 最終確定性保底：當減半階梯皆耗盡且仍有超過 2 項歷史可裁切時，
+    /// 放棄依賴摘要 LLM，縮減至「確定性帳本錨點 + 最後 1 短回合 + 最新用戶提問」再試一次。
+    fn try_tier3_emergency_fallback(&mut self, attempts: &mut u32) -> ContextRecovery {
+        if self.cfg.compaction_mode == CompactionMode::Tiered
+            && *attempts <= MAX_CONTEXT_RECOVERIES_PER_RUN
+            && self.history.len() > 2
+            && crate::compaction::emergency_minimal_compaction(
+                self.history,
+                self.ledger,
+                self.original_task.as_deref(),
+            )
+        {
+            *attempts = MAX_CONTEXT_RECOVERIES_PER_RUN.saturating_add(1);
+            *self.last_request_input_tokens = None;
+            *self.last_request_history_bytes = None;
+            tracing::warn!(
+                target: "buzz_agent::compaction",
+                tier = "tier3_minimal_fallback",
+                remaining_items = self.history.len(),
+                "tier3 emergency deterministic fallback applied after overflow ladder exhaustion"
+            );
+            return ContextRecovery::Recovered;
+        }
+        ContextRecovery::Exhausted
     }
 
     /// The handoff mechanism itself: summarize, reset, re-seat the live prompt.
@@ -197,10 +235,33 @@ impl RunCtx<'_> {
                 }
             },
         };
-        let current_prompt = self.history.iter().rev().find_map(|item| match item {
-            HistoryItem::User(s) => Some(s.clone()),
-            _ => None,
-        });
+        let is_tiered = self.cfg.compaction_mode == CompactionMode::Tiered;
+        let current_prompt = if is_tiered {
+            // 修 D9：跳過第 35 輪警示與截斷恢復等合成 User 訊息，精準錨定真實用戶提問與 <context>。
+            crate::compaction::find_latest_real_user_prompt(
+                self.history,
+                self.original_task.as_deref(),
+            )
+        } else {
+            self.history.iter().rev().find_map(|item| match item {
+                HistoryItem::User(s) => Some(s.clone()),
+                _ => None,
+            })
+        };
+        // 修 D3：在清除歷史之前提取保護區（預設 20% 預算內、對齊完整回合邊界），避免交接後立即失憶。
+        let verbatim_tail = if is_tiered && history_budget_bytes.is_none() {
+            let tail_budget_bytes =
+                usize::try_from(self.cfg.max_context_tokens / 100 * self.cfg.tail_budget_percent)
+                    .unwrap_or(usize::MAX);
+            crate::compaction::extract_verbatim_tail_for_handoff(
+                self.history,
+                tail_budget_bytes,
+                self.cfg.tail_min_rounds,
+                current_prompt.as_deref(),
+            )
+        } else {
+            Vec::new()
+        };
         let prior = self.history.len();
         // Reset history first; the _PostCompact hook is meant to inject
         // state into the FRESH context, not the old one we're discarding.
@@ -220,17 +281,30 @@ impl RunCtx<'_> {
         // Chat/Responses require tool outputs to follow an assistant tool call,
         // but handoff reset intentionally discards the old assistant turn.
         let mut handoff_text = format!("[Context Handoff]\n{summary}");
+        if is_tiered && !self.ledger.is_empty() {
+            // 修 D8：即便特工未手動更新 todo，仍確保工作集帳本跟隨新上下文續存。
+            handoff_text.push_str("\n\n");
+            handoff_text.push_str(&self.ledger.render_markdown());
+        }
         if !post_compact.is_empty() {
             handoff_text.push_str("\n\n[Post-compact hook output — untrusted]\n");
             handoff_text.push_str(&hook_outputs_text(&post_compact));
         }
+        let tail_items = verbatim_tail.len();
         self.history.push(HistoryItem::User(handoff_text));
+        self.history.extend(verbatim_tail);
         if let Some(prompt) = current_prompt {
-            // 防範 Handoff 重播放大死循環：重新注入使用者提問時，提示模型注意審核 Handoff 摘要，
-            // 避免重複調用已完成之發布或寫入動作。
-            let guarded_prompt = format!(
-                "{prompt}\n\n[System Note: Context has been compacted. Review the Context Handoff summary above before taking action. If you have already delivered the final answer or published a reply to the channel, do NOT duplicate previous tool calls. Conclude your turn promptly.]"
-            );
+            // 防範 Handoff 重播放大死循環：Tiered 模式（修 D6）指示模型繼續執行摘要的下一步，
+            // 不再注入誘導半途停手的 "Conclude your turn promptly."；Legacy 模式保留原文字。
+            let guarded_prompt = if is_tiered {
+                format!(
+                    "{prompt}\n\n[System Note: Context has been compacted. Review the Context Handoff summary and Working Set Ledger above before taking action. If the task is not yet complete, continue executing the next step from the summary without repeating already-completed file writes or duplicate channel publishes. Only conclude your turn once all requested work and final reporting are complete.]"
+                )
+            } else {
+                format!(
+                    "{prompt}\n\n[System Note: Context has been compacted. Review the Context Handoff summary above before taking action. If you have already delivered the final answer or published a reply to the channel, do NOT duplicate previous tool calls. Conclude your turn promptly.]"
+                )
+            };
             self.history.push(HistoryItem::User(guarded_prompt));
         }
         *self.handoff_count += 1;
@@ -243,14 +317,25 @@ impl RunCtx<'_> {
             *self.handoff_count,
             self.history.len()
         );
+        if is_tiered {
+            tracing::info!(
+                target: "buzz_agent::compaction",
+                tier = "tier1_handoff",
+                handoff_count = *self.handoff_count,
+                tail_items,
+                ledger_files = self.ledger.files.len(),
+                "tiered context handoff completed"
+            );
+        }
         HandoffOutcome::Performed
     }
 
-    fn should_handoff(&self) -> bool {
+    pub(crate) fn should_handoff(&self) -> bool {
+        let threshold_pct = self.effective_handoff_threshold_percent();
         match *self.last_request_input_tokens {
             Some(_) => {
                 self.projected_handoff_input_tokens()
-                    >= token_threshold(self.cfg.max_context_tokens)
+                    >= token_threshold_for_percent(self.cfg.max_context_tokens, threshold_pct)
             }
             None => {
                 let bytes: usize = if let Some(cache) = self.history_cache.as_deref() {
@@ -268,15 +353,16 @@ impl RunCtx<'_> {
                         .sum()
                 };
                 bytes
-                    > byte_fallback_threshold(
+                    > byte_fallback_threshold_for_percent(
                         self.cfg.max_context_tokens,
                         self.cfg.max_history_bytes,
+                        threshold_pct,
                     )
             }
         }
     }
 
-    fn projected_handoff_input_tokens(&self) -> u64 {
+    pub(crate) fn projected_handoff_input_tokens(&self) -> u64 {
         let current_tokens = estimate_history_tokens(self.history, self.history_cache.as_deref());
         match *self.last_request_input_tokens {
             // Token-first: the provider told us exactly how many input tokens
@@ -347,10 +433,35 @@ impl RunCtx<'_> {
             }
             head.push('\n');
         }
-        let tail = "\n# Instructions\n\
+        let is_tiered = self.cfg.compaction_mode == CompactionMode::Tiered;
+        let prev_summary = if is_tiered {
+            crate::compaction::extract_previous_handoff_summary(self.history)
+        } else {
+            None
+        };
+        if let Some(prev) = &prev_summary {
+            // 修 D1：將前次摘要置於獨立保留區段，永不被後續 iter().rev() 預算裁剪丟棄。
+            head.push_str("\n# Previous Handoff Summary\n");
+            head.push_str(prev);
+            head.push('\n');
+        }
+        if is_tiered && !self.ledger.is_empty() {
+            head.push_str("\n# Working Set Ledger\n");
+            head.push_str(&self.ledger.render_markdown());
+            head.push('\n');
+        }
+        let tail = if prev_summary.is_some() {
+            "\n# Instructions\n\
+             Merge # Session History progress into # Previous Handoff Summary, preserving completed \
+             milestones, key decisions, and touched files. Cover: (1) original task, (2) what was \
+             accomplished, (3) key decisions, (4) what remains, (5) one concrete next step. Be \
+             concise but thorough. Plain text.\n"
+        } else {
+            "\n# Instructions\n\
              Produce a context handoff summary covering: (1) original task, \
              (2) what was accomplished, (3) key decisions, (4) what remains, \
-             (5) one concrete next step. Be concise but thorough. Plain text.\n";
+             (5) one concrete next step. Be concise but thorough. Plain text.\n"
+        };
         let history_header = "\n# Session History (oldest first)\n";
         let fixed_bytes = head.len() + history_header.len() + tail.len();
         // An explicit budget is the allowance for the whole prompt, so subtract
@@ -424,6 +535,10 @@ fn hook_outputs_text(outputs: &[(String, String)]) -> String {
 }
 
 fn push_history_snippet(out: &mut String, item: &HistoryItem) {
+    const TOOL_RESULT_SNIPPET_ELIDE_THRESHOLD: usize = 2048;
+    const TOOL_RESULT_SNIPPET_HEAD_BYTES: usize = 1024;
+    const TOOL_RESULT_SNIPPET_TAIL_BYTES: usize = 512;
+
     match item {
         HistoryItem::User(s) => {
             out.push_str("[user] ");
@@ -440,13 +555,43 @@ fn push_history_snippet(out: &mut String, item: &HistoryItem) {
                 out.push_str(text);
             }
             for c in tool_calls {
-                out.push_str(&format!(" tool:{}", c.name));
+                // 修 D2：在摘要輸入攜帶關鍵參數（如 path / command），避免壓縮後遺忘操作對象。
+                let args = crate::compaction::summarize_tool_args(
+                    &c.name,
+                    &c.arguments,
+                    SNIPPET_ARG_MAX_BYTES,
+                );
+                if args.is_empty() {
+                    out.push_str(&format!(" tool:{}", c.name));
+                } else {
+                    out.push_str(&format!(" tool:{}({})", c.name, args));
+                }
             }
             out.push('\n');
         }
         HistoryItem::ToolResult(r) => {
             out.push_str(if r.is_error { "[tool_err] " } else { "[tool] " });
-            out.push_str(&r.text());
+            let raw = r.text();
+            if raw.len() > TOOL_RESULT_SNIPPET_ELIDE_THRESHOLD {
+                let mut head_end = TOOL_RESULT_SNIPPET_HEAD_BYTES.min(raw.len());
+                while head_end > 0 && !raw.is_char_boundary(head_end) {
+                    head_end -= 1;
+                }
+                let mut tail_start = raw.len().saturating_sub(TOOL_RESULT_SNIPPET_TAIL_BYTES);
+                while tail_start < raw.len() && !raw.is_char_boundary(tail_start) {
+                    tail_start += 1;
+                }
+                if head_end < tail_start {
+                    let omitted = tail_start - head_end;
+                    out.push_str(&raw[..head_end]);
+                    out.push_str(&format!("\n...(omitted {omitted} bytes)...\n"));
+                    out.push_str(&raw[tail_start..]);
+                } else {
+                    out.push_str(&raw);
+                }
+            } else {
+                out.push_str(&raw);
+            }
             out.push('\n');
         }
     }
@@ -472,25 +617,6 @@ fn handoff_prompt_budget_bytes(
         .unwrap_or(usize::MAX)
 }
 
-pub(crate) fn clamp_bytes(s: &str, max_bytes: usize) -> String {
-    if s.len() <= max_bytes {
-        return s.to_owned();
-    }
-    if max_bytes < 4 {
-        let mut cut = max_bytes.min(s.len());
-        while cut > 0 && !s.is_char_boundary(cut) {
-            cut -= 1;
-        }
-        return s[..cut].to_owned();
-    }
-    let target = max_bytes - "…".len();
-    let mut cut = target;
-    while cut > 0 && !s.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    format!("{}…", &s[..cut])
-}
-
 /// Conservative bytes-per-token ratio used when estimating tokens from raw
 /// history bytes. We use 1: a token is always at least one byte, so treating
 /// every byte as a whole token is an unconditional UPPER bound on the true
@@ -500,14 +626,23 @@ pub(crate) fn clamp_bytes(s: &str, max_bytes: usize) -> String {
 /// than risk the next request exceeding the window.
 const CONSERVATIVE_BYTES_PER_TOKEN: u64 = 1;
 
-fn estimate_history_tokens(history: &[HistoryItem], cache: Option<&HistoryItemCache>) -> u64 {
+pub(crate) fn estimate_history_tokens(
+    history: &[HistoryItem],
+    cache: Option<&HistoryItemCache>,
+) -> u64 {
     let total_bytes: usize = if let Some(cache) = cache {
-        history.iter().map(|item| {
-            let (_, pressure) = cache.get_or_compute(item);
-            pressure
-        }).sum()
+        history
+            .iter()
+            .map(|item| {
+                let (_, pressure) = cache.get_or_compute(item);
+                pressure
+            })
+            .sum()
     } else {
-        history.iter().map(HistoryItem::context_pressure_bytes).sum()
+        history
+            .iter()
+            .map(HistoryItem::context_pressure_bytes)
+            .sum()
     };
     estimate_tokens_from_bytes(total_bytes)
 }
@@ -519,31 +654,58 @@ fn estimate_tokens_from_bytes(bytes: usize) -> u64 {
     (bytes as u64).div_ceil(CONSERVATIVE_BYTES_PER_TOKEN)
 }
 
+/// 依百分比計算輸入 Token 交接門檻（Tiered 預設 80%，Legacy 維持 90%）。
+pub(crate) fn token_threshold_for_percent(max_context_tokens: u64, percent: u64) -> u64 {
+    max_context_tokens / 100 * percent
+}
+
 /// Input-token count at which to hand off. Uses 90% of the configured context
 /// window, independent of the request's output allowance. Free function so the
 /// policy math is unit testable without constructing a [`RunCtx`].
+#[cfg(test)]
 fn token_threshold(max_context_tokens: u64) -> u64 {
-    // Integer math: handoff threshold is 90%, i.e. window * 9 / 10.
-    max_context_tokens / 10 * 9
+    token_threshold_for_percent(max_context_tokens, LEGACY_HANDOFF_THRESHOLD_PERCENT)
+}
+
+/// 依百分比計算無先前用量紀錄時的保守位元組回退門檻（Tiered 預設 80%，Legacy 維持 90%）。
+fn byte_fallback_threshold_for_percent(
+    max_context_tokens: u64,
+    max_history_bytes: usize,
+    percent: u64,
+) -> usize {
+    let derived = token_threshold_for_percent(max_context_tokens, percent)
+        .saturating_mul(CONSERVATIVE_BYTES_PER_TOKEN);
+    // 十位數百分比沿用 `/ 10 * (percent / 10)` 整數截斷規則，與現有 byte cap 契約維持完全一致
+    let byte_cap = if percent.is_multiple_of(10) {
+        (max_history_bytes / 10).saturating_mul((percent / 10) as usize)
+    } else {
+        (max_history_bytes / 100).saturating_mul(percent as usize)
+    };
+    usize::try_from(derived).unwrap_or(usize::MAX).min(byte_cap)
 }
 
 /// Conservative byte cap used only before any usage is known. Maps the token
 /// threshold to bytes at the conservative bytes/token ratio (so the cap is
 /// small and the handoff fires early), clamped to the configured byte budget
 /// so it can only ever be more conservative than the old byte-only behavior.
+#[cfg(test)]
 fn byte_fallback_threshold(max_context_tokens: u64, max_history_bytes: usize) -> usize {
-    let derived = token_threshold(max_context_tokens).saturating_mul(CONSERVATIVE_BYTES_PER_TOKEN);
-    let byte_cap = max_history_bytes / 10 * 9;
-    usize::try_from(derived).unwrap_or(usize::MAX).min(byte_cap)
+    byte_fallback_threshold_for_percent(
+        max_context_tokens,
+        max_history_bytes,
+        LEGACY_HANDOFF_THRESHOLD_PERCENT,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         byte_fallback_threshold, estimate_tokens_from_bytes, handoff_prompt_budget_bytes,
-        summary_completion_cap, token_threshold, HANDOFF_SYSTEM_PROMPT,
+        summary_completion_cap, token_threshold, token_threshold_for_percent,
+        HANDOFF_SYSTEM_PROMPT,
     };
     use crate::config::{Provider, HANDOFF_MAX_OUTPUT_TOKENS};
+    use crate::types::HistoryItem;
 
     #[test]
     fn handoff_prompt_budget_reserves_summary_output_and_fixed_prompt() {
@@ -649,5 +811,59 @@ mod tests {
         assert_eq!(estimate_tokens_from_bytes(1), 1);
         assert_eq!(estimate_tokens_from_bytes(4), 4);
         assert_eq!(estimate_tokens_from_bytes(5), 5);
+    }
+
+    #[test]
+    fn token_threshold_for_percent_supports_tiered_and_legacy_modes() {
+        assert_eq!(token_threshold_for_percent(200_000, 80), 160_000);
+        assert_eq!(token_threshold_for_percent(200_000, 90), 180_000);
+        assert_eq!(token_threshold_for_percent(1_000, 80), 800);
+    }
+
+    #[test]
+    fn push_history_snippet_includes_tool_args_and_elides_large_tool_result() {
+        use super::push_history_snippet;
+        use crate::types::{ToolCall, ToolResult, ToolResultContent};
+        use serde_json::{json, Map};
+
+        let mut out = String::new();
+        let assistant = HistoryItem::Assistant {
+            text: "reading".into(),
+            tool_calls: vec![ToolCall {
+                provider_id: "c1".into(),
+                name: "dev__read_file".into(),
+                arguments: json!({"path": "crates/buzz-agent/src/handoff.rs"}),
+                provider_extra: Map::new(),
+            }],
+            reasoning_details: None,
+        };
+        push_history_snippet(&mut out, &assistant);
+        assert!(out.contains(r#"tool:dev__read_file(path="crates/buzz-agent/src/handoff.rs")"#));
+
+        let head_marker = "HEAD-ANCHOR-";
+        let tail_marker = "-TAIL-ANCHOR";
+        let big = format!("{head_marker}{}{tail_marker}", "z".repeat(3000));
+        let mut tr_out = String::new();
+        push_history_snippet(
+            &mut tr_out,
+            &HistoryItem::ToolResult(ToolResult {
+                provider_id: "c1".into(),
+                content: vec![ToolResultContent::Text(big)],
+                is_error: false,
+            }),
+        );
+        assert!(tr_out.contains(head_marker));
+        assert!(tr_out.contains(tail_marker));
+        assert!(tr_out.contains("...(omitted "));
+    }
+
+    #[test]
+    fn extract_previous_handoff_summary_preserves_prior_handoff_for_rolling_merge() {
+        let history = vec![
+            HistoryItem::User("[Context Handoff]\nStep 1 done".into()),
+            HistoryItem::User("next step".into()),
+        ];
+        let prev = crate::compaction::extract_previous_handoff_summary(&history).unwrap();
+        assert!(prev.contains("[Context Handoff]\nStep 1 done"));
     }
 }

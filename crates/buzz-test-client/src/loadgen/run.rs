@@ -2688,11 +2688,16 @@ hold_secs = 1
     #[tokio::test]
     async fn one_slow_publish_in_flight_at_the_stop_is_judged_with_the_last_step() {
         // About 200 typing indicators a second are acknowledged at once until
-        // 1.7s in; from then each OK takes 1.5s, so exactly one is in flight
-        // when the 2s hold ends. On its own, the settlement's p99 would be
+        // the slow window begins; from then each OK takes 1.5s, so exactly one is in flight
+        // when the hold ends. On its own, the settlement's p99 would be
         // that one slow publish; among the step's fast ones it is not.
+        let (hold_secs, slow_start_ms) = if cfg!(windows) {
+            (5, 4700)
+        } else {
+            (2, 1700)
+        };
         let (addr, _) = fake_ws_relay(FakeRelay {
-            slow_ok: Some((Duration::from_millis(1700), Duration::from_millis(1500))),
+            slow_ok: Some((Duration::from_millis(slow_start_ms), Duration::from_millis(1500))),
             ..FakeRelay::PROMPT
         })
         .await;
@@ -2719,7 +2724,7 @@ history_limit = 1
 max_p99_ms = 1000.0
 [[ramp]]
 users = 1.0
-hold_secs = 2
+hold_secs = {hold_secs}
 "#
         ))
         .unwrap();

@@ -153,6 +153,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "antigravity"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "buzz-core",
+ "chrono",
+ "clap",
+ "dashmap 5.5.3",
+ "nostr 0.44.7",
+ "once_cell",
+ "pretty_assertions",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1001,6 +1027,7 @@ dependencies = [
 name = "buzz-agent"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "arc-swap",
  "async-trait",
@@ -1009,7 +1036,7 @@ dependencies = [
  "blake3",
  "chrono",
  "cron",
- "dashmap",
+ "dashmap 6.2.1",
  "deadpool-redis",
  "dirs",
  "fs2",
@@ -1080,7 +1107,7 @@ dependencies = [
  "base64 0.22.1",
  "buzz-core",
  "chrono",
- "dashmap",
+ "dashmap 6.2.1",
  "futures-util",
  "hex",
  "jsonwebtoken",
@@ -1474,7 +1501,7 @@ dependencies = [
  "buzz-workflow",
  "bytes",
  "chrono",
- "dashmap",
+ "dashmap 6.2.1",
  "flate2",
  "futures",
  "futures-util",
@@ -1637,7 +1664,7 @@ dependencies = [
  "buzz-deletion",
  "chrono",
  "cron",
- "dashmap",
+ "dashmap 6.2.1",
  "evalexpr",
  "hex",
  "metrics",
@@ -2483,6 +2510,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "daily-digest-skill"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "buzz-agent",
+ "buzz-core",
+ "chrono",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2592,6 +2634,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b1e3a325bc115f096c8b77bbf027a7c2592230e70be2d985be950d3d5e60ebe"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "dashmap"
+version = "5.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
+dependencies = [
+ "cfg-if 1.0.4",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -2824,6 +2879,12 @@ name = "diatomic-waker"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab03c107fafeb3ee9f5925686dbb7a73bc76e3932abb0d2b365cb64b169cf04c"
+
+[[package]]
+name = "diff"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 
 [[package]]
 name = "diffy"
@@ -3083,6 +3144,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "env-guardian"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "buzz-agent",
+ "buzz-core",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -3799,6 +3874,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea0b22561a9c04a7cb1a302c013e0259cd3b4bb619f145b32f72b8b4bcbed230"
 dependencies = [
  "hashbrown 0.16.1",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a596f1b20ed2cc5ecac41a164aaebc7258057060f06c0cf7a2ba3991ee7990fb"
+dependencies = [
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -7783,6 +7867,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pretty_assertions"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d"
+dependencies = [
+ "diff",
+ "yansi",
+]
+
+[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8114,6 +8208,19 @@ name = "pxfm"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0c5ccf5294c6ccd63a74f1565028353830a9c2f5eb0c682c355c471726a6e3f"
+
+[[package]]
+name = "qa-guard"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "buzz-agent",
+ "buzz-core",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "quanta"
@@ -8861,6 +8968,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsqlite-vfs"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c51c9ae4df8a7fba42103df5c621fa3c37eccf3a3c650879e90fc48b11cc192c"
+dependencies = [
+ "hashbrown 0.16.1",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rtoolbox"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8879,8 +8996,11 @@ dependencies = [
  "bitflags 2.13.0",
  "fallible-iterator",
  "fallible-streaming-iterator",
+ "hashlink 0.12.2",
  "libsqlite3-sys",
+ "serde_json",
  "smallvec",
+ "sqlite-wasm-rs",
 ]
 
 [[package]]
@@ -10015,6 +10135,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqlite-wasm-rs"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc3efc0da82635d7e1ced0053bbbfa8c7ab9645d0bf36ceb4f7127bb85315d75"
+dependencies = [
+ "cc",
+ "js-sys",
+ "rsqlite-vfs",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "sqlx"
 version = "0.9.0"
 source = "git+https://github.com/launchbadge/sqlx?rev=c3735abf034689bb1fab9d7bf9f040e492de28cf#c3735abf034689bb1fab9d7bf9f040e492de28cf"
@@ -10044,7 +10176,7 @@ dependencies = [
  "futures-io",
  "futures-util",
  "hashbrown 0.16.1",
- "hashlink",
+ "hashlink 0.11.0",
  "indexmap 2.14.0",
  "log",
  "memchr",
@@ -11612,6 +11744,7 @@ dependencies = [
  "atomic",
  "getrandom 0.4.3",
  "js-sys",
+ "rand 0.10.1",
  "serde_core",
  "wasm-bindgen",
 ]
@@ -12693,6 +12826,12 @@ name = "xxhash-rust"
 version = "0.8.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
+
+[[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yasna"

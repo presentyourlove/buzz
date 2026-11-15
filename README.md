@@ -874,6 +874,46 @@ just reset          # ⚠️  Wipe data + recreate
   - 全套單元測試 37 項（含子特工、安全門禁、迴歸測試）：100% 全部 Verified PASS。
   - `CodebaseVerifier` 23 項核心特性：100% 全部通過。
 
+### Phase 21: Buzz 自治事實查核與雙重驗證能力賦能 (Fact-Check & Dual-Verification Empowerment)
+- **核心升級亮點 (Core Highlights)**：
+  - **解除 MCP 路由寫死限制**：修正 `runtime.rs` 與 `spawn_snapshot.rs`，優先讀取 Agent 個別指定之 `mcp_command`，終結過去被強制回退至基本 `buzz-dev-mcp` 的瓶頸。
+  - **無損雙層中繼架構部署**：將原生 `buzz-dev-mcp.exe` 封裝為底層實體 `buzz-dev-mcp.real.exe`，以 `buzz-composite-mcp` 作為第一線入口，全面暴露 13 項工具（既有本機檔案/終端工具 + `web_search` / `web_fetch` / `fact_check`）。
+  - **Fizz、Honey2 與 Pollen 行為鐵律注入**：於 `managed-agents.json` 注入【事實查核與聯網搜尋唯一行動鐵律】，明令面對即時事實/規格問題時立即調用搜尋工具並即刻回覆，徹底杜絕嘗試在本地撰寫專案代碼或系統計畫書的死循環。
+- **檔案變更清單 (File Inventory)**：
+  - **修改 (Modified)**：
+    - `desktop/src-tauri/src/managed_agents/runtime.rs`
+    - `desktop/src-tauri/src/managed_agents/spawn_snapshot.rs`
+    - `C:\私人\tools\buzz-composite-mcp.mjs`
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json`
+    - `C:\Users\user\AppData\Local\Buzz\buzz-dev-mcp.exe`
+  - **新增 (Added)**：
+    - `C:\Users\user\AppData\Local\Buzz\buzz-dev-mcp.real.exe`
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json.bak_20261115_fact_check_composite`
+- **測試驗證 (Testing & QA)**：
+  - `buzz-dev-mcp.exe` JSON-RPC `tools/list` 檢測：13 項工具 100% 成功註冊。
+  - `web_search` 實時檢索驗證：精準獲取「iPhone 18 Pro 港澳版 eSIM」真實規格。
+  - `web_fetch` 權威抓取驗證：Apple 香港官方支援頁面（Markdown）解析成功。
+
+### Phase 22: Buzz 官方最新版本無損升級與自研智慧續航核心融合 (Lossless Upgrade & Smart Turns Integration)
+- **核心升級亮點 (Core Highlights)**：
+  - **官方最新版本無損覆蓋升級**：安全終止背景 40+ 佔用進程並建立全量鏡像快照（`Buzz_backup_20261115_1311`），精準覆蓋安裝至 `C:\Users\user\AppData\Local\Buzz`，完美承接桌面捷徑、開機啟動與 `%APPDATA%\xyz.block.buzz.app\agents\managed-agents.json`，配置與記憶 100% 零遺失。
+  - **40 輪智慧工作續航 (Smart Turns)**：重構 `crates/buzz-agent/src/agent.rs`，加入實質工作動態展期機制；特工在正常產出/編輯檔案時，超過 40 輪自動展期免主理人手動點擊批准，徹底終結長任務被頻繁中斷之痛點；唯有死循環（連續相同失敗 3 次或工具失敗 4 次）時精準熔斷求助。
+  - **專案產出收攏與自研 MCP Shim 保全**：所有產出路徑（`PLANS`、`REPORTS`、`OUTBOX`）統一收攏至 `C:\私人\ai agent\buzz\`；官方升級後自動還原自研 `buzz-dev-mcp` Shim，持續提供 Windows CP950 亂碼自動糾錯與 13 項複合工具。
+- **檔案變更清單 (File Inventory)**：
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/agent.rs` (實質工具進展檢測與動態 40 輪展期)
+    - `C:\Users\user\AppData\Local\Buzz\buzz-agent.exe` (升級為 33.9 MB 自研增強核心)
+    - `C:\Users\user\AppData\Local\Buzz\buzz-dev-mcp.exe` (還原複合 Shim)
+    - `c:\私人\ai agent\block-buzz.md` (增設第三十二章)
+    - `c:\私人\ai agent\buzz\README.md` (增設 Phase 22 成果記錄)
+  - **新增 (Added)**：
+    - `C:\Users\user\AppData\Local\Buzz_backup_20261115_1311\` (全量快照備份)
+    - `C:\Users\user\AppData\Local\Buzz\buzz-agent.official.exe` (官方原生核心備份)
+    - `C:\Users\user\AppData\Local\Buzz\buzz-dev-mcp.official.exe` (官方原生工具備份)
+- **測試驗證 (Testing & QA)**：
+  - 二進位檔完整性測試：`buzz-agent.exe` 執行環境變數校驗與引數測試 100% 正常。
+  - 目錄與捷徑映射測試：桌面 `Buzz.lnk` 與 `managed-agents.json` 驗證 100% 無損。
+
 ---
 
 <p align="center">

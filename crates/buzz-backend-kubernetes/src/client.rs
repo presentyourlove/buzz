@@ -48,7 +48,7 @@ fn prepend_plugin_path() {
 
 /// Is `command` runnable — an executable on `PATH`, or an existing path?
 fn resolves_on_path(command: &str) -> bool {
-    if command.contains(std::path::MAIN_SEPARATOR) {
+    if command.contains(std::path::MAIN_SEPARATOR) || command.contains('/') {
         return Path::new(command).is_file();
     }
     std::env::var_os("PATH")
@@ -132,9 +132,10 @@ mod tests {
     /// race every other test in the binary.
     #[test]
     fn plugin_directories_are_prepended_in_order() {
+        let inherited = std::env::join_paths(["/inherited/bin", "/usr/bin"]).unwrap();
         let joined = prepended_path(
             Some(Path::new("/tmp/fake-home")),
-            std::ffi::OsStr::new("/inherited/bin:/usr/bin"),
+            &inherited,
         )
         .unwrap();
         let dirs: Vec<PathBuf> = std::env::split_paths(&joined).collect();
@@ -176,7 +177,12 @@ mod tests {
 
     #[test]
     fn resolves_absolute_paths_directly() {
+        #[cfg(unix)]
         assert!(resolves_on_path("/bin/sh"));
+        #[cfg(windows)]
+        assert!(resolves_on_path(
+            std::env::current_exe().unwrap().to_str().unwrap()
+        ));
         assert!(!resolves_on_path("/nonexistent/plugin-binary"));
     }
 }

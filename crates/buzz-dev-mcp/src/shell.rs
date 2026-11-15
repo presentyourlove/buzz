@@ -116,6 +116,36 @@ fn detect_stack(cwd: &Path) -> String {
     }
 }
 
+/// 寬鬆反序列化 `Option<u64>`：允許模型誤傳字串數字（如 `"300000"`）或空字串，防止長任務超時參數觸發 JSON 反序列化失敗。
+fn deserialize_optional_u64_lenient<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let val: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match val {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => n
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| D::Error::custom("expected non-negative integer for timeout_ms")),
+        Some(serde_json::Value::String(s)) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                trimmed
+                    .parse::<u64>()
+                    .map(Some)
+                    .map_err(|e| D::Error::custom(format!("invalid timeout_ms string '{trimmed}': {e}")))
+            }
+        }
+        Some(other) => Err(D::Error::custom(format!(
+            "expected integer or string for timeout_ms, got {other}"
+        ))),
+    }
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ShellParams {
     pub command: String,
@@ -123,7 +153,7 @@ pub struct ShellParams {
     pub workdir: Option<String>,
     /// Defaults to 120000 ms (2 min) if omitted; capped at 1,200,000 ms (20 min).
     /// For long-running commands (git push with hooks, cargo build, test suites), use 300000+.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_u64_lenient")]
     pub timeout_ms: Option<u64>,
 }
 
@@ -981,6 +1011,9 @@ fn rotate_artifacts(state: &SharedState, new_path: PathBuf) {
 }
 
 #[cfg(test)]
+pub(super) static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::shim::Shim;
@@ -1012,6 +1045,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn basic_echo() {
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
         let dir = tempdir().expect("tempdir");
         let state = make_state(dir.path());
         let r = run(
@@ -1035,6 +1069,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn timeout_fires() {
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
         let dir = tempdir().expect("tempdir");
         let state = make_state(dir.path());
         let r = run(
@@ -1060,6 +1095,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn workdir_is_honored() {
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
         let dir = tempdir().expect("tempdir");
         let sub = dir.path().join("sub");
         std::fs::create_dir(&sub).expect("mkdir sub");
@@ -1150,13 +1186,7 @@ mod tests {
 mod windows_resolver_tests {
     use super::*;
     use std::env;
-    use std::sync::Mutex;
     use tempfile::tempdir;
-
-    // Process-global env mutation guard: tests that mutate BUZZ_SHELL,
-    // SystemRoot, or GIT_BASH must hold this lock for the duration of the
-    // test so parallel test threads cannot race on these env vars.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     fn touch(path: &Path) {
         if let Some(parent) = path.parent() {
@@ -1509,5 +1539,38 @@ mod windows_resolver_tests {
             found.is_none(),
             "alias-only PATH must return None, not the WSL launcher"
         );
+    }
+
+    #[test]
+    fn shell_params_timeout_ms_accepts_string_and_integer() {
+        let from_str: ShellParams = serde_json::from_str(
+            r#"{"command": "cargo test", "timeout_ms": "300000"}"#,
+        )
+        .expect("string timeout_ms should deserialize");
+        assert_eq!(from_str.timeout_ms, Some(300_000));
+
+        let from_int: ShellParams =
+            serde_json::from_str(r#"{"command": "cargo test", "timeout_ms": 300000}"#)
+                .expect("integer timeout_ms should deserialize");
+        assert_eq!(from_int.timeout_ms, Some(300_000));
+
+        let from_empty: ShellParams =
+            serde_json::from_str(r#"{"command": "echo ok", "timeout_ms": "  "}"#)
+                .expect("blank timeout_ms should deserialize to None");
+        assert_eq!(from_empty.timeout_ms, None);
+
+        let from_null: ShellParams =
+            serde_json::from_str(r#"{"command": "echo ok", "timeout_ms": null}"#)
+                .expect("null timeout_ms should deserialize to None");
+        assert_eq!(from_null.timeout_ms, None);
+
+        let from_omitted: ShellParams = serde_json::from_str(r#"{"command": "echo ok"}"#)
+            .expect("omitted timeout_ms should deserialize to None");
+        assert_eq!(from_omitted.timeout_ms, None);
+
+        let invalid = serde_json::from_str::<ShellParams>(
+            r#"{"command": "echo ok", "timeout_ms": "not-a-number"}"#,
+        );
+        assert!(invalid.is_err(), "non-numeric string must fail deserialization");
     }
 }

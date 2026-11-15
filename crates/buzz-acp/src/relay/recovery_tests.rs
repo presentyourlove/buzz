@@ -340,6 +340,7 @@ async fn advance_clock(duration: Duration) {
     tokio::time::resume();
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn blocked_recovery_write_is_bounded_and_retains_loss() {
     let (mut client, _stalled_server) = test_ws_pair().await;

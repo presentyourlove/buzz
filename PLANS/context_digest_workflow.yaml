@@ -1,0 +1,64 @@
+name: "Context Digestion Gateway Phase 1"
+description: "每則訊息觸發，經由 webhook 呼叫 Gemini 進行上下文摘要，並發布至 #context-digest 頻道"
+trigger:
+  on: message_posted
+  filter: "str_len(trigger_text) > 10"
+steps:
+  - id: fetch_recent
+    name: "取得最近 50 條頻道歷史"
+    action: call_webhook
+    url: "http://localhost:8080/internal/search"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+    body: |
+      {
+        "channel": "{{trigger.channel_id}}",
+        "limit": 50
+      }
+    timeout_secs: 10
+
+  - id: digest
+    name: "呼叫 Gemini API 進行摘要化"
+    action: call_webhook
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+      x-goog-api-key: "{{secrets.GEMINI_API_KEY}}"
+    body: |
+      {
+        "contents": [{
+          "parts": [{"text": "請將以下對話濃縮為 200 字內摘要，並列出關鍵決策點：\n{{steps_fetch_recent_output_body}}"}]
+        }]
+      }
+    timeout_secs: 30
+
+  - id: embed_vector
+    name: "呼叫 Gemini API 產出語意向量"
+    action: call_webhook
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2-preview:embedContent"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+      x-goog-api-key: "{{secrets.GEMINI_API_KEY}}"
+    body: |
+      {
+        "model": "models/gemini-embedding-2-preview",
+        "content": {
+          "parts": [{"text": "{{steps_digest_output_body}}"}]
+        }
+      }
+    timeout_secs: 30
+
+  - id: publish_digest
+    name: "發布消化結果到 #context-digest 頻道"
+    action: send_message
+    channel: "45b288c1-a648-4c90-81c0-f679f0cc0a92"
+    text: |
+      📋 **Context Digest** `{{trigger.timestamp}}`
+      **Channel ID**: `{{trigger.channel_id}}`
+      **Trigger**: {{trigger.text}}
+      ---
+      {{steps_digest_output_body}}
+    reply_in_thread: false

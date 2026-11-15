@@ -1,0 +1,31 @@
+[package]
+name = "qa-guard"
+version = "0.1.0"
+edition = "2021"
+authors = ["Pollen"]
+description = "Patch validation, code quality checking, and cargo compliance verification with detailed reporting"
+license = "Apache-2.0"
+repository = "https://github.com/block/sprout"
+
+[dependencies]
+# Buzz Agent 核心依賴
+buzz-agent = { path = "../../crates/buzz-agent" }
+buzz-core = { path = "../../crates/buzz-core" }
+
+# Rust 標準依賴
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+
+[lib]
+name = "qa_guard"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[profile.dev]
+opt-level = 1
+
+[profile.test]
+opt-level = 1

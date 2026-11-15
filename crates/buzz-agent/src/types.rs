@@ -61,7 +61,7 @@ impl ToolResultContent {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum HistoryItem {
     User(String),
     Assistant {
@@ -272,7 +272,7 @@ impl HistoryItemCache {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolCall {
     pub provider_id: String,
     pub name: String,
@@ -290,7 +290,7 @@ pub struct ToolCall {
     pub provider_extra: Map<String, Value>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolResult {
     pub provider_id: String,
     pub content: Vec<ToolResultContent>,

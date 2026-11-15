@@ -96,6 +96,9 @@ blake3 = "1"
 # Nostr protocol support for Health Guardian alerts
 nostr = { workspace = true }
 
+# 階段 E：跨進程持久化 Checkpoint 之 AES-256-GCM 靜態認證加密（使用工作區快取既有關聯版本以支援離線編譯）
+aes-gcm = "0.10.3"
+
 # Error handling
 anyhow = { workspace = true }
 

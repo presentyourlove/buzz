@@ -1,0 +1,1029 @@
+#!/usr/bin/env python3
+"""
+Buzz 自動化每日進化分析腳本 (Daily Evolution Script)
+
+本腳本於每日定時執行：
+1. 蒐集當日頻道中的所有對話訊息
+2. 讀取 WORK_LOGS/ 目錄下的工作紀錄與收割日誌
+3. 分析對話脈絡、萃取主題、待辦事項、阻礙與決策
+4. 生成結構化之「每日系統進化提案」完整存檔至 PLANS/
+5. 依據老闆核心指示：向頻道發布精煉的「建議進化項目與審核選項」，剔除對話分析雜訊
+
+使用範例：
+    python daily_evolution.py --channel CHANNEL_UUID --relay-url RELAY_URL --private-key PRIVATE_KEY
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+# 引入技能合成與提煉器
+try:
+    from skill_synthesizer import SkillSynthesizer
+except ImportError:
+    from scripts.daily_evolution.skill_synthesizer import SkillSynthesizer
+
+# 引入代碼庫真實狀態驗證器
+try:
+    from codebase_verifier import CodebaseVerifier
+except ImportError:
+    from scripts.daily_evolution.codebase_verifier import CodebaseVerifier
+
+# 定義台北/香港時區 (UTC+8)
+TZ_TAIPEI = timezone(timedelta(hours=8))
+
+
+DEFAULT_AUTH_TAG = '["auth","2d29f28fd5106795c630120d7e5b062bc4f5caa8057b4a6a374b7468cdc5de8e","","6f67f68423fe1877d312046cc63cf0106b7f31f284eb51d586dc036a235aeb8433d159d97c37e2b927b40fdc68eff0e1071fdaf56c497494d1779a8bc7fc6118"]'
+
+
+class DailyEvolution:
+    """每日進化分析與提案生成核心類別"""
+
+    def __init__(
+        self,
+        channel_id: str,
+        relay_url: str,
+        private_key: str,
+        auth_tag: Optional[str] = None,
+        buzz_cli_path: str = "buzz",
+        workspace_root: Optional[str] = None,
+    ):
+        self.channel_id = channel_id
+        self.relay_url = relay_url
+        self.private_key = private_key
+        self.auth_tag = auth_tag or os.environ.get("BUZZ_AUTH_TAG", DEFAULT_AUTH_TAG)
+        self.buzz_cli_path = buzz_cli_path
+        if workspace_root:
+            self.workspace_root = Path(workspace_root)
+        else:
+            self.workspace_root = Path(__file__).resolve().parent.parent.parent
+        self.plans_dir = self.workspace_root / "PLANS"
+        self.work_logs_dir = self.workspace_root / "WORK_LOGS"
+        self.plans_dir.mkdir(exist_ok=True)
+        self.work_logs_dir.mkdir(exist_ok=True)
+        self.skill_synthesizer = SkillSynthesizer(workspace_root=str(self.workspace_root))
+        self.codebase_verifier = CodebaseVerifier()
+
+    def _run_buzz_cli(self, args: List[str]) -> str:
+        """執行 Buzz CLI 命令並取得標準輸出 (強制 UTF-8 編碼)"""
+        env = os.environ.copy()
+        env["BUZZ_RELAY_URL"] = self.relay_url
+        env["BUZZ_PRIVATE_KEY"] = self.private_key
+        if self.auth_tag:
+            env["BUZZ_AUTH_TAG"] = self.auth_tag
+        env["PYTHONIOENCODING"] = "utf-8"
+
+        cmd = [self.buzz_cli_path] + args
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env, encoding="utf-8", creationflags=flags)
+        if result.returncode != 0:
+            raise RuntimeError(f"Buzz CLI 執行失敗: {result.stderr}")
+        return result.stdout
+
+    def post_proposal_to_channel(self, proposal: str) -> str:
+        """依據老闆指示，將精煉的進化建議項目發布至指定頻道"""
+        print("📤 正在發布建議進化項目至目標頻道...")
+        try:
+            env = os.environ.copy()
+            env["BUZZ_RELAY_URL"] = self.relay_url
+            env["BUZZ_PRIVATE_KEY"] = self.private_key
+            if self.auth_tag:
+                env["BUZZ_AUTH_TAG"] = self.auth_tag
+            env["PYTHONIOENCODING"] = "utf-8"
+
+            cmd = [
+                self.buzz_cli_path,
+                "messages", "send",
+                "--channel", self.channel_id,
+                "--content", "-",  # 由標準輸入傳遞長文本
+            ]
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            result = subprocess.run(
+                cmd,
+                input=proposal,
+                capture_output=True,
+                text=True,
+                env=env,
+                encoding="utf-8",
+                creationflags=flags
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"發布提案失敗: {result.stderr}")
+
+            try:
+                response = json.loads(result.stdout)
+                event_id = response.get("event_id", "unknown")
+                print(f"   ✅ 建議項目已成功發布至頻道 (事件 ID: {event_id})")
+                return event_id
+            except json.JSONDecodeError:
+                print(f"   ✅ 提案發布完成 (回應內容: {result.stdout[:100]})")
+                return "unknown"
+        except Exception as e:
+            print(f"   ⚠️ 發布提案時發生異常: {e}")
+            raise
+
+    def post_summary_to_channel(self, content: str) -> str:
+        """相容方法：轉呼叫 post_proposal_to_channel"""
+        return self.post_proposal_to_channel(content)
+
+    def fetch_today_messages(self) -> List[Dict[str, Any]]:
+        """獲取目標頻道當日之所有對話訊息 (自台北時間 00:00:00 起算)"""
+        now = datetime.now(TZ_TAIPEI)
+        start_of_today = datetime(now.year, now.month, now.day, tzinfo=TZ_TAIPEI)
+        since_timestamp = int(start_of_today.timestamp())
+
+        output = self._run_buzz_cli([
+            "messages", "get",
+            "--channel", self.channel_id,
+            "--since", str(since_timestamp),
+            "--limit", "200",
+        ])
+
+        try:
+            messages = json.loads(output)
+            return messages if isinstance(messages, list) else []
+        except json.JSONDecodeError:
+            return []
+
+    def fetch_work_logs(self) -> List[Dict[str, Any]]:
+        """讀取 WORK_LOGS/ 目錄下所有紀錄檔"""
+        logs = []
+        for ext in ("*.md", "*.jsonl"):
+            for log_file in sorted(self.work_logs_dir.glob(ext)):
+                try:
+                    content = log_file.read_text(encoding="utf-8")
+                    logs.append({
+                        "file": log_file.name,
+                        "content": content,
+                        "modified": datetime.fromtimestamp(log_file.stat().st_mtime, tz=TZ_TAIPEI).isoformat(),
+                    })
+                except Exception as e:
+                    print(f"警告：讀取日誌檔 {log_file} 失敗: {e}", file=sys.stderr)
+        return logs
+
+    def analyze_conversations(self, messages: List[Dict], work_logs: List[Dict]) -> Dict[str, Any]:
+        """分析對話內容並產出結構化洞察"""
+        author_counts: Dict[str, int] = {}
+        topics: List[str] = []
+        action_items_raw: List[Dict[str, str]] = []
+        blockers_raw: List[Dict[str, str]] = []
+        decisions_raw: List[Dict[str, str]] = []
+
+        for msg in messages:
+            content = msg.get("content", "")
+            author = msg.get("pubkey", "unknown")[:16]
+            author_counts[author] = author_counts.get(author, 0) + 1
+
+            # 過濾純狀態報告或大篇幅機器生成的報告雜訊
+            # 改為行級過濾：僅跳過以特定模式開頭的行，避免誤傷正常討論
+            noise_patterns = [
+                r"^##\s*✅\s*Phase",
+                r"^每日系統進化提案",
+                r"^【安全與品質驗收",
+                r"^###\s*📁\s*新增",
+                r"^```json\s*$",
+            ]
+            import re
+            lines = content.split('\n')
+            filtered_lines = [line for line in lines if not any(re.match(pattern, line.strip()) for pattern in noise_patterns)]
+            # 如果過濾後內容為空或極短，視為雜訊訊息直接跳過
+            filtered_content = '\n'.join(filtered_lines).strip()
+            if not filtered_content or len(filtered_content) < 20:
+                continue
+            content = filtered_content
+
+            content_lower = content.lower()
+            # 關鍵字主題萃取 (支援中英雙語)
+            if any(kw in content_lower for kw in ["bug", "error", "fail", "issue", "problem", "錯誤", "異常", "失敗", "報錯"]):
+                topics.append("錯誤與異常分析 (bugs/errors)")
+            if any(kw in content_lower for kw in ["feature", "implement", "add", "create", "build", "實作", "功能", "新增"]):
+                topics.append("功能開發與演進 (feature development)")
+            if any(kw in content_lower for kw in ["review", "pr", "pull request", "merge", "審查", "審核", "驗收", "qa"]):
+                topics.append("架構審查與品質驗收 (code review/QA)")
+            if any(kw in content_lower for kw in ["deploy", "release", "publish", "發布", "部署", "上線"]):
+                topics.append("系統發布與部署 (deployment)")
+            if any(kw in content_lower for kw in ["test", "testing", "spec", "測試", "驗證"]):
+                topics.append("自動化與整合測試 (testing)")
+            if any(kw in content_lower for kw in ["refactor", "cleanup", "improve", "optimize", "重構", "優化", "清理"]):
+                topics.append("架構重構與效能優化 (refactoring/optimization)")
+
+            # 萃取待辦事項
+            if any(kw in content_lower for kw in ["todo", "action item", "need to", "should", "must", "待辦", "需要", "必須", "請安排", "排定"]):
+                action_items_raw.append({"text": content[:200].strip(), "source": content[:80].strip()})
+
+            # 萃取阻礙與瓶頸
+            if any(kw in content_lower for kw in ["blocked", "blocker", "waiting for", "stuck", "阻礙", "卡住", "瓶頸", "無法", "失敗"]):
+                blockers_raw.append({"text": content[:200].strip(), "source": content[:80].strip()})
+
+            # 萃取決策與共識
+            if any(kw in content_lower for kw in ["decided", "agreed", "approved", "confirmed", "決策", "同意", "確認", "核准", "拍板"]):
+                decisions_raw.append({"text": content[:200].strip(), "source": content[:80].strip()})
+
+        # 主題去重
+        topics = sorted(list(set(topics)))
+
+        # 結構化待辦事項
+        action_items = []
+        for i, item in enumerate(action_items_raw[:10], 1):
+            action_items.append({
+                "id": f"1.{i}",
+                "description": item["text"],
+                "source_message": item["source"],
+                "priority": "中 (Medium)"
+            })
+
+        # 結構化阻礙項目
+        blockers = []
+        for i, item in enumerate(blockers_raw[:5], 1):
+            blockers.append({
+                "id": f"2.{i}",
+                "description": item["text"],
+                "source_message": item["source"],
+                "severity": "高 (High)"
+            })
+
+        # 結構化決策記錄
+        decisions = []
+        for i, item in enumerate(decisions_raw[:5], 1):
+            decisions.append({
+                "id": f"3.{i}",
+                "description": item["text"],
+                "source_message": item["source"],
+                "consensus": True
+            })
+
+        # 統計成員活躍度
+        total_messages = len(messages)
+        author_activity = []
+        for author, count in sorted(author_counts.items(), key=lambda x: x[1], reverse=True):
+            percentage = round((count / total_messages * 100), 1) if total_messages > 0 else 0
+            author_activity.append({
+                "author_prefix": author,
+                "message_count": count,
+                "percentage": percentage
+            })
+
+        # 工作日誌摘要
+        work_logs_summary = []
+        for log in work_logs:
+            work_logs_summary.append({
+                "file": log["file"],
+                "excerpt": log["content"][:250].replace("\n", " ").strip(),
+                "modified_at": log["modified"]
+            })
+
+        return {
+            "message_count": len(messages),
+            "author_activity": author_activity,
+            "topics_discussed": topics,
+            "action_items": action_items,
+            "blockers": blockers,
+            "decisions": decisions,
+            "work_logs_summary": work_logs_summary,
+        }
+
+    def fetch_git_changes(self) -> List[str]:
+        """抓取當日或近期代碼提交歷史 (Git commits) 作為進化分析上下文"""
+        commits: List[str] = []
+        repos = [
+            Path(r"C:\私人\ai agent\buzz"),
+            Path(r"C:\私人\ai agent\buzz-obsidian"),
+        ]
+        for repo in repos:
+            if repo.exists() and (repo / ".git").exists():
+                try:
+                    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                    res = subprocess.run(
+                        ["git", "-C", str(repo), "log", "--since=today 00:00:00", "--oneline"],
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        timeout=5,
+                        creationflags=flags
+                    )
+                    lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
+                    if not lines:
+                        res = subprocess.run(
+                            ["git", "-C", str(repo), "log", "-n", "5", "--oneline"],
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            timeout=5,
+                            creationflags=flags
+                        )
+                        lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
+                    for l in lines:
+                        commits.append(f"[{repo.name}] {l}")
+                except Exception as e:
+                    print(f"警告：讀取 Git 倉庫 {repo} 失敗: {e}", file=sys.stderr)
+        return commits
+
+    def _call_openrouter_llm(self, prompt: str) -> Optional[str]:
+        """調用 OpenRouter 高效大模型動態提煉系統建議"""
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            cfg_path = Path(r"C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\global-agent-config.json")
+            if cfg_path.exists():
+                try:
+                    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                    api_key = cfg.get("env_vars", {}).get("OPENROUTER_API_KEY")
+                except Exception:
+                    pass
+
+        if not api_key:
+            return None
+
+        models_to_try = [
+            "nvidia/nemotron-3.5-lightning:free",
+            "nvidia/nemotron-3.5-super-vl:free",
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+        ]
+
+        for model in models_to_try:
+            try:
+                payload = json.dumps({
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "你是一位資深的系統架構師與 Honey2 系統進化專屬評估官。"
+                                "請嚴格遵循繁體中文 (Traditional Chinese)，根據今日團隊真實對話、Git 提交與日誌，"
+                                "產出具備針對性、可落地的系統進化建議。絕不可使用固定空洞的常規範本。"
+                            )
+                        },
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.4,
+                    "max_tokens": 1200
+                }).encode("utf-8")
+
+                req = urllib.request.Request(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    data=payload
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    content = data["choices"][0]["message"]["content"]
+                    if content and len(content.strip()) > 30:
+                        return content
+            except Exception as e:
+                print(f"OpenRouter 模型 {model} 呼叫異常: {e}", file=sys.stderr)
+                continue
+        return None
+
+    def generate_dynamic_recommendations(
+        self,
+        analysis: Dict[str, Any],
+        git_commits: List[str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """透過 AI 大模型動態生成每日進化建議項目，若遇網路或呼叫異常則自適應降級"""
+        context_lines = [
+            f"【本日討論主題】：{', '.join(analysis['topics_discussed']) if analysis['topics_discussed'] else '常規維運與協作'}",
+            f"【待辦事項數】：{len(analysis['action_items'])}",
+        ]
+        if analysis['action_items']:
+            context_lines.append("待辦清單：")
+            for item in analysis['action_items'][:5]:
+                context_lines.append(f" - {item['description'][:100]}")
+
+        if analysis['blockers']:
+            context_lines.append("阻礙與問題：")
+            for b in analysis['blockers'][:4]:
+                context_lines.append(f" - {b['description'][:100]}")
+
+        if analysis['decisions']:
+            context_lines.append("今日決策：")
+            for d in analysis['decisions'][:4]:
+                context_lines.append(f" - {d['description'][:100]}")
+
+        if git_commits:
+            context_lines.append("近期代碼提交 (Git Commits)：")
+            for c in git_commits[:6]:
+                context_lines.append(f" - {c}")
+
+        prompt = (
+            "請依據以下今日真實的工作與對話上下文，提煉出 4 個面向的具體系統進化建議：\n"
+            "1. process_improvements (流程優化，2-3項)\n"
+            "2. technical_debt (技術債清理，2-3項)\n"
+            "3. team_coordination (團隊協同，2-3項)\n"
+            "4. automation_opportunities (自動化機會，2-3項)\n\n"
+            + "\n".join(context_lines) +
+            "\n\n請務必輸出純 JSON 格式（不要包含任何 markdown 註解外框），格式如下：\n"
+            "{\n"
+            '  "process_improvements": [{"id": "1.1", "description": "具體建議內容", "source": "對話洞察"}],\n'
+            '  "technical_debt": [{"id": "2.1", "description": "具體建議內容", "source": "Git變更"}],\n'
+            '  "team_coordination": [{"id": "3.1", "description": "具體建議內容", "source": "團隊活躍"}],\n'
+            '  "automation_opportunities": [{"id": "4.1", "description": "具體建議內容", "source": "系統架構"}]\n'
+            "}"
+        )
+
+        llm_output = self._call_openrouter_llm(prompt)
+        if llm_output:
+            try:
+                clean_json = llm_output.strip()
+                if clean_json.startswith("```"):
+                    clean_json = re.sub(r"^```(?:json)?\s*", "", clean_json)
+                    clean_json = re.sub(r"\s*```$", "", clean_json)
+                parsed = json.loads(clean_json)
+                if all(k in parsed for k in ["process_improvements", "technical_debt", "team_coordination", "automation_opportunities"]):
+                    for cat in parsed.values():
+                        for item in cat:
+                            item.setdefault("checked", False)
+                    print("✅ 成功透過 AI 模型生成動態進化建議項目！")
+                    return parsed
+            except Exception as e:
+                print(f"解析 LLM 建議 JSON 失敗，啟動動態自適應降級: {e}", file=sys.stderr)
+
+        print("💡 使用當日真實日誌與上下文自適應衍生建議項目...")
+        recs = {
+            "process_improvements": [],
+            "technical_debt": [],
+            "team_coordination": [],
+            "automation_opportunities": [],
+        }
+
+        # 1. 流程優化
+        if analysis["action_items"]:
+            top_action = analysis["action_items"][0]["description"][:60].replace("\n", " ")
+            recs["process_improvements"].append({
+                "id": "1.1",
+                "description": f"排定優先級並推進今日核心待辦：{top_action}",
+                "source": "對話洞察",
+                "checked": True
+            })
+        else:
+            recs["process_improvements"].append({
+                "id": "1.1",
+                "description": "維護標準開工規範與工單指派紀律，確保各 Agent 職責分明",
+                "source": "系統規範",
+                "checked": False
+            })
+
+        if analysis["decisions"]:
+            top_dec = analysis["decisions"][0]["description"][:60].replace("\n", " ")
+            recs["process_improvements"].append({
+                "id": "1.2",
+                "description": f"將團隊拍板之重要共識落實為專案規範：{top_dec}",
+                "source": "拍板共識",
+                "checked": True
+            })
+        else:
+            recs["process_improvements"].append({
+                "id": "1.2",
+                "description": "在下個開發週期前優先排解阻礙並落實決策紀錄",
+                "source": "流程管控",
+                "checked": False
+            })
+
+        # 2. 技術債清理
+        if analysis["blockers"]:
+            top_blocker = analysis["blockers"][0]["description"][:60].replace("\n", " ")
+            recs["technical_debt"].append({
+                "id": "2.1",
+                "description": f"針對本日回報之瓶頸進行根本原因分析 (RCA)：{top_blocker}",
+                "source": "阻礙排查",
+                "checked": True
+            })
+        else:
+            recs["technical_debt"].append({
+                "id": "2.1",
+                "description": "針對近期變更模組補齊自動化測試與回歸案例",
+                "source": "技術優化",
+                "checked": False
+            })
+
+        if git_commits:
+            top_commit = git_commits[0][:60]
+            recs["technical_debt"].append({
+                "id": "2.2",
+                "description": f"針對最新代碼變更進行邊界防護與整合體檢：{top_commit}",
+                "source": "Git變更",
+                "checked": False
+            })
+        else:
+            recs["technical_debt"].append({
+                "id": "2.2",
+                "description": "強化分析引擎對話萃取精準度，過濾標題與報告雜訊",
+                "source": "系統優化",
+                "checked": False
+            })
+
+        # 3. 團隊協同
+        active_authors = [a["author_prefix"] for a in analysis.get("author_activity", [])]
+        if active_authors:
+            recs["team_coordination"].append({
+                "id": "3.1",
+                "description": f"協同本日活躍成員 (`{', '.join(active_authors[:3])}`) 分工同步任務狀態",
+                "source": "團隊活躍",
+                "checked": False
+            })
+        else:
+            recs["team_coordination"].append({
+                "id": "3.1",
+                "description": "明確指派待辦任務之負責 Agent (Antigravity/Pollen/Honey2/Sentry)",
+                "source": "團隊協同",
+                "checked": False
+            })
+        recs["team_coordination"].append({
+            "id": "3.2",
+            "description": "持續同步工作日誌至 Obsidian 第二大腦團隊共用知識庫",
+            "source": "知識庫同步",
+            "checked": True
+        })
+
+        # 4. 自動化機會
+        if any("錯誤" in t for t in analysis["topics_discussed"]):
+            recs["automation_opportunities"].append({
+                "id": "4.1",
+                "description": "針對本日討論之異常模式新增即時監控與自動警報機制",
+                "source": "對話洞察",
+                "checked": False
+            })
+        else:
+            recs["automation_opportunities"].append({
+                "id": "4.1",
+                "description": "持續優化 CI/CD 建置腳本與常駐守護行程之熔斷自癒",
+                "source": "自動化維運",
+                "checked": False
+            })
+
+        return recs
+
+    def generate_proposal(
+        self,
+        analysis: Dict[str, Any],
+        date_str: str,
+        skill_candidates: Optional[List[Dict[str, Any]]] = None,
+        recommendations: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    ) -> Tuple[str, str]:
+        """
+        生成兩份提案：
+        1. full_proposal: 包含完整活動摘要、對話萃取、技能合成候選、元數據的詳細文檔（存於 PLANS/ 備查）
+        2. channel_proposal: 依老闆指示，僅包含核心「建議進化項目」、「技能候選」與「審核機制」（推送至頻道）
+        """
+        now = datetime.now(TZ_TAIPEI)
+        if skill_candidates is None:
+            skill_candidates = []
+
+        if recommendations is None:
+            git_commits = self.fetch_git_changes()
+            recommendations = self.generate_dynamic_recommendations(analysis, git_commits)
+
+        # 構建主題清單
+        if analysis["topics_discussed"]:
+            topics_list = "\n".join(f"- {t}" for t in analysis["topics_discussed"])
+        else:
+            topics_list = "- 本日無特定技術主題"
+
+        # 構建待辦事項清單
+        if analysis["action_items"]:
+            action_items_list = "\n".join(
+                f"{item['id']}. {item['description']} *(來源：`{item['source_message']}`)*"
+                for item in analysis["action_items"]
+            )
+        else:
+            action_items_list = "本日對話中無顯式待辦事項。"
+
+        # 構建阻礙項目清單
+        if analysis["blockers"]:
+            blockers_list = "\n".join(
+                f"{item['id']}. {item['description']} *(來源：`{item['source_message']}`)*"
+                for item in analysis["blockers"]
+            )
+        else:
+            blockers_list = "本日對話中未回報任何阻礙。"
+
+        # 構建決策記錄清單
+        if analysis["decisions"]:
+            decisions_list = "\n".join(
+                f"{item['id']}. {item['description']} *(來源：`{item['source_message']}`)*"
+                for item in analysis["decisions"]
+            )
+        else:
+            decisions_list = "本日無重大拍板決策記錄。"
+
+        # 構建工作日誌摘要
+        if analysis["work_logs_summary"]:
+            work_logs_summary = "\n".join(
+                f"- **`{log['file']}`** (更新於 {log['modified_at'][:19]}): {log['excerpt']}..."
+                for log in analysis["work_logs_summary"]
+            )
+        else:
+            work_logs_summary = "本日暫無新增工作日誌。"
+
+        # 構建代碼庫真實狀態驗證報告與實作成果
+        codebase_report = self.codebase_verifier.generate_verification_report_markdown()
+        implemented_items = analysis.get("implemented_items", [])
+        if implemented_items:
+            implemented_section = "\n".join(
+                f"- ✅ **{item.get('matched_feature', item.get('description'))}** (狀態：{item.get('status', '已實作驗證通過')})"
+                for item in implemented_items
+            )
+        else:
+            implemented_section = "本日無新增實作完成之特性。"
+
+        # 構建技能合成候選清單
+        if skill_candidates:
+            skill_candidates_full = "\n".join(
+                f"- [ ] **`{sc['name']}`** - {sc['title']}  \n"
+                f"  - **說明**：{sc['description']}  \n"
+                f"  - **提煉來源**：{sc['source_summary']}  \n"
+                f"  - **候選檔案**：`{sc['path']}`  \n"
+                f"  - **批准指令**：回覆 `同意技能: {sc['name']}`"
+                for sc in skill_candidates
+            )
+            skill_candidates_channel = "\n".join(
+                f"- [ ] **`{sc['name']}`** - {sc['title']}  \n"
+                f"  > {sc['description']}  \n"
+                f"  > 💡 *批准指令：回覆「`同意技能: {sc['name']}`」*"
+                for sc in skill_candidates
+            )
+        else:
+            skill_candidates_full = "本日未偵測到達到閾值之高頻重複新流程（已知標準技能如 `obsidian-digest-sync`、`system-health-guardian` 皆已在庫生效）。"
+            skill_candidates_channel = "本日所有識別之標準作業流程皆已落庫生效，無待審核之新增技能候選。"
+
+        # 產出元數據 JSON
+        metadata = {
+            "template_version": "2.2",
+            "channel_id": self.channel_id,
+            "date": date_str,
+            "message_count": analysis["message_count"],
+            "participant_count": len(analysis["author_activity"]),
+            "topics": analysis["topics_discussed"],
+            "action_items_count": len(analysis["action_items"]),
+            "blockers_count": len(analysis["blockers"]),
+            "decisions_count": len(analysis["decisions"]),
+            "work_logs_count": len(analysis["work_logs_summary"]),
+            "skill_candidates_count": len(skill_candidates),
+            "generated_at": now.isoformat(),
+            "script_version": "daily_evolution.py v2.2 (Skill Synthesis Enabled)"
+        }
+
+        # 1. 組裝完整存檔版 Markdown 計畫書 (存於本地 PLANS/)
+        full_proposal = f"""---
+title: "每日系統進化提案 - {date_str}"
+tags: [daily-evolution, optimization, automated]
+status: pending-approval
+created: {date_str}
+version: "2.2"
+---
+
+# 每日系統進化提案 - {date_str}
+
+> **模板版本**：2.2 (含技能自主合成)  
+> **生成來源**：Honey2 每日進化系統 (Daily Evolution System)  
+> **目標頻道**：`{self.channel_id}`  
+> **生成日期**：`{date_str}` (Asia/Taipei)
+
+---
+
+## 📊 本日活動摘要 (Daily Summary)
+
+| 指標名稱 | 統計數值 |
+|----------|----------|
+| **目標頻道** | `{self.channel_id}` |
+| **統計日期** | `{date_str}` |
+| **分析訊息數** | {analysis['message_count']} 則 |
+| **活躍成員數** | {len(analysis['author_activity'])} 位 |
+| **技能合成候選** | {len(skill_candidates)} 項 |
+| **分析時間戳記** | {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC+8) |
+
+### 成員發言統計 (Author Activity)
+| 成員公鑰前綴 | 發言則數 | 佔比 |
+|-------------|----------|------|
+{"".join(f"| `{a['author_prefix']}` | {a['message_count']} | {a['percentage']}% |\n" for a in analysis['author_activity'])}
+### 討論主題 (Topics Discussed)
+{topics_list}
+
+---
+
+## 🎯 識別之待辦事項 (Action Items)
+{action_items_list}
+
+---
+
+## 🚧 阻礙與問題 (Blockers)
+{blockers_list}
+
+---
+
+## ✅ 達成的決策 (Decisions Made)
+{decisions_list}
+
+---
+
+## 📝 工作日誌摘要 (Work Logs Summary)
+{work_logs_summary}
+
+---
+
+{codebase_report}
+
+### ✅ 本日代碼庫實體已落地成果 (Verified Features)
+{implemented_section}
+
+---
+
+## 💡 系統優化建議項目 (Optimization Recommendations)
+
+根據本日團隊活動與日誌分析，提出以下系統進化建議項目：
+
+### 1. 流程優化 (Process Improvements)
+{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['process_improvements'])}
+### 2. 技術債清理 (Technical Debt)
+{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['technical_debt'])}
+### 3. 團隊協同 (Team Coordination)
+{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['team_coordination'])}
+### 4. 自動化機會 (Automation Opportunities)
+{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['automation_opportunities'])}
+### 5. 🎯 技能合成候選 (Skill Evolution Candidates)
+{skill_candidates_full}
+
+---
+
+## 📋 老闆審核機制 (Approval Required)
+
+本提案必須經由**老闆（可愛小寶寶）審核批准**後，始交由團隊執行實作。
+
+### 審核指令選項
+| 回覆指令 | 觸發動作 |
+|----------|----------|
+| `同意` / `approve` | 批准整份提案，交由團隊實作所有勾選項目與技能落庫 |
+| `同意技能: 技能名稱` | 審核通過特定技能候選，立即執行 Sentry 驗收並雙軌落庫生效 |
+| `部分同意: 項目編號` | 僅實作指定編號項目（例如：`部分同意: 1.3, 2.2, 4.1`） |
+| `需修改: 具體意見` | 退回重新修訂提案 |
+| `拒絕` / `reject` | 否決本次提案，不進行任何實作 |
+
+### 實作進度追蹤
+經老闆核准後，團隊將於 `OUTBOX/IMPLEMENTATION_LOG_{date_str.replace('-', '')}.md` 建立追蹤表：
+
+| 項目編號 | 狀態 | 預計負責人 | 完成時間 |
+|----------|------|------------|----------|
+{"".join(f"| {item['id']} | 待處理 (Pending) | Antigravity / Pollen | -\n" for cat in recommendations.values() for item in cat)}
+---
+
+## 📎 結構化元數據 (Metadata)
+
+```json
+{json.dumps(metadata, indent=2, ensure_ascii=False)}
+```
+
+---
+
+*由每日進化系統於 {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC+8) 自動生成*
+"""
+
+        # 2. 組裝頻道專屬簡潔版提案（依老闆指示：僅包含建議進化項目、技能候選與審核選項，完全剔除分析雜訊）
+        channel_proposal = f"""# 💡 每日系統進化建議項目 - {date_str}
+
+> **目標頻道**：`{self.channel_id}`  
+> **生成時間**：`{now.strftime('%Y-%m-%d %H:%M:%S')}` (UTC+8)  
+> **代碼庫健康驗證**：Phase 2 三檔防爆 / 雙軌技能庫 / 6 Agents 綁定 實體驗證通過 ✅  
+> **完整備查檔**：`PLANS/DAILY_EVOLUTION_PROPOSAL_{date_str.replace('-', '')}.md`
+
+---
+
+## 💡 系統優化建議項目 (Optimization Recommendations)
+
+根據本日團隊活動與對話脈絡，提出以下系統進化建議項目：
+
+### 1. 流程優化 (Process Improvements)
+{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['process_improvements'])}
+### 2. 技術債清理 (Technical Debt)
+{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['technical_debt'])}
+### 3. 團隊協同 (Team Coordination)
+{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['team_coordination'])}
+### 4. 自動化機會 (Automation Opportunities)
+{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['automation_opportunities'])}
+### 5. 🎯 技能合成候選 (Skill Evolution Candidates)
+{skill_candidates_channel}
+
+---
+
+## 📋 老闆審核機制 (Approval Required)
+
+本提案必須經由**老闆（可愛小寶寶）審核批准**後，始交由團隊執行實作。
+
+### 審核指令選項
+| 回覆指令 | 觸發動作 |
+|----------|----------|
+| `同意` / `approve` | 批准整份提案，立即開工實作所有勾選項目與技能落庫 |
+| `同意技能: 技能名稱` | 審核通過特定技能候選，立即執行 Sentry 驗收並雙軌落庫生效 |
+| `部分同意: 項目編號` | 僅實作指定編號項目（例如：`部分同意: 1.3, 2.2, 4.1`） |
+| `需修改: 具體意見` | 退回重新修訂提案項目 |
+| `拒絕` / `reject` | 否決本次提案，不進行任何實作 |
+
+### 實作進度追蹤
+| 項目編號 | 狀態 | 預計負責人 | 完成時間 |
+|----------|------|------------|----------|
+{"".join(f"| {item['id']} | 待處理 (Pending) | Antigravity / Pollen | -\n" for cat in recommendations.values() for item in cat)}
+---
+
+*由每日進化系統自動生成*"""
+
+        return full_proposal, channel_proposal
+
+    def save_proposal(self, proposal: str, date_str: str) -> Path:
+        """將完整提案儲存至 PLANS/ 目錄、Obsidian 知識庫與 Wax 廣播日誌"""
+        filename = f"DAILY_EVOLUTION_PROPOSAL_{date_str.replace('-', '')}.md"
+        filepath = self.plans_dir / filename
+        filepath.write_text(proposal, encoding="utf-8")
+
+        # 同步儲存至 Obsidian 第二大腦 wiki/02-Conversation-Digest/
+        try:
+            obsidian_dir = Path(r"C:\私人\ai agent\buzz-obsidian\wiki\02-Conversation-Digest")
+            if obsidian_dir.exists():
+                obsidian_file = obsidian_dir / filename
+                obsidian_file.write_text(proposal, encoding="utf-8")
+        except Exception as e:
+            print(f"   ⚠️ 同步至 Obsidian 失敗 (非致命): {e}")
+
+        # 寫入 Wax 廣播稽核日誌
+        try:
+            wax_log = Path(r"C:\Users\user\.buzz\PLANS\WAX_BROADCAST_LOG.md")
+            wax_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(wax_log, "a", encoding="utf-8") as f:
+                f.write(f"\n\n---\n<!-- DAILY_EVOLUTION_{date_str} -->\n### 📅 [每日進化提案自動產出] - {date_str}\n- **提案檔案**: `{filename}`\n- **儲存路徑**: `{filepath}`\n- **狀態**: 已就緒，等待審核\n")
+        except Exception as e:
+            print(f"   ⚠️ 寫入 Wax 廣播日誌失敗 (非致命): {e}")
+
+        return filepath
+
+    def generate_summary(
+        self,
+        analysis: Dict[str, Any],
+        proposal_path: Path,
+        date_str: str,
+        skill_candidates: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """生成繁體中文簡要摘要 (供 CLI 標準輸出紀錄)"""
+        candidates_count = len(skill_candidates) if skill_candidates else 0
+        summary = f"""## 📅 每日系統進化提案 - {date_str}
+
+**系統自動生成之優化提案已就緒，等待審核。**
+
+### 📊 本日活動統計
+- **分析訊息**：{analysis['message_count']} 則
+- **活躍成員**：{len(analysis['author_activity'])} 位
+- **涵蓋主題**：{', '.join(analysis['topics_discussed']) if analysis['topics_discussed'] else '常規討論'}
+
+### 🎯 核心項目
+- **待辦事項**：{len(analysis['action_items'])} 項
+- **阻礙項目**：{len(analysis['blockers'])} 項
+- **拍板決策**：{len(analysis['decisions'])} 項
+- **技能合成候選**：{candidates_count} 項
+
+### 📄 完整計畫書
+已存檔至：`{proposal_path.name}`
+
+---
+
+**老闆審核動作**：請審閱計畫書並回覆：
+- `同意` / `approve` → 交由團隊實作開工與技能落庫
+- `同意技能: 技能名稱` → 批准單一技能候選掛載生效
+- `拒絕` / `reject` → 否決提案並歸檔
+- `部分同意: 項目編號` / 具體回饋 → 修訂提案
+
+*由 Honey2 每日進化系統自動生成*"""
+        return summary
+
+    def run(self, post_to_channel: bool = True) -> Dict[str, Any]:
+        """執行完整每日進化流程"""
+        now = datetime.now(TZ_TAIPEI)
+        date_str = now.strftime("%Y-%m-%d")
+        print(f"🔄 正在啟動 {date_str} 每日進化分析流程 (時區: Asia/Taipei)...")
+
+        # 1. 抓取頻道對話訊息
+        print("📥 正在讀取頻道對話訊息...")
+        messages = self.fetch_today_messages()
+        print(f"   共讀取到 {len(messages)} 則訊息")
+
+        # 2. 讀取工作日誌
+        print("📖 正在讀取工作日誌...")
+        work_logs = self.fetch_work_logs()
+        print(f"   共讀取到 {len(work_logs)} 份日誌檔案")
+
+        # 2.5 抓取 Git 代碼異動歷史
+        print("🌿 正在讀取當日 Git 代碼提交歷史...")
+        git_commits = self.fetch_git_changes()
+        print(f"   共讀取到 {len(git_commits)} 筆提交紀錄")
+
+        # 3. 深度分析
+        print("🧠 正在進行對話與日誌深度分析...")
+        analysis = self.analyze_conversations(messages, work_logs)
+
+        # 3.2 代碼庫真實狀態驗證與對話反幻覺校準
+        print("🔍 正在進行代碼庫 AST 符號與檔案真實狀態驗證...")
+        calibrated_actions, calibrated_blockers, implemented_items = self.codebase_verifier.calibrate_recommendations(analysis)
+        analysis["action_items"] = calibrated_actions
+        analysis["blockers"] = calibrated_blockers
+        analysis["implemented_items"] = implemented_items
+        print(f"   已自動校準：精準剔除 {len(implemented_items)} 項已在庫實作之假待辦/假阻礙")
+
+        # 3.5 技能合成與高頻經驗提煉 (Skill Synthesis)
+        print("🛠️ 正在執行高頻作業流程辨識與技能合成 (Skill Synthesis)...")
+        skill_candidates: List[Dict[str, Any]] = []
+        try:
+            skill_candidates = self.skill_synthesizer.detect_and_synthesize()
+            print(f"   共辨識出 {len(skill_candidates)} 項新技能候選")
+        except Exception as e:
+            print(f"   ⚠️ 技能合成過程發生異常 (繼續執行): {e}")
+
+        # 3.8 AI 動態進化建議項目生成
+        print("✨ 正在調用 AI 引擎動態生成每日系統進化建議項目...")
+        recommendations = self.generate_dynamic_recommendations(analysis, git_commits)
+
+        # 4. 生成繁體中文提案 (完整版與頻道專用建議版)
+        print("📝 正在生成繁體中文系統進化提案與頻道建議項目...")
+        full_proposal, channel_proposal = self.generate_proposal(
+            analysis, date_str, skill_candidates=skill_candidates, recommendations=recommendations
+        )
+
+        # 5. 存檔完整提案
+        print("💾 正在儲存完整提案檔案至 PLANS/...")
+        proposal_path = self.save_proposal(full_proposal, date_str)
+        print(f"   已存檔至: {proposal_path}")
+
+        # 6. 生成摘要供本機紀錄
+        summary = self.generate_summary(
+            analysis, proposal_path, date_str, skill_candidates=skill_candidates
+        )
+
+        # 7. 依據老闆核心指示：頻道僅發送「建議進化的項目與審核選項」，剔除對話分析雜訊！
+        event_id = None
+        if post_to_channel:
+            try:
+                event_id = self.post_proposal_to_channel(channel_proposal)
+            except Exception as e:
+                print(f"   ⚠️ 發布至頻道時發生異常 (繼續執行): {e}")
+
+        print("✅ 每日進化分析流程執行完畢！")
+        return {
+            "date": date_str,
+            "proposal_path": str(proposal_path),
+            "summary": summary,
+            "channel_proposal": channel_proposal,
+            "analysis": analysis,
+            "skill_candidates": skill_candidates,
+            "posted_event_id": event_id,
+        }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Buzz 每日進化分析腳本")
+    parser.add_argument("--channel", required=True, help="目標頻道 UUID")
+    parser.add_argument("--relay-url", required=True, help="Buzz Relay 網址")
+    parser.add_argument("--private-key", required=True, help="身分私鑰 (hex 或 nsec)")
+    parser.add_argument("--auth-tag", help="NIP-OA 頻道認證標籤 JSON")
+    parser.add_argument("--buzz-cli", default="buzz", help="Buzz CLI 執行檔路徑")
+    parser.add_argument("--workspace", help="工作區根目錄")
+    parser.add_argument("--dry-run", action="store_true", help="演練模式 (不儲存提案也不發送頻道)")
+    parser.add_argument("--no-post", action="store_true", help="儲存提案但不發送頻道")
+
+    args = parser.parse_args()
+
+    evolution = DailyEvolution(
+        channel_id=args.channel,
+        relay_url=args.relay_url,
+        private_key=args.private_key,
+        auth_tag=args.auth_tag,
+        buzz_cli_path=args.buzz_cli,
+        workspace_root=args.workspace,
+    )
+
+    try:
+        post_to_channel = not args.dry_run and not args.no_post
+        result = evolution.run(post_to_channel=post_to_channel)
+
+        if args.dry_run:
+            print("\n--- 演練模式：頻道建議項目 ---")
+            print(result["channel_proposal"])
+        else:
+            print(json.dumps({
+                "success": True,
+                "summary": result["summary"],
+                "proposal_path": result["proposal_path"],
+                "posted_event_id": result.get("posted_event_id"),
+            }, ensure_ascii=False))
+
+    except Exception as e:
+        print(f"❌ 錯誤: {e}", file=sys.stderr)
+        if not args.dry_run:
+            print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

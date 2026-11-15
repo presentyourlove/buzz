@@ -592,7 +592,6 @@ mod tests {
         let err = super::read_file_or_stdin("0001-does-not-exist.patch").unwrap_err();
         assert!(matches!(err, CliError::Usage(_)));
     }
-}
 
     // --- parse_timestamp_or_duration ---
     
@@ -675,3 +674,4 @@ mod tests {
         // Extremely unlikely to collide with 128-bit entropy
         assert_ne!(tag1, tag2);
     }
+}

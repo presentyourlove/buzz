@@ -2682,6 +2682,15 @@ mod tests {
             history_cache_ttl_secs: 300,
             history_cache_max_entries: 10_000,
             health_guardian: None,
+            compaction_mode: crate::config::CompactionMode::Tiered,
+            prune_threshold_percent: crate::config::DEFAULT_PRUNE_THRESHOLD_PERCENT,
+            prune_target_percent: crate::config::DEFAULT_PRUNE_TARGET_PERCENT,
+            handoff_threshold_percent: crate::config::DEFAULT_HANDOFF_THRESHOLD_PERCENT,
+            tail_budget_percent: crate::config::DEFAULT_TAIL_BUDGET_PERCENT,
+            tail_min_rounds: crate::config::DEFAULT_TAIL_MIN_ROUNDS,
+            checkpoint_enabled: crate::config::DEFAULT_CHECKPOINT_ENABLED,
+            checkpoint_dir: None,
+            checkpoint_ttl_secs: crate::config::DEFAULT_CHECKPOINT_TTL_SECS,
         }
     }
 

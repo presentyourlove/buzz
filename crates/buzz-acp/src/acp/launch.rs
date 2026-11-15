@@ -20,7 +20,27 @@ fn command_with_prefix(
         )));
     }
     let mut command = match prefix {
-        None => Command::new(worker),
+        None => {
+            #[cfg(windows)]
+            {
+                if worker == "bash" || worker == "sh" {
+                    let mut cmd = Command::new(r"C:\Program Files\Git\bin\bash.exe");
+                    if let Ok(path) = std::env::var("PATH") {
+                        let git_usr_bin = r"C:\Program Files\Git\usr\bin";
+                        if !path.split(';').any(|p| p.eq_ignore_ascii_case(git_usr_bin)) {
+                            cmd.env("PATH", format!("{git_usr_bin};{path}"));
+                        }
+                    }
+                    cmd
+                } else if worker == "cat" {
+                    Command::new(r"C:\Program Files\Git\usr\bin\cat.exe")
+                } else {
+                    Command::new(worker)
+                }
+            }
+            #[cfg(not(windows))]
+            Command::new(worker)
+        }
         Some(value) => {
             let invalid = || {
                 AcpError::Protocol(format!(
