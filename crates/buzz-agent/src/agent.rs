@@ -27,6 +27,10 @@ use nostr::Keys;
 const ERROR_REFLECTION_SUFFIX: &str =
     "\n\n[Reflect] Before retrying, identify the cause and change your approach.";
 
+/// 系統自我修正與錯誤恢復指引後綴（Self-Healing Execution Prompt）
+const SELF_HEALING_PROMPT_SUFFIX: &str =
+    "\n\n【系統自我修正與錯誤恢復機制 (Self-Healing Execution)】：\n偵測到上述工具執行發生錯誤！\n1. 請仔細研讀錯誤訊息與 Traceback 根因，切勿重複使用完全相同的失敗參數。\n2. 若為語法或編譯錯誤，請修正代碼後重試；若為路徑不存在，請先確認檔案清單。\n3. 請立即調整方針，輸出具備修正邏輯的新行動。";
+
 const UNSUPPORTED_IMAGE_TOOL_MESSAGE: &str = "The current model does not support image input. The image was removed from conversation history so this turn can continue. Use a text-based inspection tool or ask the user for a textual description instead.";
 
 /// Model-visible feedback after the provider truncates an assistant response at
@@ -1436,9 +1440,14 @@ impl RunCtx<'_> {
                     error = %result.text(),
                     "agent: tool execution failed"
                 );
+                let recovery_hint = if self.cfg.self_healing_enabled {
+                    SELF_HEALING_PROMPT_SUFFIX
+                } else {
+                    ERROR_REFLECTION_SUFFIX
+                };
                 result
                     .content
-                    .push(ToolResultContent::Text(ERROR_REFLECTION_SUFFIX.to_string()));
+                    .push(ToolResultContent::Text(recovery_hint.to_string()));
             }
             self.ledger.record_tool_execution(call, &result);
             self.history.push(HistoryItem::ToolResult(result));

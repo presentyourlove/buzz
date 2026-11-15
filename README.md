@@ -914,6 +914,31 @@ just reset          # ⚠️  Wipe data + recreate
   - 二進位檔完整性測試：`buzz-agent.exe` 執行環境變數校驗與引數測試 100% 正常。
   - 目錄與捷徑映射測試：桌面 `Buzz.lnk` 與 `managed-agents.json` 驗證 100% 無損。
 
+### Phase 23: 雲端沙盒託管與自我修正錯誤恢復機制 (Cloud Sandboxing & Self-Healing Execution)
+- **核心升級亮點 (Core Highlights)**：
+  - **AES-256-GCM 多應用憑證託管保險箱**：新增 `C:\私人\tools\credential_vault.mjs` & `.py`，實裝 Secret-Blind 安全代理工具 `credential_proxy` 與 `credential_list`，特工無感調用外部 API 且 100% 杜絕金鑰外洩。
+  - **受控沙盒命令執行器**：新增 `C:\私人\tools\sandbox_runner.py` 與 `sandbox_exec` 工具，防範 Path Injection，嚴格攔截破壞性高危系統命令，提供超時保護。
+  - **交易式微快照與原子回滾 (Micro-Snapshot Rollback)**：擴充 `crates/buzz-agent/src/checkpoint.rs`，在破壞性操作前自動備份，失敗時一鍵原子還原。
+  - **引擎級自我修正自癒管線 (Self-Healing Execution)**：修改 `agent.rs` 與 `config.rs`，工具調用失敗時自動注入結構化自我修正指引，引導特工自主改進語法與路徑，失敗連續達閾值自動回滾。
+  - **Sentry 孤兒快照自癒清理**：增強 `sentry_supervisor.py`，自動復原崩潰殘留檔案。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `C:\私人\tools\credential_vault.mjs`
+    - `C:\私人\tools\credential_vault.py`
+    - `C:\私人\tools\sandbox_runner.py`
+  - **修改 (Modified)**：
+    - `C:\私人\tools\buzz-composite-mcp.mjs` (掛載 `credential_list`, `credential_proxy`, `sandbox_exec`)
+    - `crates/buzz-agent/src/checkpoint.rs` (實裝微快照與狀態回滾)
+    - `crates/buzz-agent/src/config.rs` (新增自我修正配置欄位)
+    - `crates/buzz-agent/src/agent.rs` (整合自我修正自癒提示與失敗回滾)
+    - `C:\私人\tools\sentry_supervisor.py` (新增孤兒快照自癒巡檢)
+    - `c:\私人\ai agent\block-buzz.md` (增設第三十三章)
+    - `c:\私人\ai agent\buzz\README.md` (增設 Phase 23 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - Vault 加解密與 Secret-Blind 代理測試：200 OK 且金鑰無洩漏。
+  - 沙盒攔截測試：`format` 命令與越界路徑 100% 被拒絕。
+  - Rust 引擎沙盒編譯：`buzz-agent.exe` 編譯 0 錯誤通過並熱部署。
+
 ---
 
 <p align="center">

@@ -621,6 +621,82 @@ impl EncryptedCheckpointStore {
         purged
     }
 
+    /// 建立交易式微快照：在執行可能破壞環境或代碼的工具前，為指定檔案列表建立暫存快照。
+    pub fn create_micro_snapshot(
+        &self,
+        scope_key: &str,
+        files: &[PathBuf],
+    ) -> Result<String, String> {
+        validate_scope_key(scope_key)?;
+        let ts = unix_now_secs();
+        let snapshot_id = format!("{scope_key}_{ts}");
+        let snapshot_dir = self.dir.join("snapshots").join(&snapshot_id);
+        fs::create_dir_all(&snapshot_dir)
+            .map_err(|e| format!("micro_snapshot: create dir {}: {e}", snapshot_dir.display()))?;
+
+        let mut manifest: Vec<(String, String)> = Vec::new();
+
+        for (idx, original) in files.iter().enumerate() {
+            if original.exists() && original.is_file() {
+                let backup_name = format!("file_{idx}.bak");
+                let backup_path = snapshot_dir.join(&backup_name);
+                fs::copy(original, &backup_path).map_err(|e| {
+                    format!(
+                        "micro_snapshot: backup {} -> {}: {e}",
+                        original.display(),
+                        backup_path.display()
+                    )
+                })?;
+                manifest.push((original.to_string_lossy().to_string(), backup_name));
+            }
+        }
+
+        let manifest_json = serde_json::to_string(&manifest)
+            .map_err(|e| format!("micro_snapshot: serialize manifest: {e}"))?;
+        fs::write(snapshot_dir.join("manifest.json"), manifest_json)
+            .map_err(|e| format!("micro_snapshot: write manifest: {e}"))?;
+
+        Ok(snapshot_id)
+    }
+
+    /// 回滾交易式微快照：當執行遭遇致命錯誤或自我修正失敗時，將原檔案原子還原。
+    pub fn rollback_micro_snapshot(&self, snapshot_id: &str) -> Result<(), String> {
+        let snapshot_dir = self.dir.join("snapshots").join(snapshot_id);
+        if !snapshot_dir.exists() {
+            return Err(format!("micro_snapshot: snapshot_id '{snapshot_id}' not found"));
+        }
+
+        let manifest_path = snapshot_dir.join("manifest.json");
+        if !manifest_path.exists() {
+            return Err("micro_snapshot: manifest.json missing".to_string());
+        }
+
+        let manifest_content = fs::read_to_string(&manifest_path)
+            .map_err(|e| format!("micro_snapshot: read manifest: {e}"))?;
+        let manifest: Vec<(String, String)> = serde_json::from_str(&manifest_content)
+            .map_err(|e| format!("micro_snapshot: parse manifest: {e}"))?;
+
+        for (orig_str, backup_name) in manifest {
+            let orig_path = PathBuf::from(orig_str);
+            let backup_path = snapshot_dir.join(backup_name);
+            if backup_path.exists() {
+                let _ = fs::copy(&backup_path, &orig_path);
+            }
+        }
+
+        let _ = fs::remove_dir_all(&snapshot_dir);
+        Ok(())
+    }
+
+    /// 正常完成後丟棄交易式微快照
+    pub fn discard_micro_snapshot(&self, snapshot_id: &str) -> Result<(), String> {
+        let snapshot_dir = self.dir.join("snapshots").join(snapshot_id);
+        if snapshot_dir.exists() {
+            let _ = fs::remove_dir_all(&snapshot_dir);
+        }
+        Ok(())
+    }
+
     fn safe_path(&self, file_name: &str) -> Result<PathBuf, String> {
         if file_name.contains('/') || file_name.contains('\\') || file_name.contains("..") {
             return Err("checkpoint: illegal path component detected".to_owned());

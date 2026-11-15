@@ -635,6 +635,10 @@ pub struct Config {
     /// output-truncated response. Zero disables truncation recovery. This is
     /// independent of `max_rounds`, which still bounds all successful calls.
     pub max_token_recoveries: u32,
+    /// 是否啟用自我修正與錯誤自癒管線 (Self-Healing Execution)
+    pub self_healing_enabled: bool,
+    /// 自我修正最大連續重試次數（預設 3 次）
+    pub max_self_healing_retries: u32,
     pub llm_timeout: Duration,
     pub tool_timeout: Duration,
     pub mcp_init_timeout: Duration,
@@ -912,6 +916,8 @@ impl Config {
             max_rounds: parse_env("BUZZ_AGENT_MAX_ROUNDS", 0)?,
             max_output_tokens,
             max_token_recoveries: parse_env("BUZZ_AGENT_MAX_TOKEN_RECOVERIES", 3u32)?,
+            self_healing_enabled: parse_env("BUZZ_AGENT_SELF_HEALING_ENABLED", true)?,
+            max_self_healing_retries: parse_env("BUZZ_AGENT_MAX_SELF_HEALING_RETRIES", 3u32)?,
             llm_timeout: Duration::from_secs(parse_env("BUZZ_AGENT_LLM_TIMEOUT_SECS", 240)?),
             tool_timeout: Duration::from_secs(parse_env("BUZZ_AGENT_TOOL_TIMEOUT_SECS", 1_260)?),
             mcp_init_timeout: Duration::from_secs(parse_env(
@@ -1198,6 +1204,8 @@ impl Config {
             max_rounds: get_uint("max_rounds", "BUZZ_AGENT_MAX_ROUNDS", 0) as u32,
             max_output_tokens,
             max_token_recoveries: get_uint("max_token_recoveries", "BUZZ_AGENT_MAX_TOKEN_RECOVERIES", 3) as u32,
+            self_healing_enabled: get_bool("self_healing_enabled", "BUZZ_AGENT_SELF_HEALING_ENABLED", true),
+            max_self_healing_retries: get_uint("max_self_healing_retries", "BUZZ_AGENT_MAX_SELF_HEALING_RETRIES", 3) as u32,
             llm_timeout: Duration::from_secs(get_uint("llm_timeout_secs", "BUZZ_AGENT_LLM_TIMEOUT_SECS", 240)),
             tool_timeout: Duration::from_secs(get_uint("tool_timeout_secs", "BUZZ_AGENT_TOOL_TIMEOUT_SECS", 1260)),
             mcp_init_timeout: Duration::from_secs(get_uint("mcp_init_timeout_secs", "BUZZ_AGENT_MCP_INIT_TIMEOUT_SECS", 30)),
@@ -1300,6 +1308,8 @@ impl Config {
             max_rounds: 0,
             max_output_tokens: 1,
             max_token_recoveries: 0,
+            self_healing_enabled: true,
+            max_self_healing_retries: 3,
             llm_timeout: Duration::from_secs(30),
             tool_timeout: Duration::from_secs(30),
             mcp_init_timeout: Duration::from_secs(30),
