@@ -59,6 +59,9 @@ rmcp = { version = "1", default-features = false, features = ["client", "transpo
 arc-swap = "1"
 getrandom = "0.4"
 tracing = { workspace = true }
+
+# Browser Automation (Playwright)
+playwright-rs = { workspace = true }
 tracing-subscriber = { workspace = true }
 # OAuth 2.0 PKCE for Databricks (and future browser-auth providers).
 async-trait = "0.1"
@@ -101,6 +104,7 @@ aes-gcm = "0.10.3"
 
 # Error handling
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", default-features = false, features = ["signal", "process"] }

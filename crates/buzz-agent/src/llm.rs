@@ -2646,6 +2646,8 @@ mod tests {
             max_rounds: 10,
             max_output_tokens: 1024,
             max_token_recoveries: 3,
+            self_healing_enabled: false,
+            max_self_healing_retries: 3,
             llm_timeout: Duration::from_secs(10),
             tool_timeout: Duration::from_secs(10),
             mcp_init_timeout: Duration::from_secs(10),

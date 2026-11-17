@@ -5,6 +5,14 @@ status: draft
 created: 2026-11-15
 ---
 
+## ⚠️ Failure-Mode Analysis (必須補錄項目)
+
+**極端邊界失敗推演**：
+1. **Scheduler miss (Cron/jitter failure)** → missed trigger window? 需設計備用機制：當排程任務未在預期時間執行時，是否應重試、記錄錯誤事件，或透過 Nostr 通知主理人需人工介入？
+2. **Nostr relay outage** → stale trigger state? 需確認當中繼伺服器離線時，觸發條件是否會被誤判為已處理，導致後續恢復時遺漏原本應觸發的事件？
+3. **File system watcher permission denial** → silent failure? 需測試當應用無法監控 `config/` 或 `.buzz/config/` 目錄變更時，是否會產生明確錯誤日誌，而非靜默忽略變更？
+4. **CEL expression parse error on user-defined condition** → fallback behaviour? 需設計當條件式邏輯無法解析時的備用方案：是預設為 `false`（不觸發），還是要求主理人修正條件後重試？
+
 # Proactive Autonomous Triggers 實作計畫書
 
 > **分工定位**：由 **Buzz Agent 團隊** 自主落實，屬於業務邏輯與 Agent 行為迴圈範疇，在現有框架內直接落地。

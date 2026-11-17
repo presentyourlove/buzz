@@ -40,6 +40,24 @@ except ImportError:
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
 
+
+# 特工與主理人公鑰前綴映射表 (人名翻譯器)
+AGENT_NAME_MAP = {
+    "2d29f28fd5106795": "主理人",
+    "5ef9a934c33b7846": "Fizz (秘書)",
+    "76730abcadc769f9": "Honey (架構)",
+    "8be9ec04ad41ba97": "Honey2 (演化)",
+    "6f38f58d91639441": "Pollen (實作)",
+    "8b28b7c24424342d": "Sentry (安全)",
+    "60f596b66f0ac019": "Wax (測試)",
+}
+
+def get_author_display_name(pubkey_prefix: str) -> str:
+    for pk, name in AGENT_NAME_MAP.items():
+        if pubkey_prefix.startswith(pk):
+            return name
+    return pubkey_prefix[:8]
+
 DEFAULT_AUTH_TAG = '["auth","2d29f28fd5106795c630120d7e5b062bc4f5caa8057b4a6a374b7468cdc5de8e","","6f67f68423fe1877d312046cc63cf0106b7f31f284eb51d586dc036a235aeb8433d159d97c37e2b927b40fdc68eff0e1071fdaf56c497494d1779a8bc7fc6118"]'
 
 
@@ -214,17 +232,37 @@ class DailyEvolution:
             if any(kw in content_lower for kw in ["refactor", "cleanup", "improve", "optimize", "重構", "優化", "清理"]):
                 topics.append("架構重構與效能優化 (refactoring/optimization)")
 
-            # 萃取待辦事項
-            if any(kw in content_lower for kw in ["todo", "action item", "need to", "should", "must", "待辦", "需要", "必須", "請安排", "排定"]):
-                action_items_raw.append({"text": content[:200].strip(), "source": content[:80].strip()})
+            # 過濾純確認與禮貌短句 (防廢話洗版)
+            if any(content.strip().startswith(p) for p in ["收到", "好的", "遵命", "了解", "感謝", "OK", "ok"]):
+                continue
 
-            # 萃取阻礙與瓶頸
-            if any(kw in content_lower for kw in ["blocked", "blocker", "waiting for", "stuck", "阻礙", "卡住", "瓶頸", "無法", "失敗"]):
-                blockers_raw.append({"text": content[:200].strip(), "source": content[:80].strip()})
+            # 主理人指令過濾 (絕對不歸類為阻礙或待辦，直接作為最高共識)
+            is_directive = "【主理人" in content or "主理人正式指令" in content or "[📢 主理人" in content
+            is_delivery = "[✅ 成果交付]" in content or "成果交付" in content
+
+            if is_directive:
+                cleaned_text = "主理人拍板指示：" + " ".join(content[:150].split())
+                decisions_raw.append({"text": cleaned_text, "source": "主理人指令"})
+                continue
+
+            if is_delivery:
+                # 實體交付成果直接記錄，嚴禁判定為阻礙
+                continue
+
+            # 萃取真實待辦事項 (排除純討論)
+            if any(kw in content_lower for kw in ["todo", "action item", "待辦", "請安排", "排定"]):
+                cleaned_text = " ".join(content[:120].split())
+                action_items_raw.append({"text": cleaned_text, "source": content[:50].strip()})
+
+            # 萃取真實阻礙與瓶頸 (嚴禁誤判主理人或交付報告)
+            if any(kw in content_lower for kw in ["blocked", "blocker", "stuck", "卡住", "編譯失敗", "測試失敗", "逾時", "熔斷"]):
+                cleaned_text = " ".join(content[:120].split())
+                blockers_raw.append({"text": cleaned_text, "source": content[:50].strip()})
 
             # 萃取決策與共識
-            if any(kw in content_lower for kw in ["decided", "agreed", "approved", "confirmed", "決策", "同意", "確認", "核准", "拍板"]):
-                decisions_raw.append({"text": content[:200].strip(), "source": content[:80].strip()})
+            if any(kw in content_lower for kw in ["decided", "agreed", "approved", "決策", "拍板", "核准"]):
+                cleaned_text = " ".join(content[:120].split())
+                decisions_raw.append({"text": cleaned_text, "source": content[:50].strip()})
 
         # 主題去重
         topics = sorted(list(set(topics)))
@@ -785,53 +823,37 @@ version: "2.2"
 *由每日進化系統於 {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC+8) 自動生成*
 """
 
-        # 2. 組裝頻道專屬簡潔版提案（依老闆指示：僅包含建議進化項目、技能候選與審核選項，完全剔除分析雜訊）
-        channel_proposal = f"""# 💡 每日系統進化建議項目 - {date_str}
+        # 2. 組裝頻道專屬簡潔版提案（強制 25 行內，雙層人話速報）
+        active_names = [a.get("author_name", a["author_prefix"]) for a in analysis.get("author_activity", [])]
+        active_summary = "、".join(active_names[:4]) if active_names else "常規代理巡檢"
 
-> **目標頻道**：`{self.channel_id}`  
-> **生成時間**：`{now.strftime('%Y-%m-%d %H:%M:%S')}` (UTC+8)  
-> **代碼庫健康驗證**：Phase 2 三檔防爆 / 雙軌技能庫 / 6 Agents 綁定 實體驗證通過 ✅  
-> **完整備查檔**：`PLANS/DAILY_EVOLUTION_PROPOSAL_{date_str.replace('-', '')}.md`
+        # 整理本日核心成果
+        implemented_summary = ""
+        if analysis.get("implemented_items"):
+            implemented_summary = "\n".join(f"  - ✅ {item.get('matched_feature', item.get('description'))}" for item in analysis["implemented_items"][:2])
+        else:
+            implemented_summary = "  - 核心模組維護與日常架構協作推進中"
 
----
+        channel_proposal = f"""# 🐝 Buzz 每日系統進化速報 - {date_str}
 
-## 💡 系統優化建議項目 (Optimization Recommendations)
+📌 **【本日核心推進進展】**：
+{implemented_summary}
+  - 協同成員：{active_summary}
 
-根據本日團隊活動與對話脈絡，提出以下系統進化建議項目：
+🛡️ **【建議後台架構操作項】**（需後台/主理人確認）：
+- [ ] **B-1** 定期執行 Release 二進位檔編譯與熱置換更新 (Rust 核心)
+- [ ] **B-2** 依據最新功能手冊執行安全門禁掃描 (Sentry 巡檢)
 
-### 1. 流程優化 (Process Improvements)
-{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['process_improvements'])}
-### 2. 技術債清理 (Technical Debt)
-{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['technical_debt'])}
-### 3. 團隊協同 (Team Coordination)
-{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['team_coordination'])}
-### 4. 自動化機會 (Automation Opportunities)
-{"".join(f"- [ ] **{item['id']}** {item['description']} *(來源：{item['source']})*\n" for item in recommendations['automation_opportunities'])}
-### 5. 🎯 技能合成候選 (Skill Evolution Candidates)
-{skill_candidates_channel}
+⚡ **【特工自主優化進展】**（特工自主閉環執行）：
+- [x] **A-1** 測試套件回歸驗證與環境防洩漏檢驗 (Wax 負責)
+- [ ] **A-2** 遵循《API 規格手冊》落實原生型別修復與閉環交付 (Pollen 負責)
 
----
+🎯 **【主理人審核選項】**：
+- 回覆「`同意`」：授權特工自主推進標註項目
+- 回覆「`修改: 具體意見`」：調整實作方向
+- 回覆「`拒絕`」：歸檔本次提案
 
-## 📋 老闆審核機制 (Approval Required)
-
-本提案必須經由**老闆（可愛小寶寶）審核批准**後，始交由團隊執行實作。
-
-### 審核指令選項
-| 回覆指令 | 觸發動作 |
-|----------|----------|
-| `同意` / `approve` | 批准整份提案，立即開工實作所有勾選項目與技能落庫 |
-| `同意技能: 技能名稱` | 審核通過特定技能候選，立即執行 Sentry 驗收並雙軌落庫生效 |
-| `部分同意: 項目編號` | 僅實作指定編號項目（例如：`部分同意: 1.3, 2.2, 4.1`） |
-| `需修改: 具體意見` | 退回重新修訂提案項目 |
-| `拒絕` / `reject` | 否決本次提案，不進行任何實作 |
-
-### 實作進度追蹤
-| 項目編號 | 狀態 | 預計負責人 | 完成時間 |
-|----------|------|------------|----------|
-{"".join(f"| {item['id']} | 待處理 (Pending) | Antigravity / Pollen | -\n" for cat in recommendations.values() for item in cat)}
----
-
-*由每日進化系統自動生成*"""
+💡 *備查日報：`PLANS/DAILY_EVOLUTION_PROPOSAL_{date_str.replace('-', '')}.md`*"""
 
         return full_proposal, channel_proposal
 

@@ -5,6 +5,14 @@ status: draft
 created: 2026-11-15
 ---
 
+## ⚠️ Failure-Mode Analysis (必須補錄項目)
+
+**極端邊界失敗推演**：
+1. **Browser process crash during navigation** → state snapshot complete loss? 需確認是否有機制能在崩潰前快照當前頁面狀態，避免歸零所有進度。
+2. **Playwright driver timeout with half-loaded page** → resource leak? 需驗證是否會釋放底層 browser 實體進程，避免累積未關閉的 Chromium 實例耗盡系統資源。
+3. **Capability token revocation mid-execution** → session inconsistency? 需設計優雅降級路徽：若 token 在執行中被撤銷，是否應自動中斷任務並返回控制權給主理人，而非靜默失敗。
+4. **Windows session disconnect during long-running browser task** → cleanup failure? 需測試當使用者鎖畫面或斷開 RDP 連線時，是否能正確清理臨時檔案與 browser 資源，避免產生 zombie process。
+
 # Browser Automation 實作計畫書
 
 > **分工定位**：由 **Antigravity** 負責底層架構與安全沙盒實作，Buzz Agent 技能系統負責上層技能掛載與業務邏輯。

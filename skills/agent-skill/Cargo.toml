@@ -7,8 +7,6 @@ description = "janestreet/agent_skill 整合技能 - Nostr 事件橋接、任務
 license = "Apache-2.0"
 repository = "https://github.com/block/sprout"
 
-[workspace]
-
 [dependencies]
 # Buzz 核心依賴
 buzz-core = { path = "../../crates/buzz-core" }

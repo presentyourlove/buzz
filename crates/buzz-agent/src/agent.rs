@@ -6,6 +6,7 @@ use tokio::task::JoinSet;
 use tracing::Instrument as _;
 
 use crate::builtin;
+use crate::browser_pool::BrowserPool;
 use crate::config::{
     pricing_authority, Config, MAX_PROMPT_BYTES, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_RESULT_BYTES,
 };
@@ -455,6 +456,9 @@ pub struct RunCtx<'a> {
     pub usage_baseline: SessionUsageBaseline,
     /// 確定性工作集帳本（修復 D8）：隨回合自動記錄讀寫改檔案、指令與錯誤。
     pub ledger: &'a mut crate::compaction::WorkingSetLedger,
+    /// Shared browser pool for builtin browser tools. May be None if Playwright
+    /// runtime was not ready at startup.
+    pub browser_pool: &'a Option<Arc<BrowserPool>>,
 }
 
 /// Fold one round's proven identity into the per-turn identity accumulator.
@@ -713,6 +717,17 @@ impl RunCtx<'_> {
                 tools.push(builtin::send_direct_message_def());
                 tools.push(builtin::create_reminder_def());
             }
+            // Inject browser automation tools when browser pool is available.
+            if self.browser_pool.is_some() {
+                tools.push(builtin::browser_open_def());
+                tools.push(builtin::browser_screenshot_def());
+                tools.push(builtin::browser_close_def());
+                // Phase 2: Advanced browser interaction tools
+                tools.push(builtin::browser_click_def());
+                tools.push(builtin::browser_fill_def());
+                tools.push(builtin::browser_wait_def());
+                tools.push(builtin::browser_extract_def());
+            }
             round = round.saturating_add(1);
             let response_result = tokio::select! {
                 biased;
@@ -808,6 +823,39 @@ impl RunCtx<'_> {
                         // point — the alternative is retrying forever.
                         ContextRecovery::Exhausted => {
                             return Err(AgentError::LlmContextExceeded(e))
+                        }
+                    }
+                }
+                // 429 限流自適應降載（Adaptive Downsizing on 429/TPM Exhaustion）
+                // 當 LLM 遭遇 429 Too Many Requests 且對話歷史膨脹時，不應盲目等待相同龐大 payload 重試，
+                // 而是主動啟動上下文緊急縮編降載，減半 payload 壓力再退避重試，徹底打破限流死循環。
+                Err(AgentError::Llm(msg))
+                    if (msg.contains("429")
+                        || msg.contains("Too Many Requests")
+                        || msg.contains("rate limit")
+                        || msg.contains("Rate limit"))
+                        && context_recoveries < crate::config::MAX_CONTEXT_RECOVERIES_PER_RUN =>
+                {
+                    tracing::warn!(
+                        model = self.effective_model,
+                        error = %msg,
+                        recoveries = context_recoveries,
+                        "LLM returned rate-limit (429/TPM); performing adaptive context downsizing to relieve API pressure"
+                    );
+                    match self
+                        .recover_from_context_overflow(&mut context_recoveries)
+                        .await
+                    {
+                        ContextRecovery::Recovered => {
+                            round = round.saturating_sub(1);
+                            *self.last_request_input_tokens = None;
+                            *self.last_request_history_bytes = None;
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                            continue;
+                        }
+                        ContextRecovery::Cancelled => return Ok(StopReason::Cancelled),
+                        ContextRecovery::Exhausted => {
+                            return Err(AgentError::Llm(msg));
                         }
                     }
                 }
@@ -1369,6 +1417,76 @@ impl RunCtx<'_> {
             if call.name == builtin::CREATE_REMINDER_TOOL {
                 emit_in_progress(self.wire, self.session_id, call).await;
                 let mut result = builtin::call_create_reminder(&call.arguments, self).await.ok()?;
+                result.provider_id = call.provider_id.clone();
+                emit_completed(self.wire, self.session_id, call, &result).await;
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Built-in browser_open: execute inline, no MCP round-trip.
+            if call.name == builtin::BROWSER_OPEN_TOOL {
+                emit_in_progress(self.wire, self.session_id, call).await;
+                let mut result = builtin::call_browser_open(&call.arguments, self).await.ok()?;
+                result.provider_id = call.provider_id.clone();
+                emit_completed(self.wire, self.session_id, call, &result).await;
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Built-in browser_screenshot: execute inline, no MCP round-trip.
+            if call.name == builtin::BROWSER_SCREENSHOT_TOOL {
+                emit_in_progress(self.wire, self.session_id, call).await;
+                let mut result = builtin::call_browser_screenshot(&call.arguments, self).await.ok()?;
+                result.provider_id = call.provider_id.clone();
+                emit_completed(self.wire, self.session_id, call, &result).await;
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Built-in browser_close: execute inline, no MCP round-trip.
+            if call.name == builtin::BROWSER_CLOSE_TOOL {
+                emit_in_progress(self.wire, self.session_id, call).await;
+                let mut result = builtin::call_browser_close(&call.arguments, self).await.ok()?;
+                result.provider_id = call.provider_id.clone();
+                emit_completed(self.wire, self.session_id, call, &result).await;
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Built-in browser_select: execute inline, no MCP round-trip.
+            if call.name == builtin::BROWSER_SELECT_TOOL {
+                emit_in_progress(self.wire, self.session_id, call).await;
+                let mut result = builtin::call_browser_select(&call.arguments, self).await.ok()?;
+                result.provider_id = call.provider_id.clone();
+                emit_completed(self.wire, self.session_id, call, &result).await;
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Built-in browser_hover: execute inline, no MCP round-trip.
+            if call.name == builtin::BROWSER_HOVER_TOOL {
+                emit_in_progress(self.wire, self.session_id, call).await;
+                let mut result = builtin::call_browser_hover(&call.arguments, self).await.ok()?;
+                result.provider_id = call.provider_id.clone();
+                emit_completed(self.wire, self.session_id, call, &result).await;
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Built-in browser_keypress: execute inline, no MCP round-trip.
+            if call.name == builtin::BROWSER_KEYPRESS_TOOL {
+                emit_in_progress(self.wire, self.session_id, call).await;
+                let mut result = builtin::call_browser_keypress(&call.arguments, self).await.ok()?;
+                result.provider_id = call.provider_id.clone();
+                emit_completed(self.wire, self.session_id, call, &result).await;
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Built-in browser_execute_script: execute inline, no MCP round-trip.
+            if call.name == builtin::BROWSER_EXECUTE_SCRIPT_TOOL {
+                emit_in_progress(self.wire, self.session_id, call).await;
+                let mut result = builtin::call_browser_execute_script(&call.arguments, self).await.ok()?;
                 result.provider_id = call.provider_id.clone();
                 emit_completed(self.wire, self.session_id, call, &result).await;
                 results[idx] = Some(result);

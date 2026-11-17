@@ -2,11 +2,12 @@
 mod agent;
 pub mod auth;
 mod auth_http;
+pub mod browser_pool;
 mod builtin;
 mod catalog;
-pub mod checkpoint;
-pub mod compaction;
-pub mod config;
+mod checkpoint;
+mod compaction;
+mod config;
 mod daemon;
 mod daemon_dispatch;
 mod daemon_lock;
@@ -14,6 +15,9 @@ mod daemon_sub;
 mod daemon_ws;
 mod databricks;
 mod databricks_label_grammar;
+mod encrypted_vault;
+mod vault_api;
+mod capability_token;
 mod handoff;
 mod health_analyzer;
 mod health_dashboard;
@@ -21,12 +25,8 @@ mod health_diagnoser;
 mod health_guardian;
 mod health_reporter;
 mod hints;
-pub mod autoloop;
-pub mod harness;
-pub mod hooks;
-pub mod perception;
-pub mod verified_write;
-pub mod agent_s;
+mod hooks;
+
 pub mod anymodelbot;
 pub mod agentic_rag;
 pub mod tstack;
@@ -43,6 +43,11 @@ pub use catalog::{
 };
 pub use config::Provider;
 pub use types::AgentError;
+
+// Browser Automation Phase 2 exports
+pub use capability_token::{Capability, CapabilityToken, CapabilityChecker, TokenFactory, CapabilityError};
+pub use encrypted_vault::{EncryptedVault, MasterKey, VaultConfig, VaultEntry};
+pub use vault_api::{VaultApi, StoreCredentialRequest, RetrieveCredentialRequest, CredentialResponse, ListCredentialsResponse};
 
 /// Environment keys the Windows Git Bash resolver may inspect. `spawn_one()`
 /// forwards every key in this list into its otherwise-cleared MCP child; Doctor
@@ -68,6 +73,7 @@ use tokio::io::BufReader;
 use tokio::sync::{mpsc, watch, Mutex};
 
 use crate::agent::RunCtx;
+use crate::browser_pool::BrowserPool;
 use crate::config::{Config, MAX_SYSTEM_PROMPT_BYTES, PROTOCOL_VERSION};
 use crate::hints::SkillEntry;
 use crate::llm::Llm;
@@ -94,6 +100,8 @@ struct App {
     /// process-wide admission, id allocation, response delivery, and abort-safe
     /// cleanup. See [`permission::PermissionBroker`].
     permissions: Arc<permission::PermissionBroker>,
+    /// Browser Pool for Browser Automation
+    browser_pool: Option<Arc<BrowserPool>>,
     /// Cached model catalog for Databricks providers. Populated lazily on the
     /// first successful `session/new` discovery call. Failed discovery is never
     /// cached: static-token authentication errors reject session creation, while
@@ -197,7 +205,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(async_main());
+        .block_on(async_main())?;
     Ok(())
 }
 
@@ -312,7 +320,7 @@ async fn health_dashboard_subcommand(args: &[String]) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-async fn async_main() {
+async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_ansi(false)
@@ -324,12 +332,23 @@ async fn async_main() {
         cfg.max_pending_permissions,
         cfg.permission_timeout,
     ));
+    let browser_pool = match BrowserPool::new().await {
+        Ok(pool) => {
+            tracing::info!("BrowserPool successfully initialized");
+            Some(Arc::new(pool))
+        }
+        Err(e) => {
+            tracing::warn!("BrowserPool initialization deferred (playwright runtime not ready): {e}");
+            None
+        }
+    };
     let app = Arc::new(App {
         cfg: cfg.clone(),
         llm,
         sessions: Mutex::new(HashMap::new()),
         negotiated_version: AtomicU32::new(PROTOCOL_VERSION),
         permissions,
+        browser_pool,
         models_cache: tokio::sync::OnceCell::new(),
     });
 
@@ -366,7 +385,8 @@ async fn async_main() {
             tracing::error!("io: writer exited (stdout closed); shutting down connection");
             cancel_all_sessions(&app).await;
         }
-    }
+    };
+    Ok(())
 }
 
 /// Signal every live session to cancel. Run on connection teardown so in-flight
@@ -959,6 +979,7 @@ async fn run_prompt(app: Arc<App>, id: Value, params: Value, wire_tx: WireSender
         turn_pricing_identity: &mut turn_pricing_identity,
         usage_baseline,
         ledger: &mut ledger,
+        browser_pool: &app.browser_pool,
     };
     let result = ctx.run(p.prompt).await;
     if let Some(s) = app.sessions.lock().await.get_mut(&sid) {

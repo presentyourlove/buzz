@@ -1,0 +1,266 @@
+//! WaitFor Skill
+//! 
+//! Wait for various conditions with capability validation.
+
+use anyhow::{Context, Result};
+use playwright::Page;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tracing::{debug, info};
+
+use crate::capability::{BrowserAction, BrowserCapability};
+
+/// WaitFor skill configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaitForConfig {
+    /// Wait condition type
+    pub condition: WaitCondition,
+    /// Timeout in milliseconds
+    #[serde(default = "default_timeout")]
+    pub timeout_ms: u64,
+    /// Poll interval in milliseconds
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval_ms: u64,
+}
+
+fn default_timeout() -> u64 {
+    30000
+}
+
+fn default_poll_interval() -> u64 {
+    500
+}
+
+/// Wait condition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WaitCondition {
+    /// Wait for selector to appear
+    Selector { selector: String, state: WaitForSelectorState },
+    /// Wait for navigation
+    Navigation { url: Option<String>, wait_until: super::navigate::WaitUntil },
+    /// Wait for JavaScript condition
+    JavaScript { script: String },
+    /// Wait for network request/response
+    Network { url_pattern: String, kind: NetworkWaitKind },
+    /// Wait for page load state
+    LoadState { state: super::navigate::WaitUntil },
+    /// Wait for fixed duration
+    Duration { ms: u64 },
+    /// Wait for element to be visible
+    ElementVisible { selector: String },
+    /// Wait for element to be hidden
+    ElementHidden { selector: String },
+    /// Wait for element to be enabled
+    ElementEnabled { selector: String },
+    /// Wait for element to be disabled
+    ElementDisabled { selector: String },
+}
+
+/// Selector wait state
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WaitForSelectorState {
+    Attached,
+    Detached,
+    Visible,
+    Hidden,
+}
+
+/// Network wait kind
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkWaitKind {
+    Request,
+    Response,
+    RequestFinished,
+    ResponseFinished,
+}
+
+/// WaitFor skill result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaitForResult {
+    /// Whether wait was successful
+    pub success: bool,
+    /// Whether condition was met
+    pub condition_met: bool,
+    /// Matched element info (for selector waits)
+    pub element_info: Option<ElementInfo>,
+    /// Matched network event info (for network waits)
+    pub network_info: Option<NetworkInfo>,
+    /// Error message if failed
+    pub error: Option<String>,
+    /// Execution time in milliseconds
+    pub duration_ms: u64,
+}
+
+/// Element information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElementInfo {
+    pub selector: String,
+    pub tag_name: String,
+    pub id: Option<String>,
+    pub class_name: Option<String>,
+}
+
+/// Network event information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkInfo {
+    pub url: String,
+    pub method: String,
+    pub status: Option<u16>,
+    pub resource_type: String,
+}
+
+/// WaitFor skill
+pub struct WaitForSkill;
+
+impl WaitForSkill {
+    /// Execute wait condition
+    pub async fn execute(
+        page: &Page,
+        config: WaitForConfig,
+    ) -> Result<WaitForResult> {
+        let start = std::time::Instant::now();
+        let timeout = Duration::from_millis(config.timeout_ms);
+        let poll_interval = Duration::from_millis(config.poll_interval_ms);
+        
+        info!("Waiting for condition: {:?}", config.condition);
+        
+        let result = match config.condition {
+            WaitCondition::Selector { selector, state } => {
+                Self::wait_for_selector(page, &selector, state, timeout).await
+            }
+            WaitCondition::Navigation { url, wait_until } => {
+                Self::wait_for_navigation(page, url, wait_until, timeout).await
+            }
+            WaitCondition::JavaScript { script } => {
+                Self::wait_for_javascript(page, &script, timeout, poll_interval).await
+            }
+            WaitCondition::Network { url_pattern, kind } => {
+                Self::wait_for_network(page, &url_pattern, kind, timeout).await
+            }
+            WaitCondition::LoadState { state } => {
+                Self::wait_for_load_state(page, state, timeout).await
+            }
+            WaitCondition::Duration { ms } => {
+                Self::wait_for_duration(ms).await
+            }
+            WaitCondition::ElementVisible { selector } => {
+                Self::wait_for_selector(page, &selector, WaitForSelectorState::Visible, timeout).await
+            }
+            WaitCondition::ElementHidden { selector } => {
+                Self::wait_for_selector(page, &selector, WaitForSelectorState::Hidden, timeout).await
+            }
+            WaitCondition::ElementEnabled { selector } => {
+                Self::wait_for_element_enabled(page, &selector, true, timeout).await
+            }
+            WaitCondition::ElementDisabled { selector } => {
+                Self::wait_for_element_enabled(page, &selector, false, timeout).await
+            }
+        };
+        
+        let duration = start.elapsed().as_millis() as u64;
+        
+        match result {
+            Ok(res) => {
+                debug!("Wait completed in {}ms: condition_met={}", duration, res.condition_met);
+                Ok(WaitForResult {
+                    success: true,
+                    condition_met: res.condition_met,
+                    element_info: res.element_info,
+                    network_info: res.network_info,
+                    error: None,
+                    duration_ms: duration,
+                })
+            }
+            Err(e) => {
+                debug!("Wait failed in {}ms: {}", duration, e);
+                Ok(WaitForResult {
+                    success: false,
+                    condition_met: false,
+                    element_info: None,
+                    network_info: None,
+                    error: Some(e.to_string()),
+                    duration_ms: duration,
+                })
+            }
+        }
+    }
+    
+    /// Wait for selector
+    async fn wait_for_selector(
+        page: &Page,
+        selector: &str,
+        state: WaitForSelectorState,
+        timeout: Duration,
+    ) -> Result<WaitResult> {
+        let playwright_state = match state {
+            WaitForSelectorState::Attached => playwright::api::WaitForSelectorState::Attached,
+            WaitForSelectorState::Detached => playwright::api::WaitForSelectorState::Detached,
+            WaitForSelectorState::Visible => playwright::api::WaitForSelectorState::Visible,
+            WaitForSelectorState::Hidden => playwright::api::WaitForSelectorState::Hidden,
+        };
+        
+        let element = page
+            .wait_for_selector(selector)
+            .await
+            .with_context(|| format!("Timeout waiting for selector: {}", selector))?;
+        
+        // Wait for specific state
+        match state {
+            WaitForSelectorState::Visible => {
+                element.wait_for_element_state(playwright::api::ElementState::Visible).await?;
+            }
+            WaitForSelectorState::Hidden => {
+                element.wait_for_element_state(playwright::api::ElementState::Hidden).await?;
+            }
+            WaitForSelectorState::Attached => {
+                element.wait_for_element_state(playwright::api::ElementState::Attached).await?;
+            }
+            WaitForSelectorState::Detached => {
+                element.wait_for_element_state(playwright::api::ElementState::Detached).await?;
+            }
+        }
+        
+        let element_info = Self::get_element_info(&element, selector).await;
+        
+        Ok(WaitResult {
+            condition_met: true,
+            element_info: Some(element_info),
+            network_info: None,
+        })
+    }
+    
+    /// Wait for navigation
+    async fn wait_for_navigation(
+        page: &Page,
+        url: Option<String>,
+        timeout_ms: u64,
+    ) -> Result<WaitResult> {
+        let start = std::time::Instant::now();
+        
+        let navigation_future = async {
+            if let Some(target_url) = url {
+                page.wait_for_url(&target_url).await?;
+            } else {
+                page.wait_for_load_state(playwright::api::LoadState::NetworkIdle).await?;
+            }
+            Ok::<(), anyhow::Error>(())
+        };
+        
+        match tokio::time::timeout(Duration::from_millis(timeout_ms), navigation_future).await {
+            Ok(Ok(_)) => Ok(WaitResult {
+                condition_met: true,
+                element_info: None,
+                network_info: Some(NetworkInfo {
+                    final_url: page.url().await.unwrap_or_default(),
+                    resource_count: 0,
+                    total_transfer_size: 0,
+                }),
+            }),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(anyhow::anyhow!("Navigation timeout after {}ms", timeout_ms)),
+        }
+    }
+}

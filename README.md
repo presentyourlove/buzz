@@ -939,6 +939,93 @@ just reset          # ⚠️  Wipe data + recreate
   - 沙盒攔截測試：`format` 命令與越界路徑 100% 被拒絕。
   - Rust 引擎沙盒編譯：`buzz-agent.exe` 編譯 0 錯誤通過並熱部署。
 
+### Phase 24: 上下文壓縮機制深度優化與特工通訊門禁/路徑知識庫映射 (Context Compaction Optimization & Agent Comm Gates)
+- **核心升級亮點 (Core Highlights)**：
+  - **特工發言防洗版雙門禁**：在 `%APPDATA%\xyz.block.buzz.app\agents\managed-agents.json` 寫死注入「秘書單一發言制（主理人提問僅 @Fizz 代表發言）」與「Sentry 審核後強制靜默門禁（嚴禁特工間互 @ 乒乓球復讀）」。
+  - **Obsidian 知識庫絕對路徑映射**：為全體特工注入 `wiki/...` 唯一映射至 `C:\私人\ai agent\buzz-obsidian\wiki\...`，徹底修復 Honey 誤報未收錄問題。
+  - **上下文壓縮門檻調優 (Context Compaction Tuning)**：修改 `config.rs`，Tier 0 剪枝門檻下調至 35%（70k tokens），目標下調至 20%（40k tokens），在 80k TPM 限流危險區前無感自動修剪歷史 ToolResult。
+  - **429 限流自適應降載機制 (Adaptive Downsizing on 429)**：修改 `agent.rs`，當請求遭遇 `429 Too Many Requests` 時，自動觸發緊急上下文減半縮編與摺疊，將 payload 壓力減半後冷卻重試，徹底打破 86k 隊列卡死死循環。
+- **檔案變更清單 (File Inventory)**：
+  - **修改 (Modified)**：
+    - `%APPDATA%\xyz.block.buzz.app\agents\managed-agents.json` (注入門禁與 Obsidian 路徑映射)
+    - `crates/buzz-agent/src/config.rs` (調優剪枝門檻至 35%、交接門檻至 55%)
+    - `crates/buzz-agent/src/agent.rs` (實裝 429 限流自適應降載機制)
+    - `c:\私人\ai agent\block-buzz.md` (新增第三十四章)
+    - `c:\私人\ai agent\buzz\README.md` (新增 Phase 24 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - `managed-agents.json` 語法校驗：12 位特工 System Prompt 100% 成功注入。
+  - Cargo 編譯驗證：`cargo check --package buzz-agent` 0 error 通過。
+  - 二進位熱置換驗證：Release 版 `buzz-agent.exe` (17.7 MB) 成功熱部署至 `C:\Users\user\AppData\Local\Buzz\`。
+
+### Phase 25: 瀏覽器自動化基建正式交付與型別門禁障礙解凍 (Browser Automation Infrastructure & Compiler Recovery)
+- **核心升級亮點 (Core Highlights)**：
+  - **Playwright 瀏覽器池完整落地**：成功在 `crates/buzz-agent/src/browser_pool.rs` 交付 343 行非同步瀏覽器池模組（`BrowserPool`、`PooledBrowser`、基於 `Semaphore` 的並發租約管理、超時與單元測試），完成 Browser Automation Phase 1 核心實裝。
+  - **型別障礙修復與防禦性容錯開機**：修復 `lib.rs` 中 `async_main` 的 `Result<(), Box<dyn Error>>` 結尾閉合問題；將 `browser_pool` 封裝為 `Option<Arc<BrowserPool>>`，實裝安全容錯啟動（若環境無 node driver 自動以 Warning 待命，杜絕崩潰）。
+  - **清理未引用模組**：移除 `browser_pool.rs` 中未使用的 `BrowserType` 引用。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/src/browser_pool.rs` (由特工 Pollen 撰寫之瀏覽器池核心模組)
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/Cargo.toml` (納入 `playwright-rs` 依賴)
+  - `crates/buzz-agent/src/lib.rs` (安全容錯掛載 `browser_pool` 並修復主入口回傳型別)
+  - `crates/buzz-agent/src/browser_pool.rs` (清理未使用引用)
+  - `c:\私人\ai agent\block-buzz.md` (增設第三十五章)
+  - `c:\私人\ai agent\buzz\README.md` (增設 Phase 25 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - 型別安全驗證：`cargo check --package buzz-agent` 0 error 通過。
+  - 二進位檔發布測試：Release 二進位檔（**21,175,942 bytes** / 21.1 MB，內建 Playwright 基建）編譯成功，並熱部署至 `C:\Users\user\AppData\Local\Buzz\buzz-agent.exe`。
+
+### Phase 26: 瀏覽器池 Task 1.3 型別修復、二進位熱更新與特工自主運作可觀測性加固 (Browser Pool Fix, Release Deploy & Autonomous Agent Observability)
+- **核心升級亮點 (Core Highlights)**：
+  - **Task 1.3 瀏覽器池 Playwright API 型別相容性修復**：徹底修復 `browser_pool.rs` 中 `ContextGuard::new` 簽名接收 `Option<usize>`、`set_extra_http_headers` 接受 `HashMap<String, String>`、以及移除對私有 `guid()` 方法之依賴，Cargo 編譯達成 100% 0 error。
+  - **Release 二進位構建與熱置換**：重新編譯 Release 版 `buzz-agent.exe`（**21,253,624 bytes** / 21.2 MB），並透過檔案置換無縫熱更新至 `C:\Users\user\AppData\Local\Buzz\buzz-agent.exe`。
+  - **特工自主運作可觀測性與零死循環四大守則注入**：於全體特工注入【零宣誓硬消音】（嚴禁元語言宣告待命）、【成果交付即閉環】（產出後必須呈報路徑與摘要）、【主動進度心跳】（長程任務階段性回報）、【三次失敗硬熔斷呼救】（拒絕盲目自轉重試），根治特工黑盒長跑與無回音現象。
+- **檔案變更清單 (File Inventory)**：
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/browser_pool.rs` (修復 ContextGuard、Header 型別與 guid 依賴)
+    - `%APPDATA%\xyz.block.buzz.app\agents\managed-agents.json` (注入四大自主可觀測性鐵律)
+    - `c:\私人\ai agent\block-buzz.md` (增設第三十六章)
+    - `c:\私人\ai agent\buzz\README.md` (增設 Phase 26 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - 編譯校驗：`cargo check --package buzz-agent` 0 error 通過。
+  - Release 編譯驗證：`cargo build --release --bin buzz-agent` 成功產生 21.2 MB 二進位檔。
+  - 熱更新驗證：完成目標執行檔無縫熱替換。
+
+### Phase 27: 每日進化推播去蕪存菁與對話分析去噪 (Daily Evolution Digest Streamlining & Noise Removal)
+- **核心升級亮點 (Core Highlights)**：
+  - **推播訊息 25 行人話速讀重構**：徹底廢除舊版抽象的「流程/技術債/協同/自動化」死板模板與冗長佔位表格，全面重構為「📌 本日核心推進成果 + 🛡️ 建議後台操作項 + ⚡ 特工自主優化進展 + 🎯 主理人決策選項」的極簡雙層架構。
+  - **阻礙與瓶頸誤判過濾 (Blocker False Positive Removal)**：增加指令白名單，徹底杜絕將【主理人正式指令】及【成果交付報告】生硬誤判為「🚧 系統阻礙 (Blockers)」的重大缺陷。
+  - **成員十六進位公鑰名稱翻譯**：建立特工與主理人公鑰映射表（`AGENT_NAME_MAP`），自動將生硬的 `2d29...`、`6f38...` 翻譯為「主理人」、「Pollen」、「Wax」、「Fizz」等具體角色名稱。
+  - **零干擾安全隔離**：本次重構完全限於外部 Python 分析腳本，零修改 `crates/buzz-agent` 核心代碼，確保 Pollen 當前之型別修復工作不受任何干擾。
+- **檔案變更清單 (File Inventory)**：
+  - **修改 (Modified)**：
+    - `PLANS/daily_evolution/daily_evolution.py` (實裝公鑰翻譯器、指令過濾器與 25 行人話推播)
+    - `c:\私人\ai agent\block-buzz.md` (增設第三十七章)
+    - `c:\私人\ai agent\buzz\README.md` (增設 Phase 27 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - 語法驗證：`python daily_evolution.py --help` 0 error 通過。
+  - 隔離驗證：未觸碰任何 Rust 模組，Pollen 正在修改之工程檔案 100% 隔離保全。
+
+### Phase 28: 瀏覽器自動化工具收尾交付、整合測試通過與 Fallback 錨定 (Browser Automation Phase 1 Completion, Tests Passed & Fallback Anchor)
+- **核心升級亮點 (Core Highlights)**：
+  - **Playwright API 型別精確修復**：接棒特工 Pollen 累積之 34 處型別對齊成果，成功修復 `browser_select`（改用 `locator.select_option` 並修正 Index 轉 `usize`）、`browser_extract`（修正 `text_content` 回傳 `Option<String>` 匹配）、`browser_keypress`（消除生命週期借用移動）、以及 `page.evaluate`（補全無參數型別標註 `None::<&()>`）。
+  - **編譯零警告錯誤達標**：`cargo check --package buzz-agent` 達成 0 error。
+  - **端到端整合測試全數 PASS**：執行 Wax 設計之瀏覽器池端到端測試 `tests/browser_integration.rs`，4 項測試（生命週期開啟/導航/截圖/關閉、視窗尺寸配置、池啟動與關閉、安全 Context 洩漏防護）全數以 100% 通過（`4 passed; 0 failed`）。
+  - **二進位構建與無縫熱更新**：編譯產出 Release 二進位檔（**21,925,323 bytes** / 21.9 MB），並透過安全檔名置換完成 `C:\Users\user\AppData\Local\Buzz\buzz-agent.exe` 之熱置換。
+  - **正式建立 Fallback 檢查點**：完成代碼清理與里程碑標籤錨定（`v0.9.0-browser-stable`），確保日後可一鍵無損還原。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/docs/PLAYWRIGHT_API_SPEC.md` (Playwright-rs 0.21.0 官方導出路徑規範)
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/builtin.rs` (修復 browser_select, browser_extract, browser_keypress, evaluate API 對齊)
+    - `crates/buzz-agent/src/lib.rs` (清理不存在之 VaultError 引用)
+    - `c:\私人\ai agent\buzz\README.md` (增設 Phase 28 記錄)
+    - `c:\私人\ai agent\block-buzz.md` (增設第三十八章)
+- **測試驗證 (Testing & QA)**：
+  - 編譯校驗：`cargo check --package buzz-agent` 0 error 通過。
+  - 整合測試：`cargo test --package buzz-agent --test browser_integration` 4 passed; 0 failed。
+  - 二進位熱置換：Release 版 `buzz-agent.exe` (21.9 MB) 成功熱部署。
+
 ---
 
 <p align="center">

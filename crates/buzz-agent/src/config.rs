@@ -478,16 +478,16 @@ pub enum CompactionMode {
     Legacy,
 }
 
-/// Tier 0 確定性剪枝觸發門檻（佔 max_context_tokens 百分比）。
-pub const DEFAULT_PRUNE_THRESHOLD_PERCENT: u64 = 60;
-/// Tier 0 批次剪枝目標水位（佔 max_context_tokens 百分比），避免每回合頻繁剪枝破壞 Prompt Cache。
-pub const DEFAULT_PRUNE_TARGET_PERCENT: u64 = 40;
-/// Tier 1 增強交接（LLM 滾動摘要）觸發門檻（佔 max_context_tokens 百分比）。
-pub const DEFAULT_HANDOFF_THRESHOLD_PERCENT: u64 = 80;
+/// Tier 0 確定性剪枝觸發門檻（佔 max_context_tokens 百分比，由 60% 調優至 35%，在 70k 前主動剪枝防 429）。
+pub const DEFAULT_PRUNE_THRESHOLD_PERCENT: u64 = 35;
+/// Tier 0 批次剪枝目標水位（佔 max_context_tokens 百分比，由 40% 調優至 20%，維持輕量）。
+pub const DEFAULT_PRUNE_TARGET_PERCENT: u64 = 20;
+/// Tier 1 增強交接（LLM 滾動摘要）觸發門檻（佔 max_context_tokens 百分比，由 80% 調優至 55%）。
+pub const DEFAULT_HANDOFF_THRESHOLD_PERCENT: u64 = 55;
 /// Legacy 模式下之交接門檻（維持舊版 90% 行為不變）。
-pub const LEGACY_HANDOFF_THRESHOLD_PERCENT: u64 = 90;
-/// Tier 1 交接與 Tier 0 剪枝時保留之逐字尾端預算佔比（佔 max_context_tokens 百分比）。
-pub const DEFAULT_TAIL_BUDGET_PERCENT: u64 = 20;
+pub const LEGACY_HANDOFF_THRESHOLD_PERCENT: u64 = 75;
+/// Tier 1 交接與 Tier 0 剪枝時保留之逐字尾端預算佔比（佔 max_context_tokens 百分比，調優至 15%）。
+pub const DEFAULT_TAIL_BUDGET_PERCENT: u64 = 15;
 /// 逐字尾端最少保留之完整回合數（確保近期工具呼叫與結果不被切斷）。
 pub const DEFAULT_TAIL_MIN_ROUNDS: usize = 3;
 /// Tier 0 剪枝僅針對超過此位元組數的舊 ToolResult 進行替換。

@@ -1,0 +1,289 @@
+diff --git a/crates/buzz-agent/src/agent.rs b/crates/buzz-agent/src/agent.rs
+index 1115c5d6d..338ea9aa7 100644
+--- a/crates/buzz-agent/src/agent.rs
++++ b/crates/buzz-agent/src/agent.rs
+@@ -6,6 +6,7 @@ use tokio::task::JoinSet;
+ use tracing::Instrument as _;
+ 
+ use crate::builtin;
++use crate::browser_pool::BrowserPool;
+ use crate::config::{
+     pricing_authority, Config, MAX_PROMPT_BYTES, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_RESULT_BYTES,
+ };
+@@ -455,6 +456,9 @@ pub struct RunCtx<'a> {
+     pub usage_baseline: SessionUsageBaseline,
+     /// 確定性工作集帳本（修復 D8）：隨回合自動記錄讀寫改檔案、指令與錯誤。
+     pub ledger: &'a mut crate::compaction::WorkingSetLedger,
++    /// Shared browser pool for builtin browser tools. May be None if Playwright
++    /// runtime was not ready at startup.
++    pub browser_pool: &'a Option<Arc<BrowserPool>>,
+ }
+ 
+ /// Fold one round's proven identity into the per-turn identity accumulator.
+@@ -713,6 +717,12 @@ impl RunCtx<'_> {
+                 tools.push(builtin::send_direct_message_def());
+                 tools.push(builtin::create_reminder_def());
+             }
++            // Inject browser automation tools when browser pool is available.
++            if self.browser_pool.is_some() {
++                tools.push(builtin::browser_open_def());
++                tools.push(builtin::browser_screenshot_def());
++                tools.push(builtin::browser_close_def());
++            }
+             round = round.saturating_add(1);
+             let response_result = tokio::select! {
+                 biased;
+@@ -811,6 +821,39 @@ impl RunCtx<'_> {
+                         }
+                     }
+                 }
++                // 429 限流自適應降載（Adaptive Downsizing on 429/TPM Exhaustion）
++                // 當 LLM 遭遇 429 Too Many Requests 且對話歷史膨脹時，不應盲目等待相同龐大 payload 重試，
++                // 而是主動啟動上下文緊急縮編降載，減半 payload 壓力再退避重試，徹底打破限流死循環。
++                Err(AgentError::Llm(msg))
++                    if (msg.contains("429")
++                        || msg.contains("Too Many Requests")
++                        || msg.contains("rate limit")
++                        || msg.contains("Rate limit"))
++                        && context_recoveries < crate::config::MAX_CONTEXT_RECOVERIES_PER_RUN =>
++                {
++                    tracing::warn!(
++                        model = self.effective_model,
++                        error = %msg,
++                        recoveries = context_recoveries,
++                        "LLM returned rate-limit (429/TPM); performing adaptive context downsizing to relieve API pressure"
++                    );
++                    match self
++                        .recover_from_context_overflow(&mut context_recoveries)
++                        .await
++                    {
++                        ContextRecovery::Recovered => {
++                            round = round.saturating_sub(1);
++                            *self.last_request_input_tokens = None;
++                            *self.last_request_history_bytes = None;
++                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
++                            continue;
++                        }
++                        ContextRecovery::Cancelled => return Ok(StopReason::Cancelled),
++                        ContextRecovery::Exhausted => {
++                            return Err(AgentError::Llm(msg));
++                        }
++                    }
++                }
+                 Err(error) => return Err(error),
+             };
+             // Record provider-reported input usage so the next loop iteration's
+@@ -1375,6 +1418,36 @@ impl RunCtx<'_> {
+                 continue;
+             }
+ 
++            // Built-in browser_open: execute inline, no MCP round-trip.
++            if call.name == builtin::BROWSER_OPEN_TOOL {
++                emit_in_progress(self.wire, self.session_id, call).await;
++                let mut result = builtin::call_browser_open(&call.arguments, self).await.ok()?;
++                result.provider_id = call.provider_id.clone();
++                emit_completed(self.wire, self.session_id, call, &result).await;
++                results[idx] = Some(result);
++                continue;
++            }
++
++            // Built-in browser_screenshot: execute inline, no MCP round-trip.
++            if call.name == builtin::BROWSER_SCREENSHOT_TOOL {
++                emit_in_progress(self.wire, self.session_id, call).await;
++                let mut result = builtin::call_browser_screenshot(&call.arguments, self).await.ok()?;
++                result.provider_id = call.provider_id.clone();
++                emit_completed(self.wire, self.session_id, call, &result).await;
++                results[idx] = Some(result);
++                continue;
++            }
++
++            // Built-in browser_close: execute inline, no MCP round-trip.
++            if call.name == builtin::BROWSER_CLOSE_TOOL {
++                emit_in_progress(self.wire, self.session_id, call).await;
++                let mut result = builtin::call_browser_close(&call.arguments, self).await.ok()?;
++                result.provider_id = call.provider_id.clone();
++                emit_completed(self.wire, self.session_id, call, &result).await;
++                results[idx] = Some(result);
++                continue;
++            }
++
+             // Hook tools (bare name starts with `_`) are invisible to the
+             // LLM and only callable via `call_hooks`. Treat any direct
+             // invocation as if the tool didn't exist.
+diff --git a/crates/buzz-agent/src/builtin.rs b/crates/buzz-agent/src/builtin.rs
+index 0c083dd79..2c02f5ad6 100644
+--- a/crates/buzz-agent/src/builtin.rs
++++ b/crates/buzz-agent/src/builtin.rs
+@@ -1000,3 +1000,172 @@ mod tests {
+         );
+     }
+ }
++
++/// Tool name for `browser_open` — opens a URL in a new browser context via BrowserPool.
++pub const BROWSER_OPEN_TOOL: &str = "browser_open";
++
++/// Return the `ToolDef` for `browser_open`.
++pub fn browser_open_def() -> ToolDef {
++    ToolDef {
++        name: BROWSER_OPEN_TOOL.to_owned(),
++        description: "Open a URL in a new isolated browser context. Returns a context_id for use with browser_screenshot and browser_close."
++            .to_owned(),
++        input_schema: json!({
++            "type": "object",
++            "properties": {
++                "url": {
++                    "type": "string",
++                    "description": "The URL to open"
++                }
++            },
++            "required": ["url"]
++        }),
++    }
++}
++
++/// Execute `browser_open`.
++pub async fn call_browser_open(
++    arguments: &Value,
++    self_: &mut RunCtx<'_>,
++) -> Result<ToolResult, AgentError> {
++    let url = arguments
++        .get("url")
++        .and_then(|v| v.as_str())
++        .ok_or_else(|| AgentError::Other("browser_open: missing required 'url' parameter".to_string()))?;
++
++    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
++        AgentError::Other("browser_open: browser pool not initialized. Run in Mode B daemon with --enable-browser flag.".to_string())
++    })?;
++
++    // Create a new context
++    let context_id = pool.create_context().await
++        .map_err(|e| AgentError::Other(format!("browser_open: failed to create context: {e}")))?;
++
++    // Navigate to the URL
++    pool.navigate(&context_id, url).await
++        .map_err(|e| AgentError::Other(format!("browser_open: failed to navigate to {url}: {e}")))?;
++
++    Ok(ToolResult {
++        provider_id: String::new(),
++        content: vec![ToolResultContent::Text(
++            serde_json::json!({
++                "context_id": context_id,
++                "url": url,
++                "status": "opened"
++            }).to_string()
++        )],
++        is_error: false,
++    })
++}
++
++/// Tool name for `browser_screenshot` — captures screenshot of current page in a browser context.
++pub const BROWSER_SCREENSHOT_TOOL: &str = "browser_screenshot";
++
++/// Return the `ToolDef` for `browser_screenshot`.
++pub fn browser_screenshot_def() -> ToolDef {
++    ToolDef {
++        name: BROWSER_SCREENSHOT_TOOL.to_owned(),
++        description: "Capture a screenshot of the current page in a browser context. Saves to the specified file path."
++            .to_owned(),
++        input_schema: json!({
++            "type": "object",
++            "properties": {
++                "context_id": {
++                    "type": "string",
++                    "description": "The context_id returned by browser_open"
++                },
++                "path": {
++                    "type": "string",
++                    "description": "File path to save the screenshot (e.g., screenshot.png)"
++                }
++            },
++            "required": ["context_id", "path"]
++        }),
++    }
++}
++
++/// Execute `browser_screenshot`.
++pub async fn call_browser_screenshot(
++    arguments: &Value,
++    self_: &mut RunCtx<'_>,
++) -> Result<ToolResult, AgentError> {
++    let context_id = arguments
++        .get("context_id")
++        .and_then(|v| v.as_str())
++        .ok_or_else(|| AgentError::Other("browser_screenshot: missing required 'context_id' parameter".to_string()))?;
++
++    let path = arguments
++        .get("path")
++        .and_then(|v| v.as_str())
++        .ok_or_else(|| AgentError::Other("browser_screenshot: missing required 'path' parameter".to_string()))?;
++
++    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
++        AgentError::Other("browser_screenshot: browser pool not initialized".to_string())
++    })?;
++
++    pool.screenshot(context_id, path).await
++        .map_err(|e| AgentError::Other(format!("browser_screenshot: failed to capture screenshot: {e}")))?;
++
++    Ok(ToolResult {
++        provider_id: String::new(),
++        content: vec![ToolResultContent::Text(
++            serde_json::json!({
++                "context_id": context_id,
++                "path": path,
++                "status": "screenshot_saved"
++            }).to_string()
++        )],
++        is_error: false,
++    })
++}
++
++/// Tool name for `browser_close` — safely closes a browser context and returns it to the pool.
++pub const BROWSER_CLOSE_TOOL: &str = "browser_close";
++
++/// Return the `ToolDef` for `browser_close`.
++pub fn browser_close_def() -> ToolDef {
++    ToolDef {
++        name: BROWSER_CLOSE_TOOL.to_owned(),
++        description: "Close a browser context and return it to the pool. Prevents process leaks."
++            .to_owned(),
++        input_schema: json!({
++            "type": "object",
++            "properties": {
++                "context_id": {
++                    "type": "string",
++                    "description": "The context_id returned by browser_open"
++                }
++            },
++            "required": ["context_id"]
++        }),
++    }
++}
++
++/// Execute `browser_close`.
++pub async fn call_browser_close(
++    arguments: &Value,
++    self_: &mut RunCtx<'_>,
++) -> Result<ToolResult, AgentError> {
++    let context_id = arguments
++        .get("context_id")
++        .and_then(|v| v.as_str())
++        .ok_or_else(|| AgentError::Other("browser_close: missing required 'context_id' parameter".to_string()))?;
++
++    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
++        AgentError::Other("browser_close: browser pool not initialized".to_string())
++    })?;
++
++    pool.close_context(context_id).await
++        .map_err(|e| AgentError::Other(format!("browser_close: failed to close context: {e}")))?;
++
++    Ok(ToolResult {
++        provider_id: String::new(),
++        content: vec![ToolResultContent::Text(
++            serde_json::json!({
++                "context_id": context_id,
++                "status": "closed"
++            }).to_string()
++        )],
++        is_error: false,
++    })
++}

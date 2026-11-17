@@ -12,6 +12,7 @@
 use serde_json::{json, Value};
 
 use crate::agent::RunCtx;
+use crate::capability_token::Capability;
 use crate::hints::{strip_frontmatter, SkillEntry, MAX_SKILL_BODY_BYTES};
 use crate::mcp::truncate_at_boundary;
 use crate::types::{AgentError, ToolDef, ToolResult, ToolResultContent};
@@ -19,6 +20,7 @@ use nostr::{EventBuilder, Kind, Tag};
 use reqwest;
 use chrono;
 use hex;
+use uuid::Uuid;
 
 pub const LOAD_SKILL_TOOL: &str = "load_skill";
 
@@ -999,4 +1001,1161 @@ mod tests {
             "missing supporting-file header: {text}"
         );
     }
+}
+
+/// Tool name for `browser_open` — opens a URL in a new browser context via BrowserPool.
+pub const BROWSER_OPEN_TOOL: &str = "browser_open";
+
+/// Return the `ToolDef` for `browser_open`.
+pub fn browser_open_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_OPEN_TOOL.to_owned(),
+        description: "Open a URL in a new isolated browser context. Returns a context_id for use with browser_screenshot and browser_close."
+            .to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to open"
+                }
+            },
+            "required": ["url"]
+        }),
+    }
+}
+
+/// Execute `browser_open`.
+pub async fn call_browser_open(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    let url = arguments
+        .get("url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_open: missing required 'url' parameter".to_string()))?;
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_open: browser pool not initialized. Run in Mode B daemon with --enable-browser flag.".to_string())
+    })?;
+
+    // Create a new context
+    let context_id = pool.create_context().await
+        .map_err(|e| AgentError::Other(format!("browser_open: failed to create context: {e}")))?;
+
+    // Navigate to the URL
+    pool.navigate(&context_id, url).await
+        .map_err(|e| AgentError::Other(format!("browser_open: failed to navigate to {url}: {e}")))?;
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "url": url,
+                "status": "opened"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool name for `browser_screenshot` — captures screenshot of current page in a browser context.
+pub const BROWSER_SCREENSHOT_TOOL: &str = "browser_screenshot";
+
+/// Return the `ToolDef` for `browser_screenshot`.
+pub fn browser_screenshot_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_SCREENSHOT_TOOL.to_owned(),
+        description: "Capture a screenshot of the current page in a browser context. Saves to the specified file path."
+            .to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "The context_id returned by browser_open"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "File path to save the screenshot (e.g., screenshot.png)"
+                }
+            },
+            "required": ["context_id", "path"]
+        }),
+    }
+}
+
+/// Execute `browser_screenshot`.
+pub async fn call_browser_screenshot(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_screenshot: missing required 'context_id' parameter".to_string()))?;
+
+    let path = arguments
+        .get("path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_screenshot: missing required 'path' parameter".to_string()))?;
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_screenshot: browser pool not initialized".to_string())
+    })?;
+
+    pool.screenshot(context_id, path).await
+        .map_err(|e| AgentError::Other(format!("browser_screenshot: failed to capture screenshot: {e}")))?;
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "path": path,
+                "status": "screenshot_saved"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool name for `browser_close` — safely closes a browser context and returns it to the pool.
+pub const BROWSER_CLOSE_TOOL: &str = "browser_close";
+
+/// Return the `ToolDef` for `browser_close`.
+pub fn browser_close_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_CLOSE_TOOL.to_owned(),
+        description: "Close a browser context and return it to the pool. Prevents process leaks."
+            .to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "The context_id returned by browser_open"
+                }
+            },
+            "required": ["context_id"]
+        }),
+    }
+}
+
+/// Execute `browser_close`.
+pub async fn call_browser_close(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_close: missing required 'context_id' parameter".to_string()))?;
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_close: browser pool not initialized".to_string())
+    })?;
+
+    pool.close_context(context_id).await
+        .map_err(|e| AgentError::Other(format!("browser_close: failed to close context: {e}")))?;
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "status": "closed"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Check if the current session has the required capability for a browser operation.
+/// This integrates with the CapabilityToken system for fine-grained authorization.
+fn check_browser_capability(
+    self_: &RunCtx<'_>,
+    capability: &Capability,
+) -> Result<(), AgentError> {
+    // In Phase 2, we check for capability tokens in the session context.
+    // For now, if no capability system is configured, we allow all operations.
+    // The capability token would typically be passed via the session or agent config.
+    // This is a placeholder for the full capability check integration.
+    
+    // TODO: Implement full capability check once CredentialVault/CapabilityToken is integrated
+    // into the agent session. For now, log and allow.
+    tracing::debug!("Capability check for {:?} - allowed (placeholder)", capability);
+    Ok(())
+}
+
+// ============================================================================
+// Advanced Browser Interaction Tools (Phase 2)
+// ============================================================================
+
+/// Tool name for `browser_click` — click on an element in the browser context.
+pub const BROWSER_CLICK_TOOL: &str = "browser_click";
+
+/// Return the `ToolDef` for `browser_click`.
+pub fn browser_click_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_CLICK_TOOL.to_owned(),
+        description: "Click on an element in the browser context using a CSS selector or XPath".to_owned(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "The context_id returned by browser_open"
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector or XPath of the element to click"
+                },
+                "button": {
+                    "type": "string",
+                    "enum": ["left", "right", "middle"],
+                    "description": "Mouse button to use (default: left)",
+                    "default": "left"
+                },
+                "click_count": {
+                    "type": "integer",
+                    "description": "Number of clicks (default: 1)",
+                    "default": 1,
+                    "minimum": 1,
+                    "maximum": 3
+                },
+                "delay_ms": {
+                    "type": "integer",
+                    "description": "Delay between mousedown and mouseup in milliseconds",
+                    "default": 0
+                },
+                "position": {
+                    "type": "object",
+                    "properties": {
+                        "x": { "type": "number" },
+                        "y": { "type": "number" }
+                    },
+                    "description": "Optional click position relative to element"
+                }
+            },
+            "required": ["context_id", "selector"]
+        }),
+    }
+}
+
+/// Execute `browser_click`.
+pub async fn call_browser_click(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    // Capability check
+    check_browser_capability(self_, &Capability::Click)?;
+
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_click: missing required 'context_id' parameter".to_string()))?;
+
+    let selector = arguments
+        .get("selector")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_click: missing required 'selector' parameter".to_string()))?;
+
+    let button = arguments
+        .get("button")
+        .and_then(|v| v.as_str())
+        .unwrap_or("left");
+
+    let click_count = arguments
+        .get("click_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as i32;
+
+    let delay_ms = arguments
+        .get("delay_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_click: browser pool not initialized".to_string())
+    })?;
+
+    // Get the context and page
+    let context = pool.get_context(context_id).await.ok_or_else(|| AgentError::Other(format!("browser_click: failed to get context: context not found")))?;
+
+    let pages = context.pages();
+    let page = pages.first().ok_or_else(|| {
+        AgentError::Other("browser_click: no page available in context".to_string())
+    })?;
+
+    // Build click options
+    let click_options = playwright_rs::ClickOptions::builder()
+        .button(match button {
+            "right" => playwright_rs::protocol::click::MouseButton::Right,
+            "middle" => playwright_rs::protocol::click::MouseButton::Middle,
+            _ => playwright_rs::protocol::click::MouseButton::Left,
+        })
+        .click_count(click_count as u32)
+        .delay(delay_ms as f64)
+        .build();
+
+    // Perform the click using locator (page.click doesn't exist)
+    let locator = page.locator(selector);
+    locator.click(Some(click_options)).await
+        .map_err(|e| AgentError::Other(format!("browser_click: failed to click element: {e}")))?;
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "selector": selector,
+                "action": "click",
+                "status": "success"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool name for `browser_fill` — fill a form field in the browser context.
+pub const BROWSER_FILL_TOOL: &str = "browser_fill";
+
+/// Return the `ToolDef` for `browser_fill`.
+pub fn browser_fill_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_FILL_TOOL.to_owned(),
+        description: "Fill a form field in the browser context with a value".to_owned(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "The context_id returned by browser_open"
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector or XPath of the input element to fill"
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Value to fill into the field"
+                },
+                "delay_ms": {
+                    "type": "integer",
+                    "description": "Delay between keystrokes in milliseconds (default: 0)",
+                    "default": 0
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "Force fill even if element is not editable (default: false)",
+                    "default": false
+                },
+                "no_wait_after": {
+                    "type": "boolean",
+                    "description": "Skip waiting for navigation after fill (default: false)",
+                    "default": false
+                }
+            },
+            "required": ["context_id", "selector", "value"]
+        }),
+    }
+}
+
+/// Execute `browser_fill`.
+pub async fn call_browser_fill(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    // Capability check
+    check_browser_capability(self_, &Capability::Fill)?;
+
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_fill: missing required 'context_id' parameter".to_string()))?;
+
+    let selector = arguments
+        .get("selector")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_fill: missing required 'selector' parameter".to_string()))?;
+
+    let value = arguments
+        .get("value")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_fill: missing required 'value' parameter".to_string()))?;
+
+    let delay_ms = arguments
+        .get("delay_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let force = arguments
+        .get("force")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let no_wait_after = arguments
+        .get("no_wait_after")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let timeout_ms = arguments
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30000);
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_fill: browser pool not initialized".to_string())
+    })?;
+
+    let context = pool.get_context(context_id).await.ok_or_else(|| AgentError::Other(format!("browser_fill: failed to get context: context not found")))?;
+
+    let pages = context.pages();
+    let page = pages.first().ok_or_else(|| {
+        AgentError::Other("browser_fill: no page available in context".to_string())
+    })?;
+
+    let fill_options = playwright_rs::FillOptions::builder()
+        .force(force)
+        .timeout(timeout_ms as f64)
+        .build();
+
+    // Use locator.fill() like browser_click uses locator.click()
+    let locator = page.locator(selector);
+    locator.fill(value, Some(fill_options)).await
+        .map_err(|e| AgentError::Other(format!("browser_fill: failed to fill field: {e}")))?;
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "selector": selector,
+                "action": "fill",
+                "status": "success"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool name for `browser_wait` — wait for an element or condition in the browser context.
+pub const BROWSER_WAIT_TOOL: &str = "browser_wait";
+
+/// Return the `ToolDef` for `browser_wait`.
+pub fn browser_wait_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_WAIT_TOOL.to_owned(),
+        description: "Wait for an element, condition, or timeout in the browser context".to_owned(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "The context_id returned by browser_open"
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector or XPath to wait for (optional if waiting for timeout/navigation)"
+                },
+                "state": {
+                    "type": "string",
+                    "enum": ["attached", "detached", "visible", "hidden"],
+                    "description": "Element state to wait for (default: visible)",
+                    "default": "visible"
+                },
+                "timeout_ms": {
+                    "type": "integer",
+                    "description": "Maximum time to wait in milliseconds (default: 30000)",
+                    "default": 30000,
+                    "minimum": 100
+                },
+                "wait_until": {
+                    "type": "string",
+                    "enum": ["load", "domcontentloaded", "networkidle", "commit"],
+                    "description": "Wait for navigation to reach this state (optional)"
+                }
+            },
+            "required": ["context_id"]
+        }),
+    }
+}
+
+/// Execute `browser_wait`.
+pub async fn call_browser_wait(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    // Capability check
+    check_browser_capability(self_, &Capability::Wait)?;
+
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_wait: missing required 'context_id' parameter".to_string()))?;
+
+    let selector = arguments.get("selector").and_then(|v| v.as_str());
+    let state = arguments
+        .get("state")
+        .and_then(|v| v.as_str())
+        .unwrap_or("visible");
+
+    let timeout_ms = arguments
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30000);
+
+    let wait_until = arguments.get("wait_until").and_then(|v| v.as_str());
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_wait: browser pool not initialized".to_string())
+    })?;
+
+    let context = pool.get_context(context_id).await.ok_or_else(|| AgentError::Other(format!("browser_wait: failed to get context: context not found")))?;
+
+    let pages = context.pages();
+    let page = pages.first().ok_or_else(|| {
+        AgentError::Other("browser_wait: no page available in context".to_string())
+    })?;
+
+    if let Some(selector) = selector {
+        // Wait for element using locator.wait_for (per PLAYWRIGHT_API_SPEC.md)
+        let state_enum = match state {
+            "attached" => playwright_rs::WaitForState::Attached,
+            "detached" => playwright_rs::WaitForState::Detached,
+            "hidden" => playwright_rs::WaitForState::Hidden,
+            _ => playwright_rs::WaitForState::Visible,
+        };
+
+        let wait_opts = playwright_rs::WaitForOptions::builder()
+            .state(state_enum)
+            .timeout(timeout_ms as f64)
+            .build();
+
+        let locator = page.locator(selector);
+        locator.wait_for(Some(wait_opts)).await
+            .map_err(|e| AgentError::Other(format!("browser_wait: element not found: {e}")))?;
+    } else if let Some(wait_until) = wait_until {
+        // Wait for navigation state - use page.wait_for_load_state (no args in this version)
+        page.wait_for_load_state(None).await
+            .map_err(|e| AgentError::Other(format!("browser_wait: navigation timeout: {e}")))?;
+    } else {
+        // Simple timeout wait
+        tokio::time::sleep(tokio::time::Duration::from_millis(timeout_ms)).await;
+    }
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "action": "wait",
+                "selector": selector,
+                "state": state,
+                "timeout_ms": timeout_ms,
+                "status": "success"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool name for `browser_extract` — extract data from the browser context.
+pub const BROWSER_EXTRACT_TOOL: &str = "browser_extract";
+
+/// Return the `ToolDef` for `browser_extract`.
+pub fn browser_extract_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_EXTRACT_TOOL.to_owned(),
+        description: "Extract data from the page using CSS selectors, XPath, or JavaScript evaluation".to_owned(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "The context_id returned by browser_open"
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector or XPath of elements to extract (optional if using script)"
+                },
+                "attribute": {
+                    "type": "string",
+                    "description": "Attribute to extract (e.g., 'href', 'textContent', 'innerHTML', 'value'). Default: 'textContent'"
+                },
+                "multiple": {
+                    "type": "boolean",
+                    "description": "Extract all matching elements (default: false, extracts first only)",
+                    "default": false
+                },
+                "script": {
+                    "type": "string",
+                    "description": "Custom JavaScript to evaluate for extraction (alternative to selector)"
+                }
+            },
+            "required": ["context_id"]
+        }),
+    }
+}
+
+/// Execute `browser_extract`.
+pub async fn call_browser_extract(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    // Capability check
+    check_browser_capability(self_, &Capability::Extract)?;
+
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_extract: missing required 'context_id' parameter".to_string()))?;
+
+    let selector = arguments.get("selector").and_then(|v| v.as_str());
+    let attribute = arguments
+        .get("attribute")
+        .and_then(|v| v.as_str())
+        .unwrap_or("textContent");
+    let multiple = arguments
+        .get("multiple")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let script = arguments.get("script").and_then(|v| v.as_str());
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_extract: browser pool not initialized".to_string())
+    })?;
+
+    let context = pool.get_context(context_id).await.ok_or_else(|| AgentError::Other(format!("browser_extract: failed to get context: context not found")))?;
+
+    let pages = context.pages();
+    let page = pages.first().ok_or_else(|| {
+        AgentError::Other("browser_extract: no page available in context".to_string())
+    })?;
+
+    let result = if let Some(script) = script {
+        // Evaluate custom JavaScript
+        let value: serde_json::Value = page.evaluate(script, None::<&()>).await
+            .map_err(|e| AgentError::Other(format!("browser_extract: script evaluation failed: {e}")))?;
+        serde_json::to_value(value).unwrap_or(serde_json::Value::Null)
+    } else if let Some(selector) = selector {
+        if multiple {
+            // Extract all matching elements
+            let elements = page.locator(selector).all().await
+                .map_err(|e| AgentError::Other(format!("browser_extract: query failed: {e}")))?;
+            
+            let mut results = Vec::new();
+            for element in elements {
+                let value = if attribute == "textContent" {
+                    element.text_content().await
+                        .map_err(|e| AgentError::Other(format!("browser_extract: text extraction failed: {e}")))?
+                        .unwrap_or_default()
+                } else if attribute == "innerHTML" {
+                    element.inner_html().await
+                        .map_err(|e| AgentError::Other(format!("browser_extract: HTML extraction failed: {e}")))?
+                } else {
+                    element.get_attribute(attribute).await
+                        .map_err(|e| AgentError::Other(format!("browser_extract: attribute extraction failed: {e}")))?
+                        .unwrap_or_default()
+                };
+                results.push(serde_json::Value::String(value));
+            }
+            serde_json::Value::Array(results)
+        } else {
+            // Extract single element - use locator
+            let locator = page.locator(selector).first();
+            let value = if attribute == "textContent" {
+                locator.text_content().await
+                    .map_err(|e| AgentError::Other(format!("browser_extract: text extraction failed: {e}")))?
+                    .unwrap_or_default()
+            } else if attribute == "innerHTML" {
+                locator.inner_html().await
+                    .map_err(|e| AgentError::Other(format!("browser_extract: HTML extraction failed: {e}")))?
+            } else {
+                locator.get_attribute(attribute).await
+                    .map_err(|e| AgentError::Other(format!("browser_extract: attribute extraction failed: {e}")))?
+                    .unwrap_or_default()
+            };
+            serde_json::Value::String(value)
+        }
+    } else {
+        return Err(AgentError::Other("browser_extract: either 'selector' or 'script' parameter is required".to_string()));
+    };
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "action": "extract",
+                "selector": selector,
+                "attribute": attribute,
+                "multiple": multiple,
+                "data": result,
+                "status": "success"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool name for `browser_select`.
+pub const BROWSER_SELECT_TOOL: &str = "browser_select";
+
+/// Tool definition for `browser_select`.
+pub fn browser_select_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_SELECT_TOOL.into(),
+        description: "Select option(s) from a <select> dropdown by value, label, or index.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "Browser context ID returned by browser_open"
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector for the <select> element"
+                },
+                "values": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Option values to select (by 'value' attribute)"
+                },
+                "labels": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Option labels to select (visible text)"
+                },
+                "indices": {
+                    "type": "array",
+                    "items": { "type": "integer" },
+                    "description": "Option indices to select (0-based)"
+                }
+            },
+            "required": ["context_id", "selector"],
+            "minProperties": 2
+        }),
+    }
+}
+
+/// Execute `browser_select`.
+pub async fn call_browser_select(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    // Capability check
+    check_browser_capability(self_, &Capability::Select)?;
+
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_select: missing required 'context_id' parameter".to_string()))?;
+
+    let selector = arguments
+        .get("selector")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_select: missing required 'selector' parameter".to_string()))?;
+
+    let values: Vec<String> = arguments
+        .get("values")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+
+    let labels: Vec<String> = arguments
+        .get("labels")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+
+    let indices: Vec<i32> = arguments
+        .get("indices")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_i64().map(|i| i as i32)).collect())
+        .unwrap_or_default();
+
+    if values.is_empty() && labels.is_empty() && indices.is_empty() {
+        return Err(AgentError::Other("browser_select: at least one of 'values', 'labels', or 'indices' must be provided".to_string()));
+    }
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_select: browser pool not initialized".to_string())
+    })?;
+
+    let context = pool.get_context(context_id).await.ok_or_else(|| AgentError::Other(format!("browser_select: failed to get context: context not found")))?;
+
+    let pages = context.pages();
+    let page = pages.first().ok_or_else(|| {
+        AgentError::Other("browser_select: no page available in context".to_string())
+    })?;
+
+    let locator = page.locator(selector);
+
+    // Use locator.select_option with SelectOption enum variants (per actual playwright_rs API)
+    for value in &values {
+        let opt = playwright_rs::SelectOption::Value(value.clone());
+        locator.select_option(opt, None).await
+            .map_err(|e| AgentError::Other(format!("browser_select: selection failed for '{}': {}", value, e)))?;
+    }
+    for label in &labels {
+        let opt = playwright_rs::SelectOption::Label(label.clone());
+        locator.select_option(opt, None).await
+            .map_err(|e| AgentError::Other(format!("browser_select: selection failed for '{}': {}", label, e)))?;
+    }
+    for index in &indices {
+        let opt = playwright_rs::SelectOption::Index(*index as usize);
+        locator.select_option(opt, None).await
+            .map_err(|e| AgentError::Other(format!("browser_select: selection failed for '{}': {}", index, e)))?;
+    }
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "action": "select",
+                "selector": selector,
+                "selected_values": values,
+                "selected_labels": labels,
+                "selected_indices": indices,
+                "status": "success"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool name for `browser_hover`.
+pub const BROWSER_HOVER_TOOL: &str = "browser_hover";
+
+/// Tool definition for `browser_hover`.
+pub fn browser_hover_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_HOVER_TOOL.into(),
+        description: "Hover mouse over an element.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "Browser context ID returned by browser_open"
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector for the element to hover"
+                },
+                "position": {
+                    "type": "object",
+                    "properties": {
+                        "x": { "type": "number" },
+                        "y": { "type": "number" }
+                    },
+                    "description": "Optional position offset within the element"
+                },
+                "timeout_ms": {
+                    "type": "integer",
+                    "description": "Maximum time to wait for element in milliseconds (default: 30000)",
+                    "default": 30000,
+                    "minimum": 100
+                }
+            },
+            "required": ["context_id", "selector"]
+        }),
+    }
+}
+
+/// Execute `browser_hover`.
+pub async fn call_browser_hover(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    // Capability check
+    check_browser_capability(self_, &Capability::Hover)?;
+
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_hover: missing required 'context_id' parameter".to_string()))?;
+
+    let selector = arguments
+        .get("selector")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_hover: missing required 'selector' parameter".to_string()))?;
+
+    let timeout_ms = arguments
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30000);
+
+    let position = arguments.get("position").and_then(|v| v.as_object());
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_hover: browser pool not initialized".to_string())
+    })?;
+
+    // Use public get_context API (per BrowserPool interface)
+    let context = pool.get_context(context_id).await.ok_or_else(|| {
+        AgentError::Other(format!("browser_hover: failed to get context: context not found"))
+    })?;
+
+    let pages = context.pages();
+    let page = pages.first().ok_or_else(|| {
+        AgentError::Other("browser_hover: no page available in context".to_string())
+    })?;
+
+    let locator = page.locator(selector).first();
+    locator.hover(None).await
+        .map_err(|e| AgentError::Other(format!("browser_hover: hover failed: {e}")))?;
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "action": "hover",
+                "selector": selector,
+                "status": "success"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool name for `browser_keypress`.
+pub const BROWSER_KEYPRESS_TOOL: &str = "browser_keypress";
+
+/// Tool definition for `browser_keypress`.
+pub fn browser_keypress_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_KEYPRESS_TOOL.into(),
+        description: "Press keyboard keys (single key, combination, or text input).".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "Browser context ID returned by browser_open"
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "Optional CSS selector to focus before keypress"
+                },
+                "key": {
+                    "type": "string",
+                    "description": "Single key to press (e.g., 'Enter', 'Tab', 'ArrowDown', 'Control+a')"
+                },
+                "keys": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Multiple keys to press in sequence"
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Text to type (alternative to key/keys)"
+                },
+                "delay_ms": {
+                    "type": "integer",
+                    "description": "Delay between key presses in milliseconds (default: 0)",
+                    "default": 0,
+                    "minimum": 0
+                }
+            },
+            "required": ["context_id"]
+        }),
+    }
+}
+
+/// Execute `browser_keypress`.
+pub async fn call_browser_keypress(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    // Capability check
+    check_browser_capability(self_, &Capability::Keypress)?;
+
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_keypress: missing required 'context_id' parameter".to_string()))?;
+
+    let selector = arguments.get("selector").and_then(|v| v.as_str());
+    let key = arguments.get("key").and_then(|v| v.as_str());
+    let keys: Vec<String> = arguments
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+    let text = arguments.get("text").and_then(|v| v.as_str());
+    let delay_ms = arguments
+        .get("delay_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let timeout_ms = arguments
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30000);
+
+    if key.is_none() && keys.is_empty() && text.is_none() {
+        return Err(AgentError::Other("browser_keypress: one of 'key', 'keys', or 'text' must be provided".to_string()));
+    }
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_keypress: browser pool not initialized".to_string())
+    })?;
+
+    let context = pool.get_context(context_id).await.ok_or_else(|| AgentError::Other(format!("browser_keypress: failed to get context: context not found")))?;
+
+    let pages = context.pages();
+    let page = pages.first().ok_or_else(|| {
+        AgentError::Other("browser_keypress: no page available in context".to_string())
+    })?;
+
+    // Focus element if selector provided
+    if let Some(sel) = selector {
+        let locator = page.locator(sel);
+        let wait_opts = playwright_rs::WaitForOptions::builder()
+            .state(playwright_rs::WaitForState::Visible)
+            .timeout(timeout_ms as f64)
+            .build();
+        locator.wait_for(Some(wait_opts)).await
+            .map_err(|e| AgentError::Other(format!("browser_keypress: wait for selector failed: {e}")))?;
+        locator.focus().await
+            .map_err(|e| AgentError::Other(format!("browser_keypress: focus failed: {e}")))?;
+    }
+
+    // Handle key press
+    if let Some(k) = key {
+        page.keyboard().press(k, None).await
+            .map_err(|e| AgentError::Other(format!("browser_keypress: press failed: {e}")))?;
+    }
+
+    // Handle multiple keys in sequence
+    for k in &keys {
+        page.keyboard().press(k, None).await
+            .map_err(|e| AgentError::Other(format!("browser_keypress: press failed for '{}': {}", k, e)))?;
+    }
+
+    // Handle text input
+    if let Some(t) = text {
+        page.keyboard().type_text(t, None).await
+            .map_err(|e| AgentError::Other(format!("browser_keypress: type failed: {e}")))?;
+    }
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "action": "keypress",
+                "selector": selector,
+                "key": key,
+                "keys": keys,
+                "text": text,
+                "status": "success"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool name for `browser_execute_script`.
+pub const BROWSER_EXECUTE_SCRIPT_TOOL: &str = "browser_execute_script";
+
+/// Tool definition for `browser_execute_script`.
+pub fn browser_execute_script_def() -> ToolDef {
+    ToolDef {
+        name: BROWSER_EXECUTE_SCRIPT_TOOL.into(),
+        description: "Execute JavaScript in the browser context and return the result.".into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "Browser context ID returned by browser_open"
+                },
+                "script": {
+                    "type": "string",
+                    "description": "JavaScript code to execute (function body, 'return' is optional)"
+                },
+                "args": {
+                    "type": "array",
+                    "items": {},
+                    "description": "Arguments to pass to the script (accessible as arguments[0], arguments[1], ...)"
+                },
+                "timeout_ms": {
+                    "type": "integer",
+                    "description": "Maximum execution time in milliseconds (default: 30000)",
+                    "default": 30000,
+                    "minimum": 100
+                }
+            },
+            "required": ["context_id", "script"]
+        }),
+    }
+}
+
+/// Execute `browser_execute_script`.
+pub async fn call_browser_execute_script(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    // Capability check
+    check_browser_capability(self_, &Capability::ExecuteScript)?;
+
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_execute_script: missing required 'context_id' parameter".to_string()))?;
+
+    let script = arguments
+        .get("script")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("browser_execute_script: missing required 'script' parameter".to_string()))?;
+
+    let args: Vec<Value> = arguments
+        .get("args")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.clone())
+        .unwrap_or_default();
+
+    let timeout_ms = arguments
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30000);
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("browser_execute_script: browser pool not initialized".to_string())
+    })?;
+
+    let context = pool.get_context(context_id).await.ok_or_else(|| AgentError::Other(format!("browser_execute_script: failed to get context: context not found")))?;
+
+    let pages = context.pages();
+    let page = pages.first().ok_or_else(|| {
+        AgentError::Other("browser_execute_script: no page available in context".to_string())
+    })?;
+
+    // Execute JavaScript directly using page.evaluate (no EvaluateOptions in playwright_rs)
+    let result: serde_json::Value = page.evaluate(script, None::<&()>).await
+        .map_err(|e| AgentError::Other(format!("browser_execute_script: evaluation failed: {e}")))?;
+
+    // Convert result back to JSON
+    let result_json = result;
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "action": "execute_script",
+                "script": script,
+                "result": result_json,
+                "status": "success"
+            }).to_string()
+        )],
+        is_error: false,
+    })
 }
