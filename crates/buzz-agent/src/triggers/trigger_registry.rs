@@ -2,14 +2,16 @@
 //!
 //! 參考 skills/agent-skill/src/task_store.rs 的持久化模式
 
-use crate::triggers::types::{Condition, Trigger, TriggerType, DeduplicationConfig, Action, ActionType, SerializedTrigger};
+use crate::triggers::types::{
+    Action, Condition, DeduplicationConfig, Trigger, TriggerType,
+};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde_json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::fs;
+use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -24,10 +26,12 @@ impl TriggerRegistry {
     /// 建立新的觸發器註冊表
     pub async fn new<P: AsRef<Path>>(db_path: P) -> Result<Self> {
         let db_path = db_path.as_ref().to_path_buf();
-        
+
         // 確保目錄存在
         if let Some(parent) = db_path.parent() {
-            fs::create_dir_all(parent).await.context("建立觸發器資料庫目錄失敗")?;
+            fs::create_dir_all(parent)
+                .await
+                .context("建立觸發器資料庫目錄失敗")?;
         }
 
         let registry = Self {
@@ -38,7 +42,7 @@ impl TriggerRegistry {
 
         // 載入現有資料
         registry.load().await?;
-        
+
         Ok(registry)
     }
 
@@ -49,20 +53,16 @@ impl TriggerRegistry {
             return Ok(());
         }
 
-        let content = fs::read_to_string(&self.db_path).await
+        let content = fs::read_to_string(&self.db_path)
+            .await
             .context("讀取觸發器資料庫失敗")?;
 
         if content.trim().is_empty() {
             return Ok(());
         }
 
-        let serialized: Vec<SerializedTrigger> = serde_json::from_str(&content)
-            .context("解析觸發器資料庫 JSON 失敗")?;
-
-        let mut triggers = Vec::new();
-        for s in serialized {
-            triggers.push(s.into());
-        }
+        let triggers: Vec<Trigger> =
+            serde_json::from_str(&content).context("解析觸發器資料庫 JSON 失敗")?;
 
         let mut guard = self.triggers.write().await;
         *guard = triggers;
@@ -78,15 +78,15 @@ impl TriggerRegistry {
         }
 
         let triggers = self.triggers.read().await;
-        let serialized: Vec<SerializedTrigger> = triggers.iter().map(|t| t.into()).collect();
-        let content = serde_json::to_string_pretty(&serialized)
-            .context("序列化觸發器失敗")?;
+        let content = serde_json::to_string_pretty(&*triggers).context("序列化觸發器失敗")?;
 
         // 原子寫入：寫入臨時檔再重命名
         let tmp_path = self.db_path.with_extension("tmp");
-        fs::write(&tmp_path, content).await
+        fs::write(&tmp_path, content)
+            .await
             .context("寫入臨時觸發器檔案失敗")?;
-        fs::rename(&tmp_path, &self.db_path).await
+        fs::rename(&tmp_path, &self.db_path)
+            .await
             .context("重命名觸發器檔案失敗")?;
 
         *self.dirty.write().await = false;
@@ -101,23 +101,39 @@ impl TriggerRegistry {
 
     /// 根據 ID 獲取觸發器
     pub async fn get(&self, id: Uuid) -> Option<Trigger> {
-        self.triggers.read().await.iter().find(|t| t.id == id).cloned()
+        self.triggers
+            .read()
+            .await
+            .iter()
+            .find(|t| t.id == id)
+            .cloned()
     }
 
     /// 根據名稱獲取觸發器
     pub async fn get_by_name(&self, name: &str) -> Option<Trigger> {
-        self.triggers.read().await.iter().find(|t| t.name == name).cloned()
+        self.triggers
+            .read()
+            .await
+            .iter()
+            .find(|t| t.name == name)
+            .cloned()
     }
 
     /// 獲取啟用的觸發器
     pub async fn get_enabled(&self) -> Vec<Trigger> {
-        self.triggers.read().await.iter().filter(|t| t.enabled).cloned().collect()
+        self.triggers
+            .read()
+            .await
+            .iter()
+            .filter(|t| t.enabled)
+            .cloned()
+            .collect()
     }
 
     /// 插入新觸發器
     pub async fn insert(&self, trigger: Trigger) -> Result<()> {
         let mut triggers = self.triggers.write().await;
-        
+
         // 檢查名稱唯一性
         if triggers.iter().any(|t| t.name == trigger.name) {
             return Err(anyhow::anyhow!("觸發器名稱已存在: {}", trigger.name));
@@ -131,12 +147,18 @@ impl TriggerRegistry {
     /// 更新觸發器
     pub async fn update(&self, trigger: Trigger) -> Result<()> {
         let mut triggers = self.triggers.write().await;
-        
-        let idx = triggers.iter().position(|t| t.id == trigger.id)
+
+        let idx = triggers
+            .iter()
+            .position(|t| t.id == trigger.id)
             .ok_or_else(|| anyhow::anyhow!("觸發器不存在: {}", trigger.id))?;
 
         // 檢查名稱唯一性（排除自己）
-        if triggers.iter().enumerate().any(|(i, t)| i != idx && t.name == trigger.name) {
+        if triggers
+            .iter()
+            .enumerate()
+            .any(|(i, t)| i != idx && t.name == trigger.name)
+        {
             return Err(anyhow::anyhow!("觸發器名稱已存在: {}", trigger.name));
         }
 
@@ -160,7 +182,7 @@ impl TriggerRegistry {
     /// 批次插入/更新（用於初始化或導入）
     pub async fn upsert_batch(&self, triggers: Vec<Trigger>) -> Result<()> {
         let mut guard = self.triggers.write().await;
-        
+
         for trigger in triggers {
             if let Some(idx) = guard.iter().position(|t| t.id == trigger.id) {
                 guard[idx] = trigger;
@@ -179,13 +201,19 @@ impl TriggerRegistry {
 
     /// 獲取啟用的觸發器數量
     pub async fn count_enabled(&self) -> usize {
-        self.triggers.read().await.iter().filter(|t| t.enabled).count()
+        self.triggers
+            .read()
+            .await
+            .iter()
+            .filter(|t| t.enabled)
+            .count()
     }
 
     /// 搜尋觸發器（支援條件過濾）
     pub async fn search(&self, query: &TriggerSearchQuery) -> Vec<Trigger> {
         let triggers = self.triggers.read().await;
-        triggers.iter()
+        triggers
+            .iter()
             .filter(|t| query.matches(t))
             .cloned()
             .collect()
@@ -263,10 +291,10 @@ impl TriggerSearchQuery {
         let mut tags = Vec::new();
         match &trigger.trigger_type {
             TriggerType::Schedule { .. } => tags.push("schedule".to_string()),
-            TriggerType::FileWatch { .. } => tags.push("filewatch".to_string()),
+            TriggerType::FileSystem { .. } => tags.push("filesystem".to_string()),
             TriggerType::Webhook { .. } => tags.push("webhook".to_string()),
             TriggerType::SystemMetric { .. } => tags.push("system".to_string()),
-            TriggerType::Manual { .. } => tags.push("manual".to_string()),
+            TriggerType::NostrEvent { .. } => tags.push("nostr".to_string()),
         }
         tags
     }
@@ -276,20 +304,20 @@ impl TriggerSearchQuery {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriggerTypeFilter {
     Schedule,
-    FileWatch,
+    FileSystem,
     Webhook,
     SystemMetric,
-    Manual,
+    NostrEvent,
 }
 
 impl TriggerTypeFilter {
     fn matches(&self, trigger_type: &TriggerType) -> bool {
         match (self, trigger_type) {
             (Self::Schedule, TriggerType::Schedule { .. }) => true,
-            (Self::FileWatch, TriggerType::FileWatch { .. }) => true,
+            (Self::FileSystem, TriggerType::FileSystem { .. }) => true,
             (Self::Webhook, TriggerType::Webhook { .. }) => true,
             (Self::SystemMetric, TriggerType::SystemMetric { .. }) => true,
-            (Self::Manual, TriggerType::Manual { .. }) => true,
+            (Self::NostrEvent, TriggerType::NostrEvent { .. }) => true,
             _ => false,
         }
     }

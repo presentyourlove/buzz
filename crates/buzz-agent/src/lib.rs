@@ -1,4 +1,5 @@
 #![cfg_attr(not(windows), forbid(unsafe_code))]
+#![allow(unused_imports, unused_variables, dead_code)]
 mod agent;
 pub mod auth;
 mod auth_http;

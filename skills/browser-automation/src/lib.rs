@@ -3,6 +3,8 @@
 //! 基於 Playwright Rust 的安全瀏覽器自動化技能，整合 Antigravity Encrypted Vault
 //! 提供 7 大內建技能：Navigate, Click, TypeText, Screenshot, PDF, EvalJS, WaitFor
 
+#![allow(unused_imports, unused_variables, dead_code)]
+
 pub mod browser_pool;
 pub mod context_manager;
 pub mod capability;

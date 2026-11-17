@@ -1055,6 +1055,7 @@ dependencies = [
  "browser-automation",
  "chrono",
  "cron",
+ "crossbeam-channel",
  "dashmap 6.2.1",
  "deadpool-redis",
  "dirs 6.0.0",

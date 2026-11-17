@@ -6,7 +6,9 @@ use crate::triggers::types::{NextFireTime, Trigger, TriggerType};
 use anyhow::Result;
 use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
 use cron::Schedule;
-use rand::{Rng, thread_rng};
+use rand::rng;
+use rand::rngs::ThreadRng;
+use rand::Rng;
 use std::collections::BinaryHeap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
@@ -114,7 +116,10 @@ impl Scheduler {
     pub fn remove_trigger(&self, trigger_id: Uuid) -> bool {
         let mut heap = self.heap.lock().unwrap();
         let len_before = heap.len();
-        let new_heap: BinaryHeap<ScheduledItem> = heap.drain().filter(|item| item.trigger_id != trigger_id).collect();
+        let new_heap: BinaryHeap<ScheduledItem> = heap
+            .drain()
+            .filter(|item| item.trigger_id != trigger_id)
+            .collect();
         *heap = new_heap;
         heap.len() < len_before
     }
@@ -136,19 +141,23 @@ impl Scheduler {
         let mut next = if let Some(cron_expr) = cron {
             // Cron 表達式
             let schedule: Schedule = cron_expr.parse()?;
-            schedule.after(&now).next().ok_or_else(|| anyhow::anyhow!("No next cron time"))?
+            schedule
+                .after(&now)
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("No next cron time"))?
         } else if let Some(secs) = interval_secs {
             // 固定間隔
             now + Duration::seconds(secs as i64)
         } else {
-            return Err(anyhow::anyhow!("Schedule trigger must have either cron or interval_secs"));
+            return Err(anyhow::anyhow!(
+                "Schedule trigger must have either cron or interval_secs"
+            ));
         };
 
         // 應用抖動
         if self.config.enable_jitter && jitter_secs > 0 {
-            let mut rng = thread_rng();
-            let jitter = rng.gen_range(0..=jitter_secs as i64);
-            next = next + Duration::seconds(jitter);
+            let jitter = rand::random::<u64>() % (jitter_secs as u64 + 1);
+            next = next + Duration::seconds(jitter as i64);
         }
 
         Ok(next)
@@ -227,20 +236,24 @@ impl Scheduler {
         let heap = self.heap.clone();
         let running = self.running.clone();
 
-        let mut interval = interval(StdDuration::from_secs(check_interval_secs));
+        let interval = tokio::time::interval(StdDuration::from_secs(check_interval_secs));
         *self.check_interval.lock().unwrap() = Some(interval);
 
         tokio::spawn(async move {
-            let mut interval = interval(StdDuration::from_secs(check_interval_secs));
+            let mut interval = tokio::time::interval(StdDuration::from_secs(check_interval_secs));
             while *running.lock().unwrap() {
                 interval.tick().await;
                 // 清理已過期但未被消費的項目（防止堆積）
                 let now = Utc::now();
-                let mut heap_guard = heap.lock().unwrap();
+                let heap_guard = heap.lock().unwrap();
                 while let Some(item) = heap_guard.peek() {
                     // 如果項目超過 1 小時還沒被處理，可能是系統異常，記錄警告
                     if item.next_fire < now - Duration::hours(1) {
-                        tracing::warn!("Trigger {} overdue by >1h, next_fire: {}", item.trigger_id, item.next_fire);
+                        tracing::warn!(
+                            "Trigger {} overdue by >1h, next_fire: {}",
+                            item.trigger_id,
+                            item.next_fire
+                        );
                         break; // 保留項目，不自動丟棄
                     }
                     break;

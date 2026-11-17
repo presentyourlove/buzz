@@ -206,6 +206,7 @@ impl<E: Event + serde::Serialize + Clone + 'static> ErasedTrigger for Trigger<E>
     fn last_fire(&self) -> Option<SystemTime> { self.last_fire }
     fn fire_count(&self) -> u64 { self.fire_count }
     
+    #[allow(unused_assignments, unused_variables)]
     fn fire(&mut self, event_bus: Arc<EventBus>) -> Pin<Box<dyn Future<Output = Result<(), AgentError>> + Send>> {
         let event_factory = self.event_factory.clone();
         let schedule = self.schedule.clone();

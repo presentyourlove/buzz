@@ -77,6 +77,8 @@ uuid = { workspace = true }
 futures-util = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }
+# Crossbeam channels for EventBus
+crossbeam-channel = "0.5"
 # System Health Guardian: process/port scanning, system info
 sysinfo = "0.32"
 

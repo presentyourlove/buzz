@@ -614,8 +614,14 @@ impl RunCtx<'_> {
         loop {
             // 智慧動態預算天花板 (Smart Dynamic Budget Ceiling)
             // 若使用者明確設定了 max_rounds > 0 則尊重設定；
-            // 否則初始預算為 40 輪。若特工持續有實質進展（無死循環、無連續故障），自動展期 40 輪，無需主理人批准；
-            // 僅當偵測到卡死、死循環或達到全域絕對安全天花板 (160 輪) 時，才暫停請求核准。
+            // 否則支援環境變數 BUZZ_MAX_ROUNDS_CEILING（預設 1000 輪）。
+            // 只要特工持續有實質進展（無死循環、無連續故障），自動持續展期 40 輪，完全不打擾主理人；
+            // 僅當偵測到卡死、死循環（鬼打牆）或達到安全天花板（預設 1000 輪）時，才暫停請求核准。
+            let max_rounds_ceiling: u32 = std::env::var("BUZZ_MAX_ROUNDS_CEILING")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1000);
+
             let mut effective_max_rounds = if self.cfg.max_rounds > 0 {
                 self.cfg.max_rounds
             } else {
@@ -624,7 +630,7 @@ impl RunCtx<'_> {
 
             if self.cfg.max_rounds == 0 && round >= effective_max_rounds {
                 let is_truly_stuck = identical_call_failures >= 3 || total_consecutive_tool_failures >= 4;
-                let is_absolute_ceiling = round >= 160;
+                let is_absolute_ceiling = round >= max_rounds_ceiling;
 
                 if !is_truly_stuck && !is_absolute_ceiling && successful_tool_rounds > 0 {
                     // 真係做緊嘢！自動展期 40 輪，不打擾主理人
@@ -635,14 +641,15 @@ impl RunCtx<'_> {
                         round,
                         new_budget = dynamic_extended_budget,
                         successful_tool_rounds,
+                        max_rounds_ceiling,
                         "smart turn budget: active progress detected — auto-extending turn budget by 40 rounds without user interruption"
                     );
                 }
             }
 
-            // 機制二：第 35 輪（或逼近當前階梯天花板剩餘 5 輪時）主動落盤預警 (Proximity Nag)
-            // 僅在真的卡死或接近絕對天花板 (160 輪) 剩餘 5 輪時才注入警示
-            if round == effective_max_rounds.saturating_sub(5) && (effective_max_rounds >= 160 || identical_call_failures >= 2 || total_consecutive_tool_failures >= 3) {
+            // 機制二：逼近當前階梯天花板剩餘 5 輪時主動落盤預警 (Proximity Nag)
+            // 僅在真的卡死或接近絕對天花板剩餘 5 輪時才注入警示
+            if round == effective_max_rounds.saturating_sub(5) && (effective_max_rounds >= max_rounds_ceiling || identical_call_failures >= 2 || total_consecutive_tool_failures >= 3) {
                 tracing::info!(
                     session_id = %self.session_id,
                     round,
@@ -2999,6 +3006,7 @@ mod tests {
         // Second publish attempt (succeeded): success count becomes 1
         publish_attempt_count += 1;
         publish_success_count += 1;
+        assert_eq!(publish_attempt_count, 2);
         assert_eq!(publish_success_count, 1);
 
         // Third publish attempt in same turn: detected as duplicate because publish_success_count > 0
@@ -3029,6 +3037,7 @@ mod tests {
         // Reset on success
         total_failures = 0;
         identical_failures = 0;
+        assert_eq!(identical_failures, 0);
 
         // 8 total failures trigger overflow breaker
         for _ in 0..8 {

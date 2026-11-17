@@ -600,7 +600,7 @@ pub async fn call_create_reminder(
     ).map_err(|e| AgentError::Other(format!("NIP-44 encrypt failed: {e}")))?;
 
     // Build event
-    let mut builder = EventBuilder::new(Kind::Custom(30300), ciphertext)
+    let builder = EventBuilder::new(Kind::Custom(30300), ciphertext)
         .tag(Tag::parse(["d", &d_tag])?)
         .tag(Tag::parse(["not_before", &not_before.to_string()])?)
         .tag(Tag::parse(["alt", "Encrypted reminder"]) ?);

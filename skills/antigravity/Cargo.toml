@@ -61,12 +61,4 @@ walkdir = "2.5"
 tempfile = "3.9"
 pretty_assertions = "1.4"
 
-[profile.release]
-lto = true
-opt-level = 3
-codegen-units = 1
-panic = "abort"
 
-[profile.dev]
-opt-level = 0
-debug = true

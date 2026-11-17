@@ -25,8 +25,4 @@ name = "env_guardian"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
-[profile.dev]
-opt-level = 1
 
-[profile.test]
-opt-level = 1

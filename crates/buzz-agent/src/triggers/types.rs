@@ -264,7 +264,7 @@ pub struct BusEvent {
 }
 
 /// 事件來源
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum EventSource {
     Scheduler,
@@ -349,6 +349,8 @@ impl Trigger {
             },
             created_at: now,
             updated_at: now,
+            last_fired_at: None,
+            fire_count: 0,
         }
     }
 }
