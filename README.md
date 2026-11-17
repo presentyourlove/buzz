@@ -1012,7 +1012,7 @@ just reset          # ⚠️  Wipe data + recreate
   - **編譯零警告錯誤達標**：`cargo check --package buzz-agent` 達成 0 error。
   - **端到端整合測試全數 PASS**：執行 Wax 設計之瀏覽器池端到端測試 `tests/browser_integration.rs`，4 項測試（生命週期開啟/導航/截圖/關閉、視窗尺寸配置、池啟動與關閉、安全 Context 洩漏防護）全數以 100% 通過（`4 passed; 0 failed`）。
   - **二進位構建與無縫熱更新**：編譯產出 Release 二進位檔（**21,925,323 bytes** / 21.9 MB），並透過安全檔名置換完成 `C:\Users\user\AppData\Local\Buzz\buzz-agent.exe` 之熱置換。
-  - **正式建立 Fallback 檢查點**：完成代碼清理與里程碑標籤錨定（`v0.9.0-browser-stable`），確保日後可一鍵無損還原。
+  - **正式建立 Fallback 檢查點**：完成代碼清理與里程碑標籤錨定（`checkpoint-20261117-stable`），確保日後可一鍵無損還原。
 - **檔案變更清單 (File Inventory)**：
   - **新增 (Added)**：
     - `crates/buzz-agent/docs/PLAYWRIGHT_API_SPEC.md` (Playwright-rs 0.21.0 官方導出路徑規範)
