@@ -1,5 +1,5 @@
 //! WaitFor Skill
-//! 
+//!
 //! Wait for various conditions with capability validation.
 
 use anyhow::{Context, Result};
@@ -36,13 +36,22 @@ fn default_poll_interval() -> u64 {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WaitCondition {
     /// Wait for selector to appear
-    Selector { selector: String, state: WaitForSelectorState },
+    Selector {
+        selector: String,
+        state: WaitForSelectorState,
+    },
     /// Wait for navigation
-    Navigation { url: Option<String>, wait_until: super::navigate::WaitUntil },
+    Navigation {
+        url: Option<String>,
+        wait_until: super::navigate::WaitUntil,
+    },
     /// Wait for JavaScript condition
     JavaScript { script: String },
     /// Wait for network request/response
-    Network { url_pattern: String, kind: NetworkWaitKind },
+    Network {
+        url_pattern: String,
+        kind: NetworkWaitKind,
+    },
     /// Wait for page load state
     LoadState { state: super::navigate::WaitUntil },
     /// Wait for fixed duration
@@ -117,16 +126,13 @@ pub struct WaitForSkill;
 
 impl WaitForSkill {
     /// Execute wait condition
-    pub async fn execute(
-        page: &Page,
-        config: WaitForConfig,
-    ) -> Result<WaitForResult> {
+    pub async fn execute(page: &Page, config: WaitForConfig) -> Result<WaitForResult> {
         let start = std::time::Instant::now();
         let timeout = Duration::from_millis(config.timeout_ms);
         let poll_interval = Duration::from_millis(config.poll_interval_ms);
-        
+
         info!("Waiting for condition: {:?}", config.condition);
-        
+
         let result = match config.condition {
             WaitCondition::Selector { selector, state } => {
                 Self::wait_for_selector(page, &selector, state, timeout).await
@@ -143,14 +149,14 @@ impl WaitForSkill {
             WaitCondition::LoadState { state } => {
                 Self::wait_for_load_state(page, state, timeout).await
             }
-            WaitCondition::Duration { ms } => {
-                Self::wait_for_duration(ms).await
-            }
+            WaitCondition::Duration { ms } => Self::wait_for_duration(ms).await,
             WaitCondition::ElementVisible { selector } => {
-                Self::wait_for_selector(page, &selector, WaitForSelectorState::Visible, timeout).await
+                Self::wait_for_selector(page, &selector, WaitForSelectorState::Visible, timeout)
+                    .await
             }
             WaitCondition::ElementHidden { selector } => {
-                Self::wait_for_selector(page, &selector, WaitForSelectorState::Hidden, timeout).await
+                Self::wait_for_selector(page, &selector, WaitForSelectorState::Hidden, timeout)
+                    .await
             }
             WaitCondition::ElementEnabled { selector } => {
                 Self::wait_for_element_enabled(page, &selector, true, timeout).await
@@ -159,12 +165,15 @@ impl WaitForSkill {
                 Self::wait_for_element_enabled(page, &selector, false, timeout).await
             }
         };
-        
+
         let duration = start.elapsed().as_millis() as u64;
-        
+
         match result {
             Ok(res) => {
-                debug!("Wait completed in {}ms: condition_met={}", duration, res.condition_met);
+                debug!(
+                    "Wait completed in {}ms: condition_met={}",
+                    duration, res.condition_met
+                );
                 Ok(WaitForResult {
                     success: true,
                     condition_met: res.condition_met,
@@ -187,7 +196,7 @@ impl WaitForSkill {
             }
         }
     }
-    
+
     /// Wait for selector
     async fn wait_for_selector(
         page: &Page,
@@ -196,25 +205,27 @@ impl WaitForSkill {
         timeout: Duration,
     ) -> Result<WaitForResult> {
         use playwright::{WaitForOptions, WaitForState};
-        
+
         let wait_state = match state {
             WaitForSelectorState::Visible => WaitForState::Visible,
             WaitForSelectorState::Hidden => WaitForState::Hidden,
             WaitForSelectorState::Attached => WaitForState::Attached,
             WaitForSelectorState::Detached => WaitForState::Detached,
         };
-        
+
         let wait_opts = WaitForOptions::builder()
             .state(wait_state)
             .timeout(timeout.as_millis() as f64)
             .build();
-        
+
         let locator = page.locator(selector);
-        locator.wait_for(Some(wait_opts)).await
+        locator
+            .wait_for(Some(wait_opts))
+            .await
             .with_context(|| format!("Timeout waiting for selector: {}", selector))?;
-        
+
         let element_info = Self::get_element_info_from_locator(&locator, selector).await;
-        
+
         Ok(WaitForResult {
             success: true,
             condition_met: true,
@@ -224,7 +235,7 @@ impl WaitForSkill {
             duration_ms: 0,
         })
     }
-    
+
     /// Wait for navigation
     async fn wait_for_navigation(
         page: &Page,
@@ -240,7 +251,7 @@ impl WaitForSkill {
             }
             Ok::<(), anyhow::Error>(())
         };
-        
+
         match tokio::time::timeout(timeout, navigation_future).await {
             Ok(Ok(_)) => Ok(WaitForResult {
                 success: true,
@@ -256,7 +267,10 @@ impl WaitForSkill {
                 duration_ms: 0,
             }),
             Ok(Err(e)) => Err(e),
-            Err(_) => Err(anyhow::anyhow!("Navigation timeout after {}ms", timeout.as_millis())),
+            Err(_) => Err(anyhow::anyhow!(
+                "Navigation timeout after {}ms",
+                timeout.as_millis()
+            )),
         }
     }
 
@@ -268,7 +282,10 @@ impl WaitForSkill {
     ) -> Result<WaitForResult> {
         let start = std::time::Instant::now();
         loop {
-            let res: Result<bool> = page.evaluate(script, None::<&()>).await.map_err(|e| anyhow::anyhow!(e));
+            let res: Result<bool> = page
+                .evaluate(script, None::<&()>)
+                .await
+                .map_err(|e| anyhow::anyhow!(e));
             if let Ok(true) = res {
                 return Ok(WaitForResult {
                     success: true,
@@ -292,7 +309,8 @@ impl WaitForSkill {
         _kind: NetworkWaitKind,
         _timeout: Duration,
     ) -> Result<WaitForResult> {
-        page.wait_for_load_state(Some(playwright::WaitUntil::NetworkIdle)).await?;
+        page.wait_for_load_state(Some(playwright::WaitUntil::NetworkIdle))
+            .await?;
         Ok(WaitForResult {
             success: true,
             condition_met: true,
@@ -364,8 +382,14 @@ impl WaitForSkill {
         }
     }
 
-    async fn get_element_info_from_locator(locator: &playwright::Locator, selector: &str) -> ElementInfo {
-        let tag_name: Option<String> = locator.evaluate("el => el.tagName.toLowerCase()", None::<&()>).await.ok();
+    async fn get_element_info_from_locator(
+        locator: &playwright::Locator,
+        selector: &str,
+    ) -> ElementInfo {
+        let tag_name: Option<String> = locator
+            .evaluate("el => el.tagName.toLowerCase()", None::<&()>)
+            .await
+            .ok();
         let id = locator.get_attribute("id").await.ok().flatten();
         let class_name = locator.get_attribute("class").await.ok().flatten();
         ElementInfo {

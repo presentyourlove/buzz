@@ -1,8 +1,8 @@
 //! permission_guard.rs - Domain Whitelist Gate for SSRF Prevention
-//! 
+//!
 //! Strictly restricts network egress to authorized domains only,
 //! preventing Server-Side Request Forgery (SSRF) attacks.
-//! 
+//!
 //! Usage:
 //! - Configure allowed domains via `allowed_egress_domains()`
 //! - Check domain authorization before any network operation
@@ -36,14 +36,14 @@ impl DomainWhitelistPolicy {
             default_ttl: 300,
         }
     }
-    
+
     /// Create a whitelist policy with specific allowed domains
     pub fn with_domains(domains: Vec<String>) -> Self {
         let mut allowed = HashSet::new();
         for domain in domains {
             allowed.insert(domain.clone());
         }
-        
+
         Self {
             allowed_domains: allowed,
             allow_subdomains: false,
@@ -51,7 +51,7 @@ impl DomainWhitelistPolicy {
             default_ttl: 300,
         }
     }
-    
+
     /// Allow subdomains of a base domain
     pub fn allow_subdomains_of(mut self, base_domain: &str) -> Self {
         self.allow_subdomains = true;
@@ -59,26 +59,26 @@ impl DomainWhitelistPolicy {
         self.allowed_domains.insert(base_domain.to_string());
         self
     }
-    
+
     /// Check if a URL's host is allowed by the whitelist
     pub fn is_allowed(&self, url: &Url) -> bool {
         let Some(host) = url.host_str() else {
             return false;
         };
-        
+
         // If arbitrary URLs are explicitly allowed, check host format only
         if self.allow_arbitrary_urls {
             // In arbitrary mode, only block obvious internal/loopback addresses
             return !Self::is_internal_host(host);
         }
-        
+
         let host_lower = host.to_lowercase();
-        
+
         // Check exact match
         if self.allowed_domains.contains(&host_lower) {
             return true;
         }
-        
+
         // Check subdomain match if enabled
         if self.allow_subdomains {
             for allowed in &self.allowed_domains {
@@ -87,11 +87,11 @@ impl DomainWhitelistPolicy {
                 }
             }
         }
-        
+
         // Default: deny
         false
     }
-    
+
     /// Check if a host is an internal/loopback address that should always be blocked
     fn is_internal_host(host: &str) -> bool {
         // Common internal/loopback patterns
@@ -106,7 +106,7 @@ impl DomainWhitelistPolicy {
             "::1",
             "fe80",
         ];
-        
+
         let lower = host.to_lowercase();
         internal_patterns.iter().any(|p| lower.starts_with(p))
     }
@@ -129,12 +129,18 @@ impl PermissionGuard {
 
         // SSRF protection: reject localhost and loopback
         if host == "localhost" || host == "127.0.0.1" || host == "::1" || host.starts_with("127.") {
-            anyhow::bail!("SSRF blocked: localhost/loopback address is disallowed: {}", host);
+            anyhow::bail!(
+                "SSRF blocked: localhost/loopback address is disallowed: {}",
+                host
+            );
         }
 
         // SSRF protection: private IP ranges
         if host.starts_with("10.") || host.starts_with("192.168.") {
-            anyhow::bail!("SSRF blocked: private IP range (10.x, 192.168.x) is disallowed: {}", host);
+            anyhow::bail!(
+                "SSRF blocked: private IP range (10.x, 192.168.x) is disallowed: {}",
+                host
+            );
         }
 
         if host.starts_with("172.") {
@@ -142,7 +148,10 @@ impl PermissionGuard {
             if parts.len() >= 2 {
                 if let Ok(second) = parts[1].parse::<u8>() {
                     if (16..=31).contains(&second) {
-                        anyhow::bail!("SSRF blocked: private IP range (172.16-31.x) is disallowed: {}", host);
+                        anyhow::bail!(
+                            "SSRF blocked: private IP range (172.16-31.x) is disallowed: {}",
+                            host
+                        );
                     }
                 }
             }
@@ -158,17 +167,28 @@ impl PermissionGuard {
             host == d_lower || host.ends_with(&format!(".{}", d_lower))
         });
         if !allowed {
-            anyhow::bail!("Navigation rejected: domain '{}' not in allowed_domains list", host);
+            anyhow::bail!(
+                "Navigation rejected: domain '{}' not in allowed_domains list",
+                host
+            );
         }
 
         Ok(())
     }
 
     pub fn check_credential_access(&self, cred_label: &str) -> Result<()> {
-        if self.capability.allowed_credentials.iter().any(|c| c == cred_label) {
+        if self
+            .capability
+            .allowed_credentials
+            .iter()
+            .any(|c| c == cred_label)
+        {
             Ok(())
         } else {
-            anyhow::bail!("Credential '{}' not in allowed_credentials list", cred_label);
+            anyhow::bail!(
+                "Credential '{}' not in allowed_credentials list",
+                cred_label
+            );
         }
     }
 }
@@ -198,10 +218,10 @@ macro_rules! ssrf_safe_url {
         use url::Url;
         let base = Url::parse($base).context("Invalid base URL")?;
         let path = $path;
-        
+
         // Construct URL and check against whitelist
         let full_url = base.join(path).context("Failed to join URL")?;
-        
+
         // Security check - will panic if not whitelisted in production
         #[cfg(debug_assertions)]
         {
@@ -210,7 +230,7 @@ macro_rules! ssrf_safe_url {
                 anyhow::bail!("URL not in whitelist: {}", full_url);
             }
         }
-        
+
         full_url
     }};
 }
@@ -218,15 +238,15 @@ macro_rules! ssrf_safe_url {
 // #[cfg(test)]
 // mod tests {
 //     use super::*;
-    
+
 //     #[test]
 //     fn test_whitelist_basic() {
 //         let domains = vec!["example.com", "api.github.com"];
 //         init_whitelist(domains);
-        
+
 //         let url = Url::parse("https://example.com/path").unwrap();
 //         assert!(crate::permission_guard::check_url(&url));
-        
+
 //         let blocked = Url::parse("https://evil.com").unwrap();
 //         assert!(!crate::permission_guard::check_url(&blocked));
 //     }

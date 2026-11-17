@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(not(windows), forbid(unsafe_code))]
 mod agent;
 pub mod auth;
 mod auth_http;
@@ -26,6 +26,10 @@ mod health_guardian;
 mod health_reporter;
 mod hints;
 mod hooks;
+mod cron;
+mod event_bus;
+mod scheduler;
+pub mod windows_job;
 
 pub mod anymodelbot;
 pub mod agentic_rag;
@@ -35,6 +39,7 @@ mod mcp;
 pub mod model_capabilities;
 mod permission;
 pub mod ticket_sandbox;
+// pub mod triggers; // WIP by Pollen
 pub mod types;
 mod wire;
 

@@ -1,5 +1,5 @@
 //! EvalJS Skill
-//! 
+//!
 //! Executes JavaScript expressions and functions in page context with
 //! result serialization, error handling, and console log capturing.
 
@@ -66,46 +66,49 @@ pub struct EvalJSSkill;
 
 impl EvalJSSkill {
     /// Execute JavaScript evaluation
-    pub async fn execute(
-        page: &Page,
-        config: EvalJSConfig,
-    ) -> Result<EvalJSResult> {
+    pub async fn execute(page: &Page, config: EvalJSConfig) -> Result<EvalJSResult> {
         let start = std::time::Instant::now();
-        
+
         info!("Evaluating JavaScript: {} chars", config.script.len());
-        
+
         // Capture console logs
         let console_logs = Arc::new(std::sync::Mutex::new(Vec::new()));
         let logs_clone = console_logs.clone();
-        let _ = page.on_console(move |msg| {
-            let logs = logs_clone.clone();
-            async move {
-                if let Ok(mut lock) = logs.lock() {
-                    lock.push(ConsoleLog {
-                        level: msg.type_().to_string(),
-                        text: msg.text().to_string(),
-                        timestamp: chrono::Utc::now(),
-                    });
+        let _ = page
+            .on_console(move |msg| {
+                let logs = logs_clone.clone();
+                async move {
+                    if let Ok(mut lock) = logs.lock() {
+                        lock.push(ConsoleLog {
+                            level: msg.type_().to_string(),
+                            text: msg.text().to_string(),
+                            timestamp: chrono::Utc::now(),
+                        });
+                    }
+                    Ok(())
                 }
-                Ok(())
-            }
-        }).await;
-        
+            })
+            .await;
+
         // Evaluate script
         let result: Result<Value> = if config.args.is_empty() {
-            page.evaluate(&config.script, None::<&()>).await.map_err(|e| anyhow::anyhow!(e))
+            page.evaluate(&config.script, None::<&()>)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))
         } else {
             let args_json = serde_json::to_string(&config.args)?;
             let script_with_args = format!(
                 "(() => {{ const args = {}; return ({})(...args); }})()",
                 args_json, config.script
             );
-            page.evaluate(&script_with_args, None::<&()>).await.map_err(|e| anyhow::anyhow!(e))
+            page.evaluate(&script_with_args, None::<&()>)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))
         };
-        
+
         let duration = start.elapsed().as_millis() as u64;
         let logs = console_logs.lock().map(|l| l.clone()).unwrap_or_default();
-        
+
         match result {
             Ok(value) => {
                 debug!("JavaScript evaluation completed in {}ms", duration);
@@ -129,25 +132,20 @@ impl EvalJSSkill {
             }
         }
     }
-    
+
     /// Add a script to run on every page load
-    pub async fn add_init_script(
-        page: &Page,
-        script: &str,
-    ) -> Result<()> {
-        page.add_init_script(script).await
+    pub async fn add_init_script(page: &Page, script: &str) -> Result<()> {
+        page.add_init_script(script)
+            .await
             .context("Failed to add init script")
     }
-    
+
     /// Execute a file as script
-    pub async fn execute_file(
-        page: &Page,
-        path: &str,
-        args: Vec<Value>,
-    ) -> Result<EvalJSResult> {
-        let script = tokio::fs::read_to_string(path).await
+    pub async fn execute_file(page: &Page, path: &str, args: Vec<Value>) -> Result<EvalJSResult> {
+        let script = tokio::fs::read_to_string(path)
+            .await
             .context("Failed to read script file")?;
-        
+
         let config = EvalJSConfig {
             script,
             args,
@@ -155,10 +153,10 @@ impl EvalJSSkill {
             return_json: true,
             isolated_world: false,
         };
-        
+
         Self::execute(page, config).await
     }
-    
+
     /// Wait for a JavaScript condition
     pub async fn wait_for_condition(
         page: &Page,
@@ -168,35 +166,44 @@ impl EvalJSSkill {
     ) -> Result<bool> {
         let start = std::time::Instant::now();
         let timeout = Duration::from_millis(timeout_ms);
-        
+
         loop {
-            let result: Result<bool> = page.evaluate(condition, None::<&()>).await.map_err(|e| anyhow::anyhow!(e));
+            let result: Result<bool> = page
+                .evaluate(condition, None::<&()>)
+                .await
+                .map_err(|e| anyhow::anyhow!(e));
             if let Ok(true) = result {
                 return Ok(true);
             }
-            
+
             if start.elapsed() >= timeout {
                 return Ok(false);
             }
-            
+
             tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
         }
     }
-    
+
     /// Get performance metrics
     pub async fn get_performance_metrics(page: &Page) -> Result<Value> {
-        page.evaluate("() => JSON.parse(JSON.stringify(performance.getEntriesByType('navigation')[0] || {}))", None::<&()>)
-            .await
-            .context("Failed to get performance metrics")
+        page.evaluate(
+            "() => JSON.parse(JSON.stringify(performance.getEntriesByType('navigation')[0] || {}))",
+            None::<&()>,
+        )
+        .await
+        .context("Failed to get performance metrics")
     }
-    
+
     /// Get all cookies as JSON
     pub async fn get_cookies_json(page: &Page) -> Result<Value> {
-        let cookies = page.context()?.cookies(None).await
+        let cookies = page
+            .context()?
+            .cookies(None)
+            .await
             .context("Failed to get cookies")?;
         serde_json::to_value(cookies).context("Failed to serialize cookies")
     }
-    
+
     /// Set localStorage item
     pub async fn set_local_storage(page: &Page, key: &str, value: &str) -> Result<()> {
         let script = format!(
@@ -207,20 +214,18 @@ impl EvalJSSkill {
         page.evaluate::<(), Option<()>>(&script, None).await?;
         Ok(())
     }
-    
+
     /// Get localStorage item
     pub async fn get_local_storage(page: &Page, key: &str) -> Result<Option<String>> {
-        let script = format!(
-            "localStorage.getItem('{}')",
-            key.replace('\'', "\\'")
-        );
+        let script = format!("localStorage.getItem('{}')", key.replace('\'', "\\'"));
         let result: Option<String> = page.evaluate(&script, None::<&()>).await?;
         Ok(result)
     }
-    
+
     /// Clear localStorage
     pub async fn clear_local_storage(page: &Page) -> Result<()> {
-        page.evaluate::<(), Option<()>>("localStorage.clear()", None).await?;
+        page.evaluate::<(), Option<()>>("localStorage.clear()", None)
+            .await?;
         Ok(())
     }
 }
@@ -228,7 +233,7 @@ impl EvalJSSkill {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_eval_js_config_defaults() {
         let config = EvalJSConfig {
@@ -238,7 +243,7 @@ mod tests {
             return_json: true,
             isolated_world: false,
         };
-        
+
         assert!(config.return_json);
         assert!(!config.isolated_world);
         assert_eq!(config.timeout_ms, 10000);

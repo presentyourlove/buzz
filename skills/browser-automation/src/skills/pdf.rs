@@ -1,5 +1,5 @@
 //! PDF Skill
-//! 
+//!
 //! Generate PDFs from pages with various options and capability validation.
 
 use anyhow::{Context, Result};
@@ -121,14 +121,14 @@ pub struct PdfSkill;
 
 impl PdfSkill {
     /// Execute PDF generation
-    pub async fn execute(
-        page: &Page,
-        config: PdfConfig,
-    ) -> Result<PdfResult> {
+    pub async fn execute(page: &Page, config: PdfConfig) -> Result<PdfResult> {
         let start = std::time::Instant::now();
-        
-        info!("Generating PDF: format={:?}, landscape={}", config.options.format, config.options.landscape);
-        
+
+        info!(
+            "Generating PDF: format={:?}, landscape={}",
+            config.options.format, config.options.landscape
+        );
+
         // Build PDF options
         let format_str = match config.options.format {
             PaperFormat::Letter => "Letter",
@@ -143,7 +143,7 @@ impl PdfSkill {
             PaperFormat::A5 => "A5",
             PaperFormat::A6 => "A6",
         };
-        
+
         let mut builder = playwright::PdfOptions::builder()
             .format(format_str.to_string())
             .scale(config.options.scale)
@@ -168,32 +168,41 @@ impl PdfSkill {
         };
         builder = builder.margin(margin);
         let options = builder.build();
-        
+
         // Wait for network idle before generating PDF
-        page.wait_for_load_state(Some(playwright::WaitUntil::NetworkIdle)).await?;
-        
+        page.wait_for_load_state(Some(playwright::WaitUntil::NetworkIdle))
+            .await?;
+
         // Generate PDF
-        let pdf_bytes = page.pdf(Some(options)).await
+        let pdf_bytes = page
+            .pdf(Some(options))
+            .await
             .context("Failed to generate PDF")?;
-        
+
         let duration = start.elapsed().as_millis() as u64;
         let file_size = pdf_bytes.len() as u64;
-        
+
         // Save to file if path provided
         let has_path = config.path.is_some();
         let path = if let Some(path) = config.path {
-            tokio::fs::write(&path, &pdf_bytes).await
+            tokio::fs::write(&path, &pdf_bytes)
+                .await
                 .with_context(|| format!("Failed to write PDF to {:?}", path))?;
             Some(path)
         } else {
             None
         };
-        
+
         // Estimate page count (PDF parsing would be needed for exact count)
         let page_count = Self::estimate_page_count(&pdf_bytes);
-        
-        debug!("PDF generated: {} bytes, ~{} pages in {}ms", file_size, page_count.unwrap_or(0), duration);
-        
+
+        debug!(
+            "PDF generated: {} bytes, ~{} pages in {}ms",
+            file_size,
+            page_count.unwrap_or(0),
+            duration
+        );
+
         Ok(PdfResult {
             success: true,
             pdf_bytes: if !has_path { Some(pdf_bytes) } else { None },
@@ -204,7 +213,7 @@ impl PdfSkill {
             duration_ms: duration,
         })
     }
-    
+
     /// Estimate page count from PDF bytes (simplified)
     fn estimate_page_count(bytes: &[u8]) -> Option<u32> {
         // Look for /Count in PDF trailer
@@ -220,7 +229,7 @@ impl PdfSkill {
         }
         None
     }
-    
+
     /// Generate PDF with custom CSS for printing
     pub async fn execute_with_print_css(
         page: &Page,
@@ -231,29 +240,32 @@ impl PdfSkill {
         page.add_style_tag(
             playwright::protocol::page::AddStyleTagOptions::builder()
                 .content(print_css)
-                .build()
-        ).await?;
-        
+                .build(),
+        )
+        .await?;
+
         // Emulate print media
         page.emulate_media(Some(
             playwright::protocol::page::EmulateMediaOptions::builder()
                 .media(playwright::Media::Print)
-                .build()
-        )).await?;
-        
+                .build(),
+        ))
+        .await?;
+
         // Generate PDF
         let result = Self::execute(page, config).await?;
-        
+
         // Reset media emulation
         page.emulate_media(Some(
             playwright::protocol::page::EmulateMediaOptions::builder()
                 .media(playwright::Media::Screen)
-                .build()
-        )).await?;
-        
+                .build(),
+        ))
+        .await?;
+
         Ok(result)
     }
-    
+
     /// Generate PDF from specific element
     pub async fn generate_from_element(
         page: &Page,
@@ -262,14 +274,16 @@ impl PdfSkill {
     ) -> Result<PdfResult> {
         // Get element dimensions
         let locator = page.locator(selector);
-        let bounding_box = locator.bounding_box().await?
+        let bounding_box = locator
+            .bounding_box()
+            .await?
             .context("Failed to get element bounding box")?;
-        
+
         // Set custom paper size to match element
         let mut custom_config = config;
         custom_config.options.width = Some(format!("{}px", bounding_box.width));
         custom_config.options.height = Some(format!("{}px", bounding_box.height));
-        
+
         Self::execute(page, custom_config).await
     }
 }

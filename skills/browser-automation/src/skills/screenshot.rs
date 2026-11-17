@@ -1,10 +1,12 @@
 //! Screenshot Skill
-//! 
+//!
 //! Take screenshots with various options and capability validation.
 
 use anyhow::{Context, Result};
 use playwright::Page;
-use playwright::{Animations, ScreenshotClip, ScreenshotOptions as PwScreenshotOptions, ScreenshotType};
+use playwright::{
+    Animations, ScreenshotClip, ScreenshotOptions as PwScreenshotOptions, ScreenshotType,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{debug, info};
@@ -123,14 +125,14 @@ pub struct ScreenshotSkill;
 
 impl ScreenshotSkill {
     /// Execute screenshot
-    pub async fn execute(
-        page: &Page,
-        config: ScreenshotConfig,
-    ) -> Result<ScreenshotResult> {
+    pub async fn execute(page: &Page, config: ScreenshotConfig) -> Result<ScreenshotResult> {
         let start = std::time::Instant::now();
-        
-        info!("Taking screenshot: full_page={}, format={:?}", config.options.full_page, config.options.format);
-        
+
+        info!(
+            "Taking screenshot: full_page={}, format={:?}",
+            config.options.full_page, config.options.format
+        );
+
         // Build screenshot options using playwright builder pattern
         let mut options_builder = PwScreenshotOptions::builder()
             .full_page(config.options.full_page)
@@ -145,7 +147,7 @@ impl ScreenshotSkill {
                 AnimationHandling::Allow => Animations::Allow,
                 AnimationHandling::Disabled => Animations::Disabled,
             });
-        
+
         if let Some(clip) = config.options.clip {
             options_builder = options_builder.clip(ScreenshotClip {
                 x: clip.x,
@@ -154,34 +156,38 @@ impl ScreenshotSkill {
                 height: clip.height,
             });
         }
-        
+
         let options = options_builder.build();
-        
+
         let image_bytes = if let Some(selector) = config.options.element_selector {
             let locator = page.locator(&selector);
             locator.screenshot(options).await?
         } else {
             page.screenshot(options).await?
         };
-        
+
         let duration = start.elapsed().as_millis() as u64;
         let file_size = image_bytes.len() as u64;
-        
+
         // Save to file if path provided
         let has_path = config.path.is_some();
         let path = if let Some(path) = config.path {
-            tokio::fs::write(&path, &image_bytes).await
+            tokio::fs::write(&path, &image_bytes)
+                .await
                 .with_context(|| format!("Failed to write screenshot to {:?}", path))?;
             Some(path)
         } else {
             None
         };
-        
+
         // Get dimensions from image (simplified)
         let dimensions = Self::get_image_dimensions(&image_bytes);
-        
-        debug!("Screenshot completed: {} bytes in {}ms", file_size, duration);
-        
+
+        debug!(
+            "Screenshot completed: {} bytes in {}ms",
+            file_size, duration
+        );
+
         Ok(ScreenshotResult {
             success: true,
             image_bytes: if !has_path { Some(image_bytes) } else { None },
@@ -192,7 +198,7 @@ impl ScreenshotSkill {
             duration_ms: duration,
         })
     }
-    
+
     /// Get image dimensions from bytes (simplified)
     fn get_image_dimensions(bytes: &[u8]) -> Option<ImageDimensions> {
         // PNG signature check
@@ -201,13 +207,13 @@ impl ScreenshotSkill {
             let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
             return Some(ImageDimensions { width, height });
         }
-        
+
         // JPEG - would need more complex parsing
         // WebP - would need more complex parsing
-        
+
         None
     }
-    
+
     /// Take multiple screenshots (for comparison)
     pub async fn take_sequence(
         page: &Page,
@@ -215,32 +221,35 @@ impl ScreenshotSkill {
         interval_ms: u64,
     ) -> Result<Vec<ScreenshotResult>> {
         let mut results = Vec::new();
-        
+
         for config in configs {
             let result = Self::execute(page, config).await?;
             results.push(result);
-            
+
             if interval_ms > 0 {
                 tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
             }
         }
-        
+
         Ok(results)
     }
-    
+
     /// Take screenshot on scroll (full page with stitching)
     pub async fn full_page_scroll(
         page: &Page,
         config: ScreenshotConfig,
     ) -> Result<ScreenshotResult> {
         // Ensure we're at the top
-        let _: Option<serde_json::Value> = page.evaluate("() => window.scrollTo(0, 0)", None::<&()>).await.ok();
+        let _: Option<serde_json::Value> = page
+            .evaluate("() => window.scrollTo(0, 0)", None::<&()>)
+            .await
+            .ok();
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        
+
         // Take full page screenshot
         let mut full_config = config.clone();
         full_config.options.full_page = true;
-        
+
         Self::execute(page, full_config).await
     }
 }
@@ -249,7 +258,7 @@ impl ScreenshotSkill {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    
+
     #[test]
     fn test_screenshot_config_defaults() {
         let config = ScreenshotConfig {
@@ -257,7 +266,7 @@ mod tests {
             options: ScreenshotOptions::default(),
             timeout_ms: 10000,
         };
-        
+
         assert!(!config.options.full_page);
         assert_eq!(config.options.format, ImageFormat::Png);
         assert_eq!(config.options.quality, 90);

@@ -1,10 +1,10 @@
 //! Click Skill
-//! 
+//!
 //! Click elements with various options and capability validation.
 
 use anyhow::{Context, Result};
-use playwright::Page;
 use playwright::protocol::click::{ClickOptions as PwClickOptions, KeyboardModifier, MouseButton};
+use playwright::Page;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{debug, info};
@@ -139,18 +139,15 @@ pub struct ClickSkill;
 
 impl ClickSkill {
     /// Execute click
-    pub async fn execute(
-        page: &Page,
-        config: ClickConfig,
-    ) -> Result<ClickResult> {
+    pub async fn execute(page: &Page, config: ClickConfig) -> Result<ClickResult> {
         let start = std::time::Instant::now();
-        
+
         info!("Clicking element: {}", config.selector);
-        
+
         // Wait for element and get info
         let locator = page.locator(&config.selector);
         let element_info = Self::get_element_info(&locator).await;
-        
+
         // Build click options using playwright ClickOptionsBuilder
         let mut click_options_builder = PwClickOptions::builder();
         click_options_builder = click_options_builder.button(match config.options.button {
@@ -160,7 +157,8 @@ impl ClickSkill {
         });
 
         if config.options.click_count > 1 {
-            click_options_builder = click_options_builder.click_count(config.options.click_count as u32);
+            click_options_builder =
+                click_options_builder.click_count(config.options.click_count as u32);
         }
 
         if config.options.delay_ms > 0 {
@@ -176,16 +174,22 @@ impl ClickSkill {
         }
 
         if let Some(pos) = &config.options.position {
-            click_options_builder = click_options_builder.position(playwright::Position { x: pos.x, y: pos.y });
+            click_options_builder =
+                click_options_builder.position(playwright::Position { x: pos.x, y: pos.y });
         }
 
         if !config.options.modifiers.is_empty() {
-            let modifiers: Vec<KeyboardModifier> = config.options.modifiers.iter().map(|m| match m {
-                ModifierKey::Shift => KeyboardModifier::Shift,
-                ModifierKey::Control => KeyboardModifier::Control,
-                ModifierKey::Alt => KeyboardModifier::Alt,
-                ModifierKey::Meta => KeyboardModifier::Meta,
-            }).collect();
+            let modifiers: Vec<KeyboardModifier> = config
+                .options
+                .modifiers
+                .iter()
+                .map(|m| match m {
+                    ModifierKey::Shift => KeyboardModifier::Shift,
+                    ModifierKey::Control => KeyboardModifier::Control,
+                    ModifierKey::Alt => KeyboardModifier::Alt,
+                    ModifierKey::Meta => KeyboardModifier::Meta,
+                })
+                .collect();
             click_options_builder = click_options_builder.modifiers(modifiers);
         }
 
@@ -193,12 +197,12 @@ impl ClickSkill {
 
         // Perform click
         locator.click(Some(click_options)).await?;
-        
+
         let duration = start.elapsed().as_millis() as u64;
         let final_url = Some(page.url().to_string());
-        
+
         debug!("Click completed in {}ms", duration);
-        
+
         Ok(ClickResult {
             success: true,
             element_info,
@@ -208,20 +212,28 @@ impl ClickSkill {
             duration_ms: duration,
         })
     }
-    
+
     /// Get element information
     async fn get_element_info(locator: &playwright::Locator) -> Option<ElementInfo> {
-        let tag_name: Option<String> = locator.evaluate("el => el.tagName.toLowerCase()", None::<&()>).await.ok();
+        let tag_name: Option<String> = locator
+            .evaluate("el => el.tagName.toLowerCase()", None::<&()>)
+            .await
+            .ok();
         let id = locator.get_attribute("id").await.ok().flatten();
         let class_name = locator.get_attribute("class").await.ok().flatten();
         let text_content = locator.text_content().await.ok().flatten();
-        let bounding_box = locator.bounding_box().await.ok().flatten().map(|b| BoundingBox {
-            x: b.x,
-            y: b.y,
-            width: b.width,
-            height: b.height,
-        });
-        
+        let bounding_box = locator
+            .bounding_box()
+            .await
+            .ok()
+            .flatten()
+            .map(|b| BoundingBox {
+                x: b.x,
+                y: b.y,
+                width: b.width,
+                height: b.height,
+            });
+
         Some(ElementInfo {
             tag_name: tag_name.unwrap_or_else(|| "unknown".to_string()),
             id,
@@ -230,7 +242,7 @@ impl ClickSkill {
             bounding_box,
         })
     }
-    
+
     /// Click by coordinates (for canvas, etc.)
     pub async fn click_coordinates(
         page: &Page,
@@ -239,21 +251,21 @@ impl ClickSkill {
         options: ClickOptions,
     ) -> Result<ClickResult> {
         let start = std::time::Instant::now();
-        
+
         let mouse_button = match options.button {
             ClickButton::Left => MouseButton::Left,
             ClickButton::Right => MouseButton::Right,
             ClickButton::Middle => MouseButton::Middle,
         };
-        
+
         let mouse_options = playwright::protocol::MouseOptions::builder()
             .button(mouse_button)
             .click_count(options.click_count)
             .delay(options.delay_ms as f64)
             .build();
-        
+
         page.mouse().click(x, y, Some(mouse_options)).await?;
-        
+
         Ok(ClickResult {
             success: true,
             element_info: None,

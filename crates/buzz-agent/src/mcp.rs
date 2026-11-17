@@ -760,6 +760,11 @@ async fn spawn_one(
         .map_err(|e| AgentError::Mcp(format!("spawn {}: {e}", spec.name)))?;
     let pgid = transport.id();
 
+    #[cfg(windows)]
+    if let Some(pid) = pgid {
+        crate::windows_job::assign_pid_to_job(pid);
+    }
+
     struct PgidGuard {
         pgid: Option<u32>,
         name: String,
@@ -897,8 +902,11 @@ fn killpg(pgid: u32, name: &str, stage: &str) {
     );
 }
 #[cfg(not(unix))]
-fn killpg(_pgid: u32, name: &str, stage: &str) {
-    tracing::info!("relying on Drop to kill MCP {name} ({stage})");
+fn killpg(pgid: u32, name: &str, stage: &str) {
+    let ok = crate::windows_job::terminate_pid(pgid);
+    tracing::info!(
+        "terminate_pid MCP {name} ({stage}) pid={pgid} ok={ok}"
+    );
 }
 
 fn valid_name(s: &str) -> bool {

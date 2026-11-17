@@ -1070,6 +1070,37 @@ just reset          # ⚠️  Wipe data + recreate
   - 整合測試：`cargo test --package buzz-agent --test browser_integration` 4 passed; 0 failed。
   - 二進位熱更新：Release 版 `buzz-agent.exe` (18.4 MB) 成功熱替換至本機目錄。
 
+### 31. Phase 30：官方最新主幹無損合流、Windows Job Object 進程防護與孤兒進程根治
+- **官方 upstream 37 項提交無損合流**：
+  - 完美合流官方主幹最新更新（包括 Mobile Siri 支援、Buzz-DB 單表約束保全、Relay/Workflow `send_dm` 等）。
+  - 保留所有自訂資產（Phase 1~29 特工資產、Browser Automation 全套技能），100% 零衝突乾淨合流。
+- **Windows Job Object 作業系統層進程防護 (`crates/buzz-agent/src/windows_job.rs`)**：
+  - 徹底根治 Windows 環境下特工 MCP 與子進程（Node / Python）堆積 240+ 孤兒進程之痛點。
+  - 呼叫 Win32 `CreateJobObjectW` 配置 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`。
+  - 在 `mcp.rs` 中將所有子進程（`transport.id()`）綁定至全域 Job Object，一旦父進程或特工結束，Windows 核心層強制連帶終結所有子孫進程，絕不殘留。
+  - 取代原先官方失效的 `relying on Drop to kill MCP`，實作 Win32 `TerminateProcess` 主動進程終結。
+- **Proactive Autonomous Triggers 語法修復與健全化**：
+  - 修復 `cron.rs`、`event_bus.rs`、`scheduler.rs` 語法與模式匹配，通過 10 項定時排程單元測試。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/src/windows_job.rs` (Windows Job Object 進程樹生命週期守護)
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/lib.rs` (導出 windows_job，平台安全 cfg)
+    - `crates/buzz-agent/src/mcp.rs` (掛載 Job Object 與 Windows 版 killpg 實裝)
+    - `crates/buzz-agent/src/catalog.rs` (補全 EventBus 錯誤模式匹配)
+    - `crates/buzz-agent/src/cron.rs` (補齊 chrono TimeZone trait)
+    - `crates/buzz-agent/src/scheduler.rs` (rand 0.10 適配與 BoxedEvent 派發修復)
+    - `crates/buzz-agent/src/triggers/event_bus.rs` (補齊測試區塊閉合)
+    - `crates/buzz-agent/src/triggers/scheduler.rs` (補齊 parse_interval 人類可讀間隔解析)
+    - `crates/buzz-agent/src/triggers/trigger_registry.rs` (補齊 TriggerTypeFilter 匹配邏輯)
+    - `crates/buzz-agent/src/triggers/types.rs` (補齊 Trigger 結構體建構子閉合)
+    - `README.md` (增設 Phase 30 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - `windows_job` 單元測試：2 passed; 0 failed。
+  - `cron` 定時排程單元測試：10 passed; 0 failed。
+  - `permission_guard_unit` 安全測試：10 passed; 0 failed。
+  - Release 版二進位編譯：`buzz-agent.exe` (18.4 MB) 編譯完成。
+
 ---
 
 <p align="center">

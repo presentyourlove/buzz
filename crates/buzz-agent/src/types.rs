@@ -738,6 +738,7 @@ pub enum AgentError {
     /// replayed history and give the model a recoverable tool error.
     UnsupportedImageInput(String),
     Mcp(String),
+    EventBusNoSubscribers { event_type: String },
     Cancelled,
     Other(String),
 }
@@ -752,6 +753,7 @@ impl std::fmt::Display for AgentError {
             Self::LlmContextExceeded(s) => write!(f, "llm context exceeded: {s}"),
             Self::UnsupportedImageInput(s) => write!(f, "llm image input unsupported: {s}"),
             Self::Mcp(s) => write!(f, "mcp: {s}"),
+            Self::EventBusNoSubscribers { event_type } => write!(f, "event bus: no subscribers for '{event_type}'"),
             Self::Cancelled => write!(f, "cancelled"),
             Self::Other(s) => write!(f, "other: {s}"),
         }
