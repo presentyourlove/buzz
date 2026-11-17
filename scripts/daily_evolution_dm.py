@@ -14,19 +14,15 @@ Honey2 每日進化建議書 - Direct Message (DM) 私訊直達發送器
 import os
 import sys
 import json
+import re
 import argparse
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
-# 動態解析使用者目錄與環境變數（消除硬編碼路徑）
-USER_HOME = Path.home()
-APPDATA_ROAMING = Path(os.environ.get("APPDATA", str(USER_HOME / "AppData" / "Roaming")))
-APPDATA_LOCAL = Path(os.environ.get("LOCALAPPDATA", str(USER_HOME / "AppData" / "Local")))
-WORKSPACE_ROOT = os.environ.get("BUZZ_HOME", str(USER_HOME / ".buzz"))
-
+# 加入 daily_evolution 模組路徑
 SCRIPT_DIR = Path(__file__).resolve().parent
-EVOLUTION_MODULE_DIR = Path(WORKSPACE_ROOT) / "PLANS" / "daily_evolution"
+EVOLUTION_MODULE_DIR = Path(r"C:\Users\user\.buzz\PLANS\daily_evolution")
 if str(EVOLUTION_MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(EVOLUTION_MODULE_DIR))
 
@@ -36,18 +32,24 @@ except ImportError as e:
     print(f"[錯誤] 無法匯入 DailyEvolution 模組: {e}")
     sys.exit(1)
 
-MANAGED_AGENTS_PATH = str(APPDATA_ROAMING / "xyz.block.buzz.app" / "agents" / "managed-agents.json")
-BUZZ_CLI_PATH = str(APPDATA_LOCAL / "Buzz" / "buzz.exe")
+MANAGED_AGENTS_PATH = r"C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json"
+BUZZ_CLI_PATH = r"C:\Users\user\AppData\Local\Buzz\buzz.exe"
 DEFAULT_RELAY_URL = "wss://presentyourlove.communities.buzz.xyz"
 USER_DM_CHANNEL = "af946a63-dd43-4050-baea-65140d47fc42"
 ENGINEERING_CHANNEL = "5ca019f6-1a27-592a-b015-4baf0eb33572"
+WORKSPACE_ROOT = r"C:\Users\user\.buzz"
+
+
+def sanitize_mentions(text: str) -> str:
+    """將未被代碼反引號包裹的 @提及 轉為行內代碼，防止 Buzz CLI 進行成員比對失敗拋錯"""
+    return re.sub(r'(?<!`)@([a-zA-Z0-9_\u4e00-\u9fa5]+)(?!`)', r'`@\1`', text)
 
 
 def load_honey2_credentials():
-    """從 managed-agents.json 取得 Honey2 的 nsec 私鑰與 auth_tag"""
+    """從 managed-agents.json 取得 Honey2 的 nsec 私鑰、auth_tag 與 pubkey"""
     if not os.path.exists(MANAGED_AGENTS_PATH):
         print(f"[錯誤] 找不到 managed-agents.json: {MANAGED_AGENTS_PATH}")
-        return None, None
+        return None, None, None
 
     try:
         with open(MANAGED_AGENTS_PATH, "r", encoding="utf-8") as f:
@@ -60,15 +62,16 @@ def load_honey2_credentials():
             ):
                 nsec = agent.get("private_key_nsec")
                 auth_tag = agent.get("auth_tag")
+                pubkey = agent.get("pubkey", "")
                 if isinstance(auth_tag, list):
                     auth_tag = json.dumps(auth_tag)
-                return nsec, auth_tag
+                return nsec, auth_tag, pubkey
     except Exception as e:
         print(f"[錯誤] 解析 managed-agents.json 失敗: {e}")
-    return None, None
+    return None, None, None
 
 
-def send_dm_message(nsec: str, auth_tag: str, content: str) -> bool:
+def send_dm_message(nsec: str, auth_tag: str, pubkey: str, content: str) -> bool:
     """調用 Buzz CLI 將訊息推送至主理人專屬 DM 通道"""
     env = os.environ.copy()
     env["BUZZ_RELAY_URL"] = DEFAULT_RELAY_URL
@@ -77,23 +80,29 @@ def send_dm_message(nsec: str, auth_tag: str, content: str) -> bool:
         env["BUZZ_AUTH_TAG"] = auth_tag
     env["PYTHONIOENCODING"] = "utf-8"
 
+    sanitized_content = sanitize_mentions(content)
+
     cmd = [
         BUZZ_CLI_PATH,
         "messages", "send",
         "--channel", USER_DM_CHANNEL,
         "--content", "-"
     ]
+    if pubkey:
+        cmd.extend(["--mention", pubkey])
 
     print(f"📤 正在發送每日進化建議書至主理人專屬私訊 ({USER_DM_CHANNEL})...")
     try:
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         res = subprocess.run(
             cmd,
-            input=content,
+            input=sanitized_content,
             capture_output=True,
             text=True,
             env=env,
             encoding="utf-8",
-            timeout=30
+            timeout=30,
+            creationflags=flags
         )
         if res.returncode == 0:
             print("   ✅ [成功] 每日進化建議書已送達主理人私訊視窗！")
@@ -116,7 +125,7 @@ def main():
     print("🐝 Honey2 每日進化建議書 - Direct Message 私訊排程啟動中")
     print("==========================================================")
 
-    nsec, auth_tag = load_honey2_credentials()
+    nsec, auth_tag, pubkey = load_honey2_credentials()
     if not nsec:
         print("[嚴重錯誤] 無法取得 Honey2 憑證，終止執行。")
         sys.exit(1)
@@ -136,22 +145,8 @@ def main():
     proposal_path = result.get("proposal_path", "")
     channel_proposal = result.get("channel_proposal", "")
 
-    # 組裝典雅繁體中文 DM 正文
-    dm_content = (
-        f"🍯 **【Honey2 每日系統進化建議書 (主理人專屬直達)】**\n\n"
-        f"主理人您好！今日的團隊協作、架構優化與系統日誌已分析完畢。\n"
-        f"以下為提煉出之核心進化建議與審核選項：\n\n"
-        f"──────────────────────────────────────────\n"
-        f"{channel_proposal}\n"
-        f"──────────────────────────────────────────\n\n"
-        f"📄 **完整規劃存檔**：`{proposal_path}`\n\n"
-        f"💡 **主理人批示指引**：\n"
-        f"您可在私訊或工程頻道直接回覆：\n"
-        f"• `同意` → 授權 Honey2 下達實作任務給 Pollen 開工\n"
-        f"• `同意技能: 技能名稱` → 批准掛載特定新技能\n"
-        f"• `拒絕` / `部分同意: 項目` → 否決或修改提案\n\n"
-        f"✨ *由 Honey2 系統排程自動守護生成*"
-    )
+    # channel_proposal 已經是極簡雙層速讀卡片，直接作為專屬私訊發送
+    dm_content = channel_proposal
 
     if args.dry_run:
         print("💡 [演練模式] 私訊預覽內容如下：")
@@ -159,7 +154,7 @@ def main():
         return
 
     # 發送至主理人專屬 DM
-    send_dm_message(nsec, auth_tag, dm_content)
+    send_dm_message(nsec, auth_tag, pubkey, dm_content)
 
 
 if __name__ == "__main__":

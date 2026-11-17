@@ -4,18 +4,7 @@
 //! with `mod common;` in each and compiles once per binary — each binary uses
 //! only the subset it needs, hence the module-wide `dead_code` allow.
 //!
-//! It drives a real `buzz-agent` child over the ACP wire against a 
-
-#[allow(dead_code)]
-pub mod common {
-    use std::process::Stdio;
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use anyhow::Result;
-    use buzz_agent::ACPClient;
-    use tokio::process::Command;
-    use tokio::sync::Mutex; fake LLM
+//! It drives a real `buzz-agent` child over the ACP wire against a fake LLM
 //! (`CapturingLlm`, which records each request body) and answers the
 //! `session/request_permission` surface (`approve_permission`, selecting the
 //! offered `allow_once` option by `kind`, never a hardcoded `optionId`).

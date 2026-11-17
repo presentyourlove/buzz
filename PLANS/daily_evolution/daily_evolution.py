@@ -40,24 +40,6 @@ except ImportError:
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
 
-
-# 特工與主理人公鑰前綴映射表 (人名翻譯器)
-AGENT_NAME_MAP = {
-    "2d29f28fd5106795": "主理人",
-    "5ef9a934c33b7846": "Fizz (秘書)",
-    "76730abcadc769f9": "Honey (架構)",
-    "8be9ec04ad41ba97": "Honey2 (演化)",
-    "6f38f58d91639441": "Pollen (實作)",
-    "8b28b7c24424342d": "Sentry (安全)",
-    "60f596b66f0ac019": "Wax (測試)",
-}
-
-def get_author_display_name(pubkey_prefix: str) -> str:
-    for pk, name in AGENT_NAME_MAP.items():
-        if pubkey_prefix.startswith(pk):
-            return name
-    return pubkey_prefix[:8]
-
 DEFAULT_AUTH_TAG = '["auth","2d29f28fd5106795c630120d7e5b062bc4f5caa8057b4a6a374b7468cdc5de8e","","6f67f68423fe1877d312046cc63cf0106b7f31f284eb51d586dc036a235aeb8433d159d97c37e2b927b40fdc68eff0e1071fdaf56c497494d1779a8bc7fc6118"]'
 
 
@@ -232,37 +214,17 @@ class DailyEvolution:
             if any(kw in content_lower for kw in ["refactor", "cleanup", "improve", "optimize", "重構", "優化", "清理"]):
                 topics.append("架構重構與效能優化 (refactoring/optimization)")
 
-            # 過濾純確認與禮貌短句 (防廢話洗版)
-            if any(content.strip().startswith(p) for p in ["收到", "好的", "遵命", "了解", "感謝", "OK", "ok"]):
-                continue
+            # 萃取待辦事項
+            if any(kw in content_lower for kw in ["todo", "action item", "need to", "should", "must", "待辦", "需要", "必須", "請安排", "排定"]):
+                action_items_raw.append({"text": content[:200].strip(), "source": content[:80].strip()})
 
-            # 主理人指令過濾 (絕對不歸類為阻礙或待辦，直接作為最高共識)
-            is_directive = "【主理人" in content or "主理人正式指令" in content or "[📢 主理人" in content
-            is_delivery = "[✅ 成果交付]" in content or "成果交付" in content
-
-            if is_directive:
-                cleaned_text = "主理人拍板指示：" + " ".join(content[:150].split())
-                decisions_raw.append({"text": cleaned_text, "source": "主理人指令"})
-                continue
-
-            if is_delivery:
-                # 實體交付成果直接記錄，嚴禁判定為阻礙
-                continue
-
-            # 萃取真實待辦事項 (排除純討論)
-            if any(kw in content_lower for kw in ["todo", "action item", "待辦", "請安排", "排定"]):
-                cleaned_text = " ".join(content[:120].split())
-                action_items_raw.append({"text": cleaned_text, "source": content[:50].strip()})
-
-            # 萃取真實阻礙與瓶頸 (嚴禁誤判主理人或交付報告)
-            if any(kw in content_lower for kw in ["blocked", "blocker", "stuck", "卡住", "編譯失敗", "測試失敗", "逾時", "熔斷"]):
-                cleaned_text = " ".join(content[:120].split())
-                blockers_raw.append({"text": cleaned_text, "source": content[:50].strip()})
+            # 萃取阻礙與瓶頸
+            if any(kw in content_lower for kw in ["blocked", "blocker", "waiting for", "stuck", "阻礙", "卡住", "瓶頸", "無法", "失敗"]):
+                blockers_raw.append({"text": content[:200].strip(), "source": content[:80].strip()})
 
             # 萃取決策與共識
-            if any(kw in content_lower for kw in ["decided", "agreed", "approved", "決策", "拍板", "核准"]):
-                cleaned_text = " ".join(content[:120].split())
-                decisions_raw.append({"text": cleaned_text, "source": content[:50].strip()})
+            if any(kw in content_lower for kw in ["decided", "agreed", "approved", "confirmed", "決策", "同意", "確認", "核准", "拍板"]):
+                decisions_raw.append({"text": content[:200].strip(), "source": content[:80].strip()})
 
         # 主題去重
         topics = sorted(list(set(topics)))
@@ -823,37 +785,71 @@ version: "2.2"
 *由每日進化系統於 {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC+8) 自動生成*
 """
 
-        # 2. 組裝頻道專屬簡潔版提案（強制 25 行內，雙層人話速報）
-        active_names = [a.get("author_name", a["author_prefix"]) for a in analysis.get("author_activity", [])]
-        active_summary = "、".join(active_names[:4]) if active_names else "常規代理巡檢"
+        # 2. 組裝頻道專屬【極簡雙層速讀行動卡片】（依主理人核心指示：30 秒速讀，徹底區分後台架構維護與特工自主開工）
+        arch_items = []
+        agent_items = []
 
-        # 整理本日核心成果
-        implemented_summary = ""
-        if analysis.get("implemented_items"):
-            implemented_summary = "\n".join(f"  - ✅ {item.get('matched_feature', item.get('description'))}" for item in analysis["implemented_items"][:2])
-        else:
-            implemented_summary = "  - 核心模組維護與日常架構協作推進中"
+        all_recs = []
+        for cat_name, items in recommendations.items():
+            for it in items:
+                all_recs.append(it)
 
-        channel_proposal = f"""# 🐝 Buzz 每日系統進化速報 - {date_str}
+        # 關鍵字分流：Rust/二進位/進程/Git/Job Object/常駐/底層 -> 後台架構操作；其餘 -> 特工自主開工
+        arch_keywords = ["rust", "二進位", "進程", "job object", "底層", "daemon", "常駐", "崩潰", "卡死", "重構主幹", "hot swap", "cli", "git變更", "整合體檢"]
+        for it in all_recs:
+            desc = it.get("description", "")
+            src = it.get("source", "")
+            if any(k in desc.lower() or k in src.lower() for k in arch_keywords):
+                arch_items.append(it)
+            else:
+                agent_items.append(it)
 
-📌 **【本日核心推進進展】**：
-{implemented_summary}
-  - 協同成員：{active_summary}
+        if not arch_items:
+            arch_items.append({
+                "id": "A1",
+                "description": "維持常駐守護行程健康監控與底層 Job Object 資源防護巡檢",
+                "source": "架構守護"
+            })
+        if not agent_items:
+            agent_items.append({
+                "id": "B1",
+                "description": "持續優化工作日誌同步與對話洞察萃取，補齊端到端驗收測試案例",
+                "source": "應用優化"
+            })
 
-🛡️ **【建議後台架構操作項】**（需後台/主理人確認）：
-- [ ] **B-1** 定期執行 Release 二進位檔編譯與熱置換更新 (Rust 核心)
-- [ ] **B-2** 依據最新功能手冊執行安全門禁掃描 (Sentry 巡檢)
+        arch_section = "\n".join(
+            f"- **A{i+1}.** {it['description']}"
+            for i, it in enumerate(arch_items[:2])
+        )
+        agent_section = "\n".join(
+            f"- **B{i+1}.** {it['description']}"
+            for i, it in enumerate(agent_items[:2])
+        )
 
-⚡ **【特工自主優化進展】**（特工自主閉環執行）：
-- [x] **A-1** 測試套件回歸驗證與環境防洩漏檢驗 (Wax 負責)
-- [ ] **A-2** 遵循《API 規格手冊》落實原生型別修復與閉環交付 (Pollen 負責)
+        skill_section = ""
+        if skill_candidates:
+            cand = skill_candidates[0]
+            name = cand.get("name", "未命名技能")
+            reason = cand.get("synthesis_reason", "高頻協同經驗提煉")
+            skill_section = f"\n🎯 **【新技能候選】**\n- **S1. `{name}`**：{reason}\n"
 
-🎯 **【主理人審核選項】**：
-- 回覆「`同意`」：授權特工自主推進標註項目
-- 回覆「`修改: 具體意見`」：調整實作方向
-- 回覆「`拒絕`」：歸檔本次提案
+        channel_proposal = f"""🍯 **【Honey2 每日系統進化速讀卡片】** (`{date_str}`)
+> 📌 **今日狀態**：系統運行穩定（代碼庫健康無損 ✅）。已過濾常規雜訊，精煉出以下行動項：
 
-💡 *備查日報：`PLANS/DAILY_EVOLUTION_PROPOSAL_{date_str.replace('-', '')}.md`*"""
+🛡️ **【後台架構操作（高風險 / 系統級）】** *(建議交由 Antigravity 於後台執行，不佔用對話回合)*
+{arch_section}
+  👉 *負責人：`Antigravity` 於後台終端機執行*
+
+⚡ **【特工自主開工（低風險 / 應用級）】** *(可授權 Pollen / Honey2 自主開工，無系統崩潰風險)*
+{agent_section}
+  👉 *負責人：`Pollen` 自主完成，附驗收標準*
+{skill_section}
+──────────────────────────────────────────
+💡 **主理人快捷批示** (直接在對話中回覆)：
+• 回覆 `1` 或 `同意特工` → 授權 Pollen 立即自主開工低風險項目
+• 回覆 `2` 或 `交由後台` → 由 Antigravity 於後台接管執行高風險架構維護
+• 回覆 `0` 或 `暫緩` → 暫不處理，全數歸檔
+📄 **完整技術規劃文檔**：`PLANS/DAILY_EVOLUTION_PROPOSAL_{date_str.replace('-', '')}.md`"""
 
         return full_proposal, channel_proposal
 

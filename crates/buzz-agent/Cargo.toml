@@ -10,6 +10,13 @@ readme = "README.md"
 keywords = ["acp", "agent", "llm", "mcp", "minimal"]
 categories = ["command-line-utilities", "web-programming"]
 
+[lints.rust]
+unused_imports = "allow"
+unused_variables = "allow"
+dead_code = "allow"
+unused_mut = "allow"
+unused_assignments = "allow"
+
 [lib]
 name = "buzz_agent"
 path = "src/lib.rs"
