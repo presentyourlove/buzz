@@ -335,6 +335,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let browser_pool = match BrowserPool::new().await {
         Ok(pool) => {
             tracing::info!("BrowserPool successfully initialized");
+            // Initialize browser automation skill registry
+            browser_automation::skills::init_registry();
+            tracing::info!("Browser automation skill registry initialized");
             Some(Arc::new(pool))
         }
         Err(e) => {

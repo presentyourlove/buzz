@@ -72,7 +72,7 @@ pub struct BrowserCapability {
     /// Allowed domains for navigation and network requests
     pub allowed_domains: Vec<String>,
     /// Allowed credential IDs from the vault
-    pub allowed_credentials: Vec<Uuid>,
+    pub allowed_credentials: Vec<String>,
     /// Maximum execution time for a single operation
     pub max_execution_time: Duration,
     /// Allowed browser actions
@@ -124,14 +124,24 @@ impl BrowserCapability {
         Ok(())
     }
     
+    /// Check if a domain is allowed
+    pub fn allows_domain(&self, domain: &str) -> bool {
+        if self.allowed_domains.is_empty() {
+            return true;
+        }
+        self.allowed_domains.iter().any(|d| {
+            domain == d.as_str() || domain.ends_with(&format!(".{}", d))
+        })
+    }
+
     /// Check if an action is allowed
     pub fn allows_action(&self, action: BrowserAction) -> bool {
         self.allowed_actions.contains(&action)
     }
     
     /// Check if a credential is allowed
-    pub fn allows_credential(&self, credential_id: Uuid) -> bool {
-        self.allowed_credentials.contains(&credential_id)
+    pub fn allows_credential(&self, credential_id: &str) -> bool {
+        self.allowed_credentials.iter().any(|c| c == credential_id)
     }
     
     /// Check if capability has expired
@@ -150,7 +160,7 @@ impl BrowserCapability {
 #[derive(Debug, Clone, Default)]
 pub struct CapabilityBuilder {
     allowed_domains: Vec<String>,
-    allowed_credentials: Vec<Uuid>,
+    allowed_credentials: Vec<String>,
     max_execution_time: Duration,
     allowed_actions: Vec<BrowserAction>,
     network_egress: NetworkEgressPolicy,
@@ -179,14 +189,14 @@ impl CapabilityBuilder {
     }
     
     /// Set allowed credentials
-    pub fn allowed_credentials(mut self, credentials: Vec<Uuid>) -> Self {
+    pub fn allowed_credentials(mut self, credentials: Vec<String>) -> Self {
         self.allowed_credentials = credentials;
         self
     }
     
     /// Add a single allowed credential
-    pub fn allow_credential(mut self, credential_id: Uuid) -> Self {
-        self.allowed_credentials.push(credential_id);
+    pub fn allow_credential(mut self, credential_id: impl Into<String>) -> Self {
+        self.allowed_credentials.push(credential_id.into());
         self
     }
     
@@ -260,8 +270,92 @@ impl CapabilityBuilder {
             allowed_actions: self.allowed_actions,
             network_egress: self.network_egress,
             description: self.description,
+            created_at: chrono::Utc::now(),
             expires_at: self.expires_at,
         }
+    }
+}
+
+/// A set of capabilities - typically used to represent multiple capabilities for a session
+/// Can be used to check if any/all capabilities in the set allow a specific action
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CapabilitySet {
+    /// The capabilities in this set
+    pub capabilities: Vec<BrowserCapability>,
+}
+
+impl CapabilitySet {
+    /// Create a new empty capability set
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    /// Create a capability set from a single capability
+    pub fn from_single(capability: BrowserCapability) -> Self {
+        Self {
+            capabilities: vec![capability],
+        }
+    }
+    
+    /// Add a capability to the set
+    pub fn add(&mut self, capability: BrowserCapability) {
+        self.capabilities.push(capability);
+    }
+    
+    /// Check if any capability in the set allows the given action
+    pub fn allows_action(&self, action: BrowserAction) -> bool {
+        self.capabilities.iter().any(|c| c.allows_action(action))
+    }
+    
+    /// Check if any capability in the set allows access to the given domain
+    pub fn allows_domain(&self, domain: &str) -> bool {
+        self.capabilities.iter().any(|c| c.allows_domain(domain))
+    }
+    
+    /// Check if any capability in the set allows the given credential
+    pub fn allows_credential(&self, credential_id: &str) -> bool {
+        self.capabilities.iter().any(|c| c.allows_credential(credential_id))
+    }
+    
+    /// Get the minimum max_execution_time across all capabilities
+    pub fn min_execution_time(&self) -> Option<Duration> {
+        self.capabilities.iter()
+            .map(|c| c.max_execution_time)
+            .min()
+    }
+    
+    /// Get the most permissive network egress policy
+    pub fn network_egress(&self) -> NetworkEgressPolicy {
+        // Priority: Unrestricted > AllowedDomains > None
+        for cap in &self.capabilities {
+            match &cap.network_egress {
+                NetworkEgressPolicy::Unrestricted => return NetworkEgressPolicy::Unrestricted,
+                _ => {}
+            }
+        }
+        for cap in &self.capabilities {
+            if let NetworkEgressPolicy::AllowedDomains(_) = &cap.network_egress {
+                return cap.network_egress.clone();
+            }
+        }
+        NetworkEgressPolicy::None
+    }
+    
+    /// Get all allowed domains from all capabilities
+    pub fn all_allowed_domains(&self) -> Vec<String> {
+        self.capabilities.iter()
+            .flat_map(|c| c.allowed_domains.clone())
+            .collect()
+    }
+    
+    /// Check if the set is empty
+    pub fn is_empty(&self) -> bool {
+        self.capabilities.is_empty()
+    }
+    
+    /// Get the number of capabilities in the set
+    pub fn len(&self) -> usize {
+        self.capabilities.len()
     }
 }
       

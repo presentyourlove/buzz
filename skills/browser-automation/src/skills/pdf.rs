@@ -74,6 +74,7 @@ fn default_scale() -> f64 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PaperFormat {
+    #[default]
     Letter,
     Legal,
     Tabloid,
@@ -129,52 +130,57 @@ impl PdfSkill {
         info!("Generating PDF: format={:?}, landscape={}", config.options.format, config.options.landscape);
         
         // Build PDF options
-        let mut options = playwright::api::PdfOptions::default();
-        options.format = Some(match config.options.format {
-            PaperFormat::Letter => playwright::api::PaperFormat::Letter,
-            PaperFormat::Legal => playwright::api::PaperFormat::Legal,
-            PaperFormat::Tabloid => playwright::api::PaperFormat::Tabloid,
-            PaperFormat::Ledger => playwright::api::PaperFormat::Ledger,
-            PaperFormat::A0 => playwright::api::PaperFormat::A0,
-            PaperFormat::A1 => playwright::api::PaperFormat::A1,
-            PaperFormat::A2 => playwright::api::PaperFormat::A2,
-            PaperFormat::A3 => playwright::api::PaperFormat::A3,
-            PaperFormat::A4 => playwright::api::PaperFormat::A4,
-            PaperFormat::A5 => playwright::api::PaperFormat::A5,
-            PaperFormat::A6 => playwright::api::PaperFormat::A6,
-        });
+        let format_str = match config.options.format {
+            PaperFormat::Letter => "Letter",
+            PaperFormat::Legal => "Legal",
+            PaperFormat::Tabloid => "Tabloid",
+            PaperFormat::Ledger => "Ledger",
+            PaperFormat::A0 => "A0",
+            PaperFormat::A1 => "A1",
+            PaperFormat::A2 => "A2",
+            PaperFormat::A3 => "A3",
+            PaperFormat::A4 => "A4",
+            PaperFormat::A5 => "A5",
+            PaperFormat::A6 => "A6",
+        };
         
-        if let Some(width) = config.options.width {
-            options.width = Some(width);
+        let mut builder = playwright::PdfOptions::builder()
+            .format(format_str.to_string())
+            .scale(config.options.scale)
+            .print_background(config.options.print_background)
+            .landscape(config.options.landscape)
+            .prefer_css_page_size(config.options.prefer_css_page_size);
+
+        if let Some(ref pr) = config.options.page_ranges {
+            builder = builder.page_ranges(pr.clone());
         }
-        if let Some(height) = config.options.height {
-            options.height = Some(height);
+        if let Some(ref w) = config.options.width {
+            builder = builder.width(w.clone());
         }
-        options.print_background = config.options.print_background;
-        options.landscape = config.options.landscape;
-        options.margin = Some(playwright::api::Margin {
+        if let Some(ref h) = config.options.height {
+            builder = builder.height(h.clone());
+        }
+        let margin = playwright::PdfMargin {
             top: config.options.margin.top,
             right: config.options.margin.right,
             bottom: config.options.margin.bottom,
             left: config.options.margin.left,
-        });
-        options.scale = Some(config.options.scale);
-        options.page_ranges = config.options.page_ranges;
-        options.prefer_css_page_size = config.options.prefer_css_page_size;
-        options.tagged = config.options.tagged;
-        options.outline = config.options.outline;
+        };
+        builder = builder.margin(margin);
+        let options = builder.build();
         
         // Wait for network idle before generating PDF
-        page.wait_for_load_state("networkidle").await?;
+        page.wait_for_load_state(Some(playwright::WaitUntil::NetworkIdle)).await?;
         
         // Generate PDF
-        let pdf_bytes = page.pdf(options).await
+        let pdf_bytes = page.pdf(Some(options)).await
             .context("Failed to generate PDF")?;
         
         let duration = start.elapsed().as_millis() as u64;
         let file_size = pdf_bytes.len() as u64;
         
         // Save to file if path provided
+        let has_path = config.path.is_some();
         let path = if let Some(path) = config.path {
             tokio::fs::write(&path, &pdf_bytes).await
                 .with_context(|| format!("Failed to write PDF to {:?}", path))?;
@@ -190,7 +196,7 @@ impl PdfSkill {
         
         Ok(PdfResult {
             success: true,
-            pdf_bytes: if config.path.is_none() { Some(pdf_bytes) } else { None },
+            pdf_bytes: if !has_path { Some(pdf_bytes) } else { None },
             path,
             page_count,
             file_size: Some(file_size),
@@ -222,19 +228,28 @@ impl PdfSkill {
         print_css: &str,
     ) -> Result<PdfResult> {
         // Inject print CSS
-        page.add_style_tag(playwright::api::AddStyleTagOptions {
-            content: Some(print_css.to_string()),
-            ..Default::default()
-        }).await?;
+        page.add_style_tag(
+            playwright::protocol::page::AddStyleTagOptions::builder()
+                .content(print_css)
+                .build()
+        ).await?;
         
         // Emulate print media
-        page.emulate_media("print").await?;
+        page.emulate_media(Some(
+            playwright::protocol::page::EmulateMediaOptions::builder()
+                .media(playwright::Media::Print)
+                .build()
+        )).await?;
         
         // Generate PDF
         let result = Self::execute(page, config).await?;
         
         // Reset media emulation
-        page.emulate_media("screen").await?;
+        page.emulate_media(Some(
+            playwright::protocol::page::EmulateMediaOptions::builder()
+                .media(playwright::Media::Screen)
+                .build()
+        )).await?;
         
         Ok(result)
     }
@@ -246,10 +261,8 @@ impl PdfSkill {
         config: PdfConfig,
     ) -> Result<PdfResult> {
         // Get element dimensions
-        let element = page.wait_for_selector(selector).await
-            .context("Element not found")?;
-        
-        let bounding_box = element.bounding_box().await
+        let locator = page.locator(selector);
+        let bounding_box = locator.bounding_box().await?
             .context("Failed to get element bounding box")?;
         
         // Set custom paper size to match element
@@ -257,14 +270,6 @@ impl PdfSkill {
         custom_config.options.width = Some(format!("{}px", bounding_box.width));
         custom_config.options.height = Some(format!("{}px", bounding_box.height));
         
-        let start = std::time::Instant::now();
-        let pdf_bytes = page.pdf(custom_config.options.clone()).await
-            .context("PDF generation failed")?;
-        
-        Ok(PdfResult {
-            pdf_bytes,
-            page_count: 1,
-            execution_time_ms: start.elapsed().as_millis() as u64,
-        })
+        Self::execute(page, custom_config).await
     }
 }

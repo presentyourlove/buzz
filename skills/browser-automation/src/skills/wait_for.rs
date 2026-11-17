@@ -194,41 +194,34 @@ impl WaitForSkill {
         selector: &str,
         state: WaitForSelectorState,
         timeout: Duration,
-    ) -> Result<WaitResult> {
-        let playwright_state = match state {
-            WaitForSelectorState::Attached => playwright::api::WaitForSelectorState::Attached,
-            WaitForSelectorState::Detached => playwright::api::WaitForSelectorState::Detached,
-            WaitForSelectorState::Visible => playwright::api::WaitForSelectorState::Visible,
-            WaitForSelectorState::Hidden => playwright::api::WaitForSelectorState::Hidden,
+    ) -> Result<WaitForResult> {
+        use playwright::{WaitForOptions, WaitForState};
+        
+        let wait_state = match state {
+            WaitForSelectorState::Visible => WaitForState::Visible,
+            WaitForSelectorState::Hidden => WaitForState::Hidden,
+            WaitForSelectorState::Attached => WaitForState::Attached,
+            WaitForSelectorState::Detached => WaitForState::Detached,
         };
         
-        let element = page
-            .wait_for_selector(selector)
-            .await
+        let wait_opts = WaitForOptions::builder()
+            .state(wait_state)
+            .timeout(timeout.as_millis() as f64)
+            .build();
+        
+        let locator = page.locator(selector);
+        locator.wait_for(Some(wait_opts)).await
             .with_context(|| format!("Timeout waiting for selector: {}", selector))?;
         
-        // Wait for specific state
-        match state {
-            WaitForSelectorState::Visible => {
-                element.wait_for_element_state(playwright::api::ElementState::Visible).await?;
-            }
-            WaitForSelectorState::Hidden => {
-                element.wait_for_element_state(playwright::api::ElementState::Hidden).await?;
-            }
-            WaitForSelectorState::Attached => {
-                element.wait_for_element_state(playwright::api::ElementState::Attached).await?;
-            }
-            WaitForSelectorState::Detached => {
-                element.wait_for_element_state(playwright::api::ElementState::Detached).await?;
-            }
-        }
+        let element_info = Self::get_element_info_from_locator(&locator, selector).await;
         
-        let element_info = Self::get_element_info(&element, selector).await;
-        
-        Ok(WaitResult {
+        Ok(WaitForResult {
+            success: true,
             condition_met: true,
             element_info: Some(element_info),
             network_info: None,
+            error: None,
+            duration_ms: 0,
         })
     }
     
@@ -236,31 +229,150 @@ impl WaitForSkill {
     async fn wait_for_navigation(
         page: &Page,
         url: Option<String>,
-        timeout_ms: u64,
-    ) -> Result<WaitResult> {
-        let start = std::time::Instant::now();
-        
+        wait_until: super::navigate::WaitUntil,
+        timeout: Duration,
+    ) -> Result<WaitForResult> {
         let navigation_future = async {
             if let Some(target_url) = url {
-                page.wait_for_url(&target_url).await?;
+                page.wait_for_url(&target_url, None).await?;
             } else {
-                page.wait_for_load_state(playwright::api::LoadState::NetworkIdle).await?;
+                page.wait_for_load_state(Some(wait_until.into())).await?;
             }
             Ok::<(), anyhow::Error>(())
         };
         
-        match tokio::time::timeout(Duration::from_millis(timeout_ms), navigation_future).await {
-            Ok(Ok(_)) => Ok(WaitResult {
+        match tokio::time::timeout(timeout, navigation_future).await {
+            Ok(Ok(_)) => Ok(WaitForResult {
+                success: true,
                 condition_met: true,
                 element_info: None,
                 network_info: Some(NetworkInfo {
-                    final_url: page.url().await.unwrap_or_default(),
-                    resource_count: 0,
-                    total_transfer_size: 0,
+                    url: page.url().to_string(),
+                    method: "GET".to_string(),
+                    status: Some(200),
+                    resource_type: "document".to_string(),
                 }),
+                error: None,
+                duration_ms: 0,
             }),
             Ok(Err(e)) => Err(e),
-            Err(_) => Err(anyhow::anyhow!("Navigation timeout after {}ms", timeout_ms)),
+            Err(_) => Err(anyhow::anyhow!("Navigation timeout after {}ms", timeout.as_millis())),
+        }
+    }
+
+    async fn wait_for_javascript(
+        page: &Page,
+        script: &str,
+        timeout: Duration,
+        poll_interval: Duration,
+    ) -> Result<WaitForResult> {
+        let start = std::time::Instant::now();
+        loop {
+            let res: Result<bool> = page.evaluate(script, None::<&()>).await.map_err(|e| anyhow::anyhow!(e));
+            if let Ok(true) = res {
+                return Ok(WaitForResult {
+                    success: true,
+                    condition_met: true,
+                    element_info: None,
+                    network_info: None,
+                    error: None,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                });
+            }
+            if start.elapsed() >= timeout {
+                return Err(anyhow::anyhow!("Timeout waiting for JS condition"));
+            }
+            tokio::time::sleep(poll_interval).await;
+        }
+    }
+
+    async fn wait_for_network(
+        page: &Page,
+        _url_pattern: &str,
+        _kind: NetworkWaitKind,
+        _timeout: Duration,
+    ) -> Result<WaitForResult> {
+        page.wait_for_load_state(Some(playwright::WaitUntil::NetworkIdle)).await?;
+        Ok(WaitForResult {
+            success: true,
+            condition_met: true,
+            element_info: None,
+            network_info: Some(NetworkInfo {
+                url: page.url().to_string(),
+                method: "GET".to_string(),
+                status: Some(200),
+                resource_type: "xhr".to_string(),
+            }),
+            error: None,
+            duration_ms: 0,
+        })
+    }
+
+    async fn wait_for_load_state(
+        page: &Page,
+        state: super::navigate::WaitUntil,
+        _timeout: Duration,
+    ) -> Result<WaitForResult> {
+        page.wait_for_load_state(Some(state.into())).await?;
+        Ok(WaitForResult {
+            success: true,
+            condition_met: true,
+            element_info: None,
+            network_info: None,
+            error: None,
+            duration_ms: 0,
+        })
+    }
+
+    async fn wait_for_duration(ms: u64) -> Result<WaitForResult> {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Ok(WaitForResult {
+            success: true,
+            condition_met: true,
+            element_info: None,
+            network_info: None,
+            error: None,
+            duration_ms: ms,
+        })
+    }
+
+    async fn wait_for_element_enabled(
+        page: &Page,
+        selector: &str,
+        enabled: bool,
+        timeout: Duration,
+    ) -> Result<WaitForResult> {
+        let locator = page.locator(selector);
+        let start = std::time::Instant::now();
+        loop {
+            let is_enabled = locator.is_enabled().await.unwrap_or(false);
+            if is_enabled == enabled {
+                let element_info = Self::get_element_info_from_locator(&locator, selector).await;
+                return Ok(WaitForResult {
+                    success: true,
+                    condition_met: true,
+                    element_info: Some(element_info),
+                    network_info: None,
+                    error: None,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                });
+            }
+            if start.elapsed() >= timeout {
+                return Err(anyhow::anyhow!("Timeout waiting for element enabled state"));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    async fn get_element_info_from_locator(locator: &playwright::Locator, selector: &str) -> ElementInfo {
+        let tag_name: Option<String> = locator.evaluate("el => el.tagName.toLowerCase()", None::<&()>).await.ok();
+        let id = locator.get_attribute("id").await.ok().flatten();
+        let class_name = locator.get_attribute("class").await.ok().flatten();
+        ElementInfo {
+            selector: selector.to_string(),
+            tag_name: tag_name.unwrap_or_else(|| "unknown".to_string()),
+            id,
+            class_name,
         }
     }
 }

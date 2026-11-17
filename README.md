@@ -1026,6 +1026,50 @@ just reset          # ⚠️  Wipe data + recreate
   - 整合測試：`cargo test --package buzz-agent --test browser_integration` 4 passed; 0 failed。
   - 二進位熱置換：Release 版 `buzz-agent.exe` (21.9 MB) 成功熱部署。
 
+### Phase 29: 瀏覽器自動化 Phase 2 技能包裝、SSRF 白名單防護與單元整合測試 100% 驗收 (Browser Automation Phase 2 Skills Packaging, SSRF Permission Guard & 100% Test Pass)
+- **核心升級亮點 (Core Highlights)**：
+  - **接棒收尾 Phase 2 技能層與型別架構修復**：徹底解決特工 Pollen 遺留之 122+ 處跨檔案編譯障礙，包含 `skills/browser-automation` 底層架構（`BrowserPool`、`ContextManager`、`StealthUtils`、`PermissionGuard`、`Vault`）對齊 Playwright-rs 0.21.0 API。
+  - **10 大瀏覽器技能動態註冊表**：落實 `BrowserSkill` 非同步 Trait 與 `SkillRegistry` 單例系統，動態支援 `navigate`, `click`, `type_text`, `screenshot`, `pdf`, `eval_js`, `wait_for`, `form_fill`, `structured_scrape`, `close` 等 10 大技能。
+  - **SSRF 嚴格網域白名單與內部網路阻斷門禁 (PermissionGuard)**：實施硬核 SSRF 防護機制，攔截所有 localhost、環回地址 (127.0.0.1, ::1)、私有子網 (10.x, 192.168.x, 172.16-31.x) 與繞過語法；空白名單安全預設阻斷全部請求；支援憑證標籤授權校驗 (`check_credential_access`)。
+  - **全套單元與整合測試 100% PASS**：
+    - `browser_skill_unit.rs`：12 passed; 0 failed。
+    - `permission_guard_unit.rs`：10 passed; 0 failed。
+    - `browser_integration.rs`：4 passed; 0 failed。
+    - 累計 26 項測試全數綠燈通過。
+  - **Release 二進位檔編譯與本機無縫熱替換**：成功編譯 Release 最佳化二進位檔（**18,390,306 bytes** / 18.4 MB），並熱更新部署至 `C:\Users\user\AppData\Local\Buzz\buzz-agent.exe`。
+  - **版本控制與標籤承諾遵循**：嚴格遵照主理人指示，不標記新 Tag，不覆蓋 `checkpoint-20261117-stable`，正常 Git 提交並同步至 GitHub。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-agent/tests/browser_skill_unit.rs` (10 大技能動態註冊單元測試)
+    - `crates/buzz-agent/tests/permission_guard_unit.rs` (SSRF 與網域白名單安全單元測試)
+    - `skills/browser-automation/src/permission_guard.rs` (SSRF 白名單防護與憑證門禁)
+    - `skills/browser-automation/src/skills/form_fill.rs` (高階表單填充技能)
+    - `skills/browser-automation/src/skills/structured_scrape.rs` (高階結構化資料抽取技能)
+    - `skills/browser-automation/src/skills/trait_module.rs` (BrowserSkill 非同步 Trait 與 SkillRegistry 註冊表)
+  - **修改 (Modified)**：
+    - `crates/buzz-agent/src/builtin.rs` (型別校準、補齊表單填充與結構化抽取呼叫)
+    - `crates/buzz-agent/src/hooks/types.rs` (修復 Severity enum Default 標註語法)
+    - `skills/browser-automation/src/browser_pool.rs` (相容性修復、生命週期管理與健康檢查)
+    - `skills/browser-automation/src/capability.rs` (字串憑證標籤與 allows_domain 支援)
+    - `skills/browser-automation/src/context_manager.rs` (Playwright API 完整對齊與隔離上下文)
+    - `skills/browser-automation/src/skills/click.rs` (Locator 與 MouseOptions 型別修復)
+    - `skills/browser-automation/src/skills/eval_js.rs` (evaluate 參數型別與 console log 監聽)
+    - `skills/browser-automation/src/skills/mod.rs` (導出 capability, permission_guard 與高階技能)
+    - `skills/browser-automation/src/skills/navigate.rs` (wait_for_load_state 與 goto 型別修復)
+    - `skills/browser-automation/src/skills/pdf.rs` (PdfOptionsBuilder 與 media 模擬對齊)
+    - `skills/browser-automation/src/skills/screenshot.rs` (修復 path partial move 與 evaluate 參數)
+    - `skills/browser-automation/src/skills/type_text.rs` (keyboard.type_text 參數對齊)
+    - `skills/browser-automation/src/skills/wait_for.rs` (完整實作各類 wait 條件與非同步等待)
+    - `skills/browser-automation/src/stealth.rs` (滑鼠與滾動模擬 API 對齊)
+    - `skills/browser-automation/src/vault.rs` (消除 partial move 與 metadata actions 比對型別錯誤)
+    - `skills/browser-automation/src/audit.rs` (修復日誌格式化與 rotate 回傳型別)
+    - `c:\私人\ai agent\buzz\README.md` (增設 Phase 29 成果記錄)
+- **測試驗證 (Testing & QA)**：
+  - 編譯校驗：`cargo check --package buzz-agent` 0 error 通過。
+  - 單元測試：`cargo test --package buzz-agent --test browser_skill_unit --test permission_guard_unit` 22 passed; 0 failed。
+  - 整合測試：`cargo test --package buzz-agent --test browser_integration` 4 passed; 0 failed。
+  - 二進位熱更新：Release 版 `buzz-agent.exe` (18.4 MB) 成功熱替換至本機目錄。
+
 ---
 
 <p align="center">

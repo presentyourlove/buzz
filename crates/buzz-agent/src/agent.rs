@@ -719,6 +719,8 @@ impl RunCtx<'_> {
             }
             // Inject browser automation tools when browser pool is available.
             if self.browser_pool.is_some() {
+                // Initialize browser automation skill registry
+                browser_automation::skills::init_registry();
                 tools.push(builtin::browser_open_def());
                 tools.push(builtin::browser_screenshot_def());
                 tools.push(builtin::browser_close_def());
@@ -727,6 +729,9 @@ impl RunCtx<'_> {
                 tools.push(builtin::browser_fill_def());
                 tools.push(builtin::browser_wait_def());
                 tools.push(builtin::browser_extract_def());
+                // Phase 2: High-level business skills
+                tools.push(builtin::form_fill_def());
+                tools.push(builtin::structured_scrape_def());
             }
             round = round.saturating_add(1);
             let response_result = tokio::select! {
@@ -1487,6 +1492,26 @@ impl RunCtx<'_> {
             if call.name == builtin::BROWSER_EXECUTE_SCRIPT_TOOL {
                 emit_in_progress(self.wire, self.session_id, call).await;
                 let mut result = builtin::call_browser_execute_script(&call.arguments, self).await.ok()?;
+                result.provider_id = call.provider_id.clone();
+                emit_completed(self.wire, self.session_id, call, &result).await;
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Built-in form_fill: execute inline, no MCP round-trip.
+            if call.name == builtin::FORM_FILL_TOOL {
+                emit_in_progress(self.wire, self.session_id, call).await;
+                let mut result = builtin::call_form_fill(&call.arguments, self).await.ok()?;
+                result.provider_id = call.provider_id.clone();
+                emit_completed(self.wire, self.session_id, call, &result).await;
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Built-in structured_scrape: execute inline, no MCP round-trip.
+            if call.name == builtin::STRUCTURED_SCRAPE_TOOL {
+                emit_in_progress(self.wire, self.session_id, call).await;
+                let mut result = builtin::call_structured_scrape(&call.arguments, self).await.ok()?;
                 result.provider_id = call.provider_id.clone();
                 emit_completed(self.wire, self.session_id, call, &result).await;
                 results[idx] = Some(result);

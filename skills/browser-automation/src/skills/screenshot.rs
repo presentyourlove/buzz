@@ -4,6 +4,7 @@
 
 use anyhow::{Context, Result};
 use playwright::Page;
+use playwright::{Animations, ScreenshotClip, ScreenshotOptions as PwScreenshotOptions, ScreenshotType};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{debug, info};
@@ -17,7 +18,7 @@ pub struct ScreenshotConfig {
     pub path: Option<PathBuf>,
     /// Screenshot options
     #[serde(default)]
-    pub options: ScreenshotOptions,
+    pub options: ScreenshotConfigOptions,
     /// Timeout in milliseconds
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
@@ -29,7 +30,7 @@ fn default_timeout() -> u64 {
 
 /// Screenshot options
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ScreenshotOptions {
+pub struct ScreenshotConfigOptions {
     /// Capture full page (not just viewport)
     #[serde(default)]
     pub full_page: bool,
@@ -64,18 +65,20 @@ fn default_animations() -> AnimationHandling {
 }
 
 /// Image format
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageFormat {
+    #[default]
     Png,
     Jpeg,
     Webp,
 }
 
 /// Animation handling
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AnimationHandling {
+    #[default]
     Allow,
     Disabled,
 }
@@ -128,23 +131,23 @@ impl ScreenshotSkill {
         
         info!("Taking screenshot: full_page={}, format={:?}", config.options.full_page, config.options.format);
         
-        // Build screenshot options
-        let mut options = playwright::api::ScreenshotOptions::default();
-        options.full_page = config.options.full_page;
-        options.format = match config.options.format {
-            ImageFormat::Png => playwright::api::ScreenshotFormat::Png,
-            ImageFormat::Jpeg => playwright::api::ScreenshotFormat::Jpeg,
-            ImageFormat::Webp => playwright::api::ScreenshotFormat::Webp,
-        };
-        options.quality = Some(config.options.quality);
-        options.omit_background = config.options.omit_background;
-        options.animations = match config.options.animations {
-            AnimationHandling::Allow => playwright::api::AnimationHandling::Allow,
-            AnimationHandling::Disabled => playwright::api::AnimationHandling::Disabled,
-        };
+        // Build screenshot options using playwright builder pattern
+        let mut options_builder = PwScreenshotOptions::builder()
+            .full_page(config.options.full_page)
+            .screenshot_type(match config.options.format {
+                ImageFormat::Png => ScreenshotType::Png,
+                ImageFormat::Jpeg => ScreenshotType::Jpeg,
+                ImageFormat::Webp => ScreenshotType::Webp,
+            })
+            .quality(config.options.quality)
+            .omit_background(config.options.omit_background)
+            .animations(match config.options.animations {
+                AnimationHandling::Allow => Animations::Allow,
+                AnimationHandling::Disabled => Animations::Disabled,
+            });
         
         if let Some(clip) = config.options.clip {
-            options.clip = Some(playwright::api::ClipRect {
+            options_builder = options_builder.clip(ScreenshotClip {
                 x: clip.x,
                 y: clip.y,
                 width: clip.width,
@@ -152,16 +155,12 @@ impl ScreenshotSkill {
             });
         }
         
+        let options = options_builder.build();
+        
         let image_bytes = if let Some(selector) = config.options.element_selector {
-            // Element screenshot
-            let element = page
-                .wait_for_selector(&selector)
-                .await
-                .with_context(|| format!("Element not found: {}", selector))?;
-            
-            element.screenshot(options).await?
+            let locator = page.locator(&selector);
+            locator.screenshot(options).await?
         } else {
-            // Page screenshot
             page.screenshot(options).await?
         };
         
@@ -169,6 +168,7 @@ impl ScreenshotSkill {
         let file_size = image_bytes.len() as u64;
         
         // Save to file if path provided
+        let has_path = config.path.is_some();
         let path = if let Some(path) = config.path {
             tokio::fs::write(&path, &image_bytes).await
                 .with_context(|| format!("Failed to write screenshot to {:?}", path))?;
@@ -184,7 +184,7 @@ impl ScreenshotSkill {
         
         Ok(ScreenshotResult {
             success: true,
-            image_bytes: if config.path.is_none() { Some(image_bytes) } else { None },
+            image_bytes: if !has_path { Some(image_bytes) } else { None },
             path,
             dimensions,
             file_size: Some(file_size),
@@ -234,7 +234,7 @@ impl ScreenshotSkill {
         config: ScreenshotConfig,
     ) -> Result<ScreenshotResult> {
         // Ensure we're at the top
-        page.evaluate("window.scrollTo(0, 0)").await?;
+        let _: Option<serde_json::Value> = page.evaluate("() => window.scrollTo(0, 0)", None::<&()>).await.ok();
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         
         // Take full page screenshot

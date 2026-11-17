@@ -182,7 +182,7 @@ impl AuditLogger {
             serde_json::to_string(&event)?
         } else {
             format!(
-                "{} [{}] {} - {} - {}",
+                "{} [{}] {} - {} - {:?}",
                 event.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                 event.severity as u8,
                 event.event_type as u8,
@@ -292,5 +292,142 @@ impl AuditLogger {
         }
         
         info!("Audit log rotated");
+        Ok(())
+    }
+}
+
+/// Audit session - represents a single audit logging session
+/// Wraps an AuditLogger with session metadata for structured logging
+#[derive(Debug)]
+pub struct AuditSession {
+    /// The underlying audit logger
+    logger: Arc<AuditLogger>,
+    /// Session ID
+    session_id: Uuid,
+    /// Session start time
+    start_time: DateTime<Utc>,
+    /// Actor/agent identifier for this session
+    actor: String,
+    /// Whether the session is active
+    active: bool,
+}
+
+impl AuditSession {
+    /// Create a new audit session
+    pub async fn new(logger: Arc<AuditLogger>, actor: String) -> Result<Self> {
+        let session_id = Uuid::new_v4();
+        let start_time = Utc::now();
+        
+        Ok(Self {
+            logger,
+            session_id,
+            start_time,
+            actor,
+            active: true,
+        })
+    }
+    
+    /// Get the session ID
+    pub fn session_id(&self) -> Uuid {
+        self.session_id
+    }
+    
+    /// Get the session start time
+    pub fn start_time(&self) -> DateTime<Utc> {
+        self.start_time
+    }
+    
+    /// Get the actor identifier
+    pub fn actor(&self) -> &str {
+        &self.actor
+    }
+    
+    /// Check if the session is active
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+    
+    /// Log an event in this session
+    pub async fn log(&self, event_type: AuditEventType, action: &str, result: AuditResult, target: Option<String>) -> Result<()> {
+        if !self.active {
+            return Err(anyhow::anyhow!("Session is not active"));
+        }
+        
+        let event = AuditEvent {
+            id: Uuid::new_v4(),
+            event_type,
+            severity: AuditSeverity::Info,
+            timestamp: Utc::now(),
+            session_id: self.session_id,
+            context_id: None,
+            capability_id: None,
+            actor: self.actor.clone(),
+            action: action.to_string(),
+            target,
+            result,
+            metadata: HashMap::new(),
+            duration_ms: None,
+        };
+        self.logger.log(event).await
+    }
+    
+    /// Log an event with context and capability info
+    pub async fn log_with_context(&self, context_id: Option<Uuid>, capability_id: Option<Uuid>, event_type: AuditEventType, action: &str, result: AuditResult, target: Option<String>, metadata: HashMap<String, String>, duration_ms: Option<u64>) -> Result<()> {
+        if !self.active {
+            return Err(anyhow::anyhow!("Session is not active"));
+        }
+        
+        let event = AuditEvent {
+            id: Uuid::new_v4(),
+            event_type,
+            severity: AuditSeverity::Info,
+            timestamp: Utc::now(),
+            session_id: self.session_id,
+            context_id,
+            capability_id,
+            actor: self.actor.clone(),
+            action: action.to_string(),
+            target,
+            result,
+            metadata,
+            duration_ms,
+        };
+        self.logger.log(event).await
+    }
+    
+    /// End the session
+    pub async fn end(&mut self) -> Result<()> {
+        if !self.active {
+            return Ok(());
+        }
+        
+        let event = AuditEvent {
+            id: Uuid::new_v4(),
+            event_type: AuditEventType::SessionEnd,
+            severity: AuditSeverity::Info,
+            timestamp: Utc::now(),
+            session_id: self.session_id,
+            context_id: None,
+            capability_id: None,
+            actor: self.actor.clone(),
+            action: "Audit session ended".to_string(),
+            target: None,
+            result: AuditResult::Success { details: None },
+            metadata: HashMap::new(),
+            duration_ms: None,
+        };
+        self.logger.log(event).await?;
+        
+        self.active = false;
+        Ok(())
+    }
+}
+
+impl Drop for AuditSession {
+    fn drop(&mut self) {
+        if self.active {
+            // Log session end on drop (best effort, async not available in Drop)
+            eprintln!("Warning: AuditSession dropped without explicit end() call. Session ID: {}", self.session_id);
+        }
     }
 }

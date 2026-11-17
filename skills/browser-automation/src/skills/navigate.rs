@@ -58,6 +58,17 @@ impl WaitUntil {
     }
 }
 
+impl From<WaitUntil> for playwright::WaitUntil {
+    fn from(val: WaitUntil) -> Self {
+        match val {
+            WaitUntil::Load => playwright::WaitUntil::Load,
+            WaitUntil::DomContentLoaded => playwright::WaitUntil::DomContentLoaded,
+            WaitUntil::NetworkIdle => playwright::WaitUntil::NetworkIdle,
+            WaitUntil::Commit => playwright::WaitUntil::Commit,
+        }
+    }
+}
+
 /// Navigate skill result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NavigateResult {
@@ -103,7 +114,7 @@ impl NavigateSkill {
         info!("Navigating to: {}", config.url);
         
         // Create page and navigate
-        let page = context.navigate(&config.url).await?;
+        let page = context.context().new_page().await?;
         
         // Set extra headers if provided
         if !config.headers.is_empty() {
@@ -112,25 +123,25 @@ impl NavigateSkill {
         
         // Wait for navigation
         let response = page
-            .goto(&config.url)
+            .goto(&config.url, None)
             .await
             .with_context(|| format!("Failed to navigate to {}", config.url))?;
         
         // Wait for the specified condition
-        page.wait_for_load_state(config.wait_until.as_str())
+        page.wait_for_load_state(Some(config.wait_until.into()))
             .await
             .with_context(|| format!("Timeout waiting for {}", config.wait_until.as_str()))?;
         
         let load_time = start.elapsed().as_millis() as u64;
         let final_url = page.url();
-        let status = response.status();
+        let status = response.map(|r| r.status());
         let title = page.title().await.ok();
         
-        debug!("Navigation completed: {} ({}) in {}ms", final_url, status, load_time);
+        debug!("Navigation completed: {} ({:?}) in {}ms", final_url, status, load_time);
         
         Ok(NavigateResult {
             final_url,
-            status: Some(status),
+            status,
             title,
             load_time_ms: load_time,
             success: true,
@@ -146,22 +157,22 @@ impl NavigateSkill {
         let start = std::time::Instant::now();
         
         let response = page
-            .goto(&config.url)
+            .goto(&config.url, None)
             .await
             .with_context(|| format!("Failed to navigate to {}", config.url))?;
         
-        page.wait_for_load_state(config.wait_until.as_str())
+        page.wait_for_load_state(Some(config.wait_until.into()))
             .await
             .with_context(|| format!("Timeout waiting for {}", config.wait_until.as_str()))?;
         
         let load_time = start.elapsed().as_millis() as u64;
         let final_url = page.url();
-        let status = response.status();
+        let status = response.map(|r| r.status());
         let title = page.title().await.ok();
         
         Ok(NavigateResult {
             final_url,
-            status: Some(status),
+            status,
             title,
             load_time_ms: load_time,
             success: true,

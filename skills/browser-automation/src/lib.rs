@@ -10,6 +10,7 @@ pub mod skills;
 pub mod audit;
 pub mod stealth;
 pub mod vault;
+pub mod permission_guard;
 
 pub use browser_pool::{BrowserPool, PoolConfig, PoolStats, IsolatedContext, BrowserTypeConfig};
 pub use context_manager::ContextManager;

@@ -4,6 +4,7 @@
 
 use anyhow::{Context, Result};
 use playwright::Page;
+use playwright::protocol::click::{ClickOptions as PwClickOptions, KeyboardModifier, MouseButton};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{debug, info};
@@ -71,9 +72,10 @@ fn default_click_count() -> u32 {
 }
 
 /// Click button
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ClickButton {
+    #[default]
     Left,
     Right,
     Middle,
@@ -145,64 +147,62 @@ impl ClickSkill {
         
         info!("Clicking element: {}", config.selector);
         
-        // Wait for element
-        let element = page
-            .wait_for_selector(&config.selector)
-            .await
-            .with_context(|| format!("Element not found: {}", config.selector))?;
+        // Wait for element and get info
+        let locator = page.locator(&config.selector);
+        let element_info = Self::get_element_info(&locator).await;
         
-        // Get element info before click
-        let element_info = Self::get_element_info(&element).await;
-        
-        // Build click options
-        let mut click_options = playwright::api::ClickOptions::default();
-        click_options.button = match config.options.button {
-            ClickButton::Left => playwright::api::MouseButton::Left,
-            ClickButton::Right => playwright::api::MouseButton::Right,
-            ClickButton::Middle => playwright::api::MouseButton::Middle,
-        };
-        click_options.click_count = config.options.click_count as usize;
-        click_options.delay = config.options.delay_ms as f64;
-        click_options.force = config.options.force;
-        click_options.no_wait_after = config.options.no_wait_after;
-        
-        if let Some(pos) = config.options.position {
-            click_options.position = Some(playwright::api::Position { x: pos.x, y: pos.y });
+        // Build click options using playwright ClickOptionsBuilder
+        let mut click_options_builder = PwClickOptions::builder();
+        click_options_builder = click_options_builder.button(match config.options.button {
+            ClickButton::Left => MouseButton::Left,
+            ClickButton::Right => MouseButton::Right,
+            ClickButton::Middle => MouseButton::Middle,
+        });
+
+        if config.options.click_count > 1 {
+            click_options_builder = click_options_builder.click_count(config.options.click_count as u32);
         }
-        
+
+        if config.options.delay_ms > 0 {
+            click_options_builder = click_options_builder.delay(config.options.delay_ms as f64);
+        }
+
+        if config.options.force {
+            click_options_builder = click_options_builder.force(true);
+        }
+
+        if config.options.no_wait_after {
+            click_options_builder = click_options_builder.no_wait_after(true);
+        }
+
+        if let Some(pos) = &config.options.position {
+            click_options_builder = click_options_builder.position(playwright::Position { x: pos.x, y: pos.y });
+        }
+
         if !config.options.modifiers.is_empty() {
-            click_options.modifiers = config.options.modifiers.iter().map(|m| match m {
-                ModifierKey::Shift => playwright::api::KeyboardModifier::Shift,
-                ModifierKey::Control => playwright::api::KeyboardModifier::Control,
-                ModifierKey::Alt => playwright::api::KeyboardModifier::Alt,
-                ModifierKey::Meta => playwright::api::KeyboardModifier::Meta,
+            let modifiers: Vec<KeyboardModifier> = config.options.modifiers.iter().map(|m| match m {
+                ModifierKey::Shift => KeyboardModifier::Shift,
+                ModifierKey::Control => KeyboardModifier::Control,
+                ModifierKey::Alt => KeyboardModifier::Alt,
+                ModifierKey::Meta => KeyboardModifier::Meta,
             }).collect();
+            click_options_builder = click_options_builder.modifiers(modifiers);
         }
-        
+
+        let click_options = click_options_builder.build();
+
         // Perform click
-        let navigation_result = if config.wait_for_navigation {
-            let nav_future = page.wait_for_navigation();
-            element.click(click_options).await?;
-            nav_future.await.ok()
-        } else {
-            element.click(click_options).await?;
-            None
-        };
+        locator.click(Some(click_options)).await?;
         
         let duration = start.elapsed().as_millis() as u64;
-        let navigated = navigation_result.is_some();
-        let final_url = navigation_result.as_ref().map(|_| page.url());
+        let final_url = Some(page.url().to_string());
         
-        if navigated {
-            page.wait_for_load_state(config.wait_until.as_str()).await.ok();
-        }
-        
-        debug!("Click completed in {}ms, navigated: {}", duration, navigated);
+        debug!("Click completed in {}ms", duration);
         
         Ok(ClickResult {
             success: true,
             element_info,
-            navigated,
+            navigated: false,
             final_url,
             error: None,
             duration_ms: duration,
@@ -210,12 +210,12 @@ impl ClickSkill {
     }
     
     /// Get element information
-    async fn get_element_info(element: &playwright::api::ElementHandle) -> Option<ElementInfo> {
-        let tag_name = element.evaluate("el => el.tagName.toLowerCase()").await.ok()?;
-        let id = element.get_attribute("id").await.ok().flatten();
-        let class_name = element.get_attribute("class").await.ok().flatten();
-        let text_content = element.text_content().await.ok();
-        let bounding_box = element.bounding_box().await.ok().map(|b| BoundingBox {
+    async fn get_element_info(locator: &playwright::Locator) -> Option<ElementInfo> {
+        let tag_name: Option<String> = locator.evaluate("el => el.tagName.toLowerCase()", None::<&()>).await.ok();
+        let id = locator.get_attribute("id").await.ok().flatten();
+        let class_name = locator.get_attribute("class").await.ok().flatten();
+        let text_content = locator.text_content().await.ok().flatten();
+        let bounding_box = locator.bounding_box().await.ok().flatten().map(|b| BoundingBox {
             x: b.x,
             y: b.y,
             width: b.width,
@@ -223,7 +223,7 @@ impl ClickSkill {
         });
         
         Some(ElementInfo {
-            tag_name: tag_name.as_str().unwrap_or("unknown").to_string(),
+            tag_name: tag_name.unwrap_or_else(|| "unknown".to_string()),
             id,
             class_name,
             text_content,
@@ -240,26 +240,27 @@ impl ClickSkill {
     ) -> Result<ClickResult> {
         let start = std::time::Instant::now();
         
-        page.mouse().move_(x, y).await?;
-        
-        let mut click_options = playwright::api::ClickOptions::default();
-        click_options.button = match options.button {
-            ClickButton::Left => playwright::api::MouseButton::Left,
-            ClickButton::Right => playwright::api::MouseButton::Right,
-            ClickButton::Middle => playwright::api::MouseButton::Middle,
+        let mouse_button = match options.button {
+            ClickButton::Left => MouseButton::Left,
+            ClickButton::Right => MouseButton::Right,
+            ClickButton::Middle => MouseButton::Middle,
         };
-        click_options.click_count = options.click_count as usize;
-        click_options.delay = options.delay_ms as f64;
         
-        page.mouse().down(click_options).await?;
-        page.mouse().up(click_options).await?;
+        let mouse_options = playwright::protocol::MouseOptions::builder()
+            .button(mouse_button)
+            .click_count(options.click_count)
+            .delay(options.delay_ms as f64)
+            .build();
+        
+        page.mouse().click(x, y, Some(mouse_options)).await?;
         
         Ok(ClickResult {
             success: true,
             element_info: None,
             navigated: false,
             final_url: None,
-            execution_time_ms: start.elapsed().as_millis() as u64,
+            error: None,
+            duration_ms: start.elapsed().as_millis() as u64,
         })
     }
 }

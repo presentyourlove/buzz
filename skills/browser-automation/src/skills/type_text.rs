@@ -95,37 +95,26 @@ impl TypeTextSkill {
         
         info!("Typing into element: {}", config.selector);
         
-        // Wait for element
-        let element = page
-            .wait_for_selector(&config.selector)
-            .await
-            .with_context(|| format!("Element not found: {}", config.selector))?;
-        
-        // Get element info before typing
-        let element_info = Self::get_element_info(&element).await;
+        // Wait for element and get info
+        let locator = page.locator(&config.selector);
+        let element_info = Self::get_element_info(&locator).await;
         
         // Clear field if requested
         if config.clear_first {
-            element.click().await?;
-            page.keyboard().press("Control+A").await?;
-            page.keyboard().press("Delete").await?;
+            locator.clear(None).await?;
         }
         
         // Type text
         let chars_typed = if config.options.human_like {
-            Self::human_type(page, &element, &config.text, config.options.delay_ms).await?
+            Self::human_type(page, &locator, &config.text, config.options.delay_ms).await?
         } else {
-            let type_options = playwright::api::TypeOptions {
-                delay: config.options.delay_ms as f64,
-                no_wait_after: config.options.no_wait_after,
-            };
-            element.type_text(&config.text, type_options).await?;
+            locator.fill(&config.text, None).await?;
             config.text.chars().count()
         };
         
         // Press Enter if requested
         if config.press_enter {
-            page.keyboard().press("Enter").await?;
+            page.keyboard().press("Enter", None).await?;
         }
         
         let duration = start.elapsed().as_millis() as u64;
@@ -144,15 +133,15 @@ impl TypeTextSkill {
     /// Human-like typing with random delays
     async fn human_type(
         page: &Page,
-        element: &playwright::api::ElementHandle,
+        locator: &playwright::Locator,
         text: &str,
         base_delay: u64,
     ) -> Result<usize> {
-        element.click().await?;
+        locator.click(None).await?;
         
         let mut chars_typed = 0;
         for ch in text.chars() {
-            page.keyboard().type_text(&ch.to_string()).await?;
+            page.keyboard().type_text(&ch.to_string(), None).await?;
             chars_typed += 1;
             
             // Random delay between 0.5x and 2x base delay
@@ -164,15 +153,15 @@ impl TypeTextSkill {
     }
     
     /// Get element information
-    async fn get_element_info(element: &playwright::api::ElementHandle) -> Option<ElementInfo> {
-        let tag_name = element.evaluate("el => el.tagName.toLowerCase()").await.ok()?;
-        let id = element.get_attribute("id").await.ok().flatten();
-        let class_name = element.get_attribute("class").await.ok().flatten();
-        let value = element.get_attribute("value").await.ok().flatten();
-        let input_type = element.get_attribute("type").await.ok().flatten();
+    async fn get_element_info(locator: &playwright::Locator) -> Option<ElementInfo> {
+        let tag_name: Option<String> = locator.evaluate("el => el.tagName.toLowerCase()", None::<&()>).await.ok();
+        let id = locator.get_attribute("id").await.ok().flatten();
+        let class_name = locator.get_attribute("class").await.ok().flatten();
+        let value = locator.get_attribute("value").await.ok().flatten();
+        let input_type = locator.get_attribute("type").await.ok().flatten();
         
         Some(ElementInfo {
-            tag_name: tag_name.as_str().unwrap_or("unknown").to_string(),
+            tag_name: tag_name.unwrap_or_else(|| "unknown".to_string()),
             id,
             class_name,
             value,
@@ -190,12 +179,11 @@ impl TypeTextSkill {
     ) -> Result<TypeTextResult> {
         let start = std::time::Instant::now();
         
-        page.mouse().move_(x, y).await?;
-        page.mouse().click(x, y).await?;
+        page.mouse().click(x, y, None).await?;
         
         let mut chars_typed = 0;
         for ch in text.chars() {
-            page.keyboard().type_text(&ch.to_string()).await?;
+            page.keyboard().type_text(&ch.to_string(), None).await?;
             chars_typed += 1;
             
             let delay = options.delay_ms as f64 * (0.5 + rand::random::<f64>() * 1.5);
@@ -223,7 +211,7 @@ impl TypeTextSkill {
             format!("{}+{}", modifiers.join("+"), key)
         };
         
-        page.keyboard().press(&key_with_modifiers).await?;
+        page.keyboard().press(&key_with_modifiers, None).await?;
         Ok(())
     }
     

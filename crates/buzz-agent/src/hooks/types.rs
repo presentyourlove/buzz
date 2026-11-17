@@ -120,5 +120,10 @@ pub struct RuleMatch {
     pub suggested_fix: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Severity { Error, Warn, Info }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Severity {
+    Error,
+    Warn,
+    #[default]
+    Info,
+}

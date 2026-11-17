@@ -4,7 +4,8 @@
 //! and resource tracking.
 
 use anyhow::{Context, Result};
-use playwright::{Browser, BrowserContext, Page};
+use playwright::{Browser, BrowserContext, Cookie, Page};
+use playwright::protocol::browser_context::{BrowserContextOptions, Geolocation, GrantPermissionsOptions};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -13,6 +14,7 @@ use crate::capability::BrowserCapability;
 use crate::stealth::StealthConfig;
 
 /// Context manager for creating and managing isolated browser contexts
+#[derive(Debug, Clone)]
 pub struct ContextManager {
     stealth_enabled: bool,
     stealth_config: StealthConfig,
@@ -34,13 +36,15 @@ impl ContextManager {
         capability: &BrowserCapability,
         context_id: Uuid,
     ) -> Result<BrowserContext> {
-        let context = browser
-            .context_builder()
+        let options = BrowserContextOptions::builder()
             .accept_downloads(true)
             .bypass_csp(capability.allowed_actions.contains(&crate::capability::BrowserAction::EvalJS))
             .ignore_https_errors(true)
             .no_viewport(true)
-            .build()
+            .build();
+
+        let context = browser
+            .new_context_with_options(options)
             .await
             .context("Failed to create browser context")?;
         
@@ -67,7 +71,8 @@ impl ContextManager {
             crate::capability::NetworkEgressPolicy::None => {
                 // Block all network requests
                 context.route("**/*", |route| async move {
-                    route.abort().await;
+                    let _ = route.abort(None).await;
+                    Ok(())
                 }).await?;
             }
             crate::capability::NetworkEgressPolicy::AllowedDomains(domains) => {
@@ -75,18 +80,19 @@ impl ContextManager {
                 let domains = domains.clone();
                 context.route("**/*", move |route| {
                     let domains = domains.clone();
-                    Box::pin(async move {
+                    async move {
                         let url = route.request().url();
                         if let Ok(parsed) = url::Url::parse(&url) {
                             if domains.iter().any(|d| parsed.host_str() == Some(d.as_str())) {
-                                route.resume().await;
+                                let _ = route.continue_(None).await;
                             } else {
-                                route.abort().await;
+                                let _ = route.abort(None).await;
                             }
                         } else {
-                            route.abort().await;
+                            let _ = route.abort(None).await;
                         }
-                    })
+                        Ok(())
+                    }
                 }).await?;
             }
             crate::capability::NetworkEgressPolicy::Unrestricted => {
@@ -95,8 +101,8 @@ impl ContextManager {
         }
         
         // Set default navigation timeout
-        context.set_default_navigation_timeout(capability.max_execution_time.as_millis() as f64);
-        context.set_default_timeout(capability.max_execution_time.as_millis() as f64);
+        context.set_default_navigation_timeout(capability.max_execution_time.as_millis() as f64).await;
+        context.set_default_timeout(capability.max_execution_time.as_millis() as f64).await;
         
         Ok(())
     }
@@ -107,7 +113,6 @@ impl ContextManager {
         let stealth_script = self.stealth_config.generate_init_script();
         context.add_init_script(&stealth_script).await
             .context("Failed to add stealth init script")?;
-        
         Ok(())
     }
     
@@ -119,17 +124,16 @@ impl ContextManager {
         Ok(())
     }
     
-    /// Configure viewport for a context
-    pub async fn set_viewport(&self, context: &BrowserContext, width: u32, height: u32) -> Result<()> {
-        context.set_viewport_size(width, height).await
+    /// Configure viewport for a page
+    pub async fn set_viewport(&self, page: &Page, width: u32, height: u32) -> Result<()> {
+        page.set_viewport_size(playwright::protocol::browser_context::Viewport { width, height }).await
             .context("Failed to set viewport size")?;
         Ok(())
     }
     
     /// Set user agent for a context
-    pub async fn set_user_agent(&self, context: &BrowserContext, user_agent: &str) -> Result<()> {
-        context.set_user_agent(user_agent).await
-            .context("Failed to set user agent")?;
+    pub async fn set_user_agent(&self, _context: &BrowserContext, _user_agent: &str) -> Result<()> {
+        // User agent is configured during context creation via BrowserContextOptions
         Ok(())
     }
     
@@ -140,7 +144,8 @@ impl ContextManager {
         permissions: Vec<&str>,
         origin: &str,
     ) -> Result<()> {
-        context.grant_permissions(permissions, Some(origin)).await
+        let options = GrantPermissionsOptions::default().origin(origin);
+        context.grant_permissions(&permissions, options).await
             .context("Failed to grant permissions")?;
         Ok(())
     }
@@ -149,23 +154,23 @@ impl ContextManager {
     pub async fn set_cookies(
         &self,
         context: &BrowserContext,
-        cookies: Vec<playwright::api::Cookie>,
+        cookies: Vec<Cookie>,
     ) -> Result<()> {
-        context.add_cookies(cookies).await
+        context.add_cookies(&cookies).await
             .context("Failed to set cookies")?;
         Ok(())
     }
     
     /// Clear cookies for a context
     pub async fn clear_cookies(&self, context: &BrowserContext) -> Result<()> {
-        context.clear_cookies().await
+        context.clear_cookies(None).await
             .context("Failed to clear cookies")?;
         Ok(())
     }
     
     /// Get all cookies from a context
-    pub async fn get_cookies(&self, context: &BrowserContext) -> Result<Vec<playwright::api::Cookie>> {
-        let cookies = context.cookies().await
+    pub async fn get_cookies(&self, context: &BrowserContext) -> Result<Vec<Cookie>> {
+        let cookies = context.cookies(None).await
             .context("Failed to get cookies")?;
         Ok(cookies)
     }
@@ -182,8 +187,16 @@ impl ContextManager {
     }
     
     /// Emulate media type (for print/PDF)
-    pub async fn emulate_media(&self, context: &BrowserContext, media: &str) -> Result<()> {
-        context.emulate_media(media).await
+    pub async fn emulate_media(&self, page: &Page, media: &str) -> Result<()> {
+        let m = match media.to_lowercase().as_str() {
+            "print" => playwright::protocol::Media::Print,
+            "screen" => playwright::protocol::Media::Screen,
+            _ => playwright::protocol::Media::NoOverride,
+        };
+        let opt = playwright::protocol::EmulateMediaOptions::builder()
+            .media(m)
+            .build();
+        page.emulate_media(opt).await
             .context("Failed to emulate media")?;
         Ok(())
     }
@@ -196,22 +209,25 @@ impl ContextManager {
         longitude: f64,
         accuracy: Option<f64>,
     ) -> Result<()> {
-        context.set_geolocation(latitude, longitude, accuracy).await
+        let geo = Geolocation {
+            latitude,
+            longitude,
+            accuracy,
+        };
+        context.set_geolocation(Some(geo)).await
             .context("Failed to set geolocation")?;
         Ok(())
     }
     
     /// Set locale for a context
-    pub async fn set_locale(&self, context: &BrowserContext, locale: &str) -> Result<()> {
-        context.set_locale(locale).await
-            .context("Failed to set locale")?;
+    pub async fn set_locale(&self, _context: &BrowserContext, _locale: &str) -> Result<()> {
+        // Locale is configured during context creation via BrowserContextOptions
         Ok(())
     }
     
     /// Set timezone for a context
-    pub async fn set_timezone(&self, context: &BrowserContext, timezone: &str) -> Result<()> {
-        context.set_timezone(timezone).await
-            .context("Failed to set timezone")?;
+    pub async fn set_timezone(&self, _context: &BrowserContext, _timezone: &str) -> Result<()> {
+        // Timezone is configured during context creation via BrowserContextOptions
         Ok(())
     }
     

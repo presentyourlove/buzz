@@ -4,7 +4,7 @@
 //! automated browser sessions.
 
 use anyhow::Result;
-use playwright::api::Page;
+use playwright::Page;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -185,7 +185,10 @@ impl StealthUtils {
     pub async fn randomize_viewport(page: &Page) -> Result<()> {
         let width = 1920 + rand::random::<i32>() % 100;
         let height = 1080 + rand::random::<i32>() % 100;
-        page.set_viewport_size(width as u32, height as u32).await?;
+        page.set_viewport_size(playwright::protocol::browser_context::Viewport {
+            width: width as u32,
+            height: height as u32,
+        }).await?;
         Ok(())
     }
     
@@ -193,7 +196,7 @@ impl StealthUtils {
     pub async fn human_like_mouse_move(page: &Page, x: f64, y: f64) -> Result<()> {
         // Move in steps with slight randomization
         let steps = 10 + rand::random::<u32>() % 10;
-        let current = page.evaluate("() => ({ x: window.mouseX || 0, y: window.mouseY || 0 })").await?;
+        let current: serde_json::Value = page.evaluate("() => ({ x: window.mouseX || 0, y: window.mouseY || 0 })", None::<&()>).await.unwrap_or_else(|_| serde_json::json!({ "x": 0, "y": 0 }));
         let start_x = current.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let start_y = current.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
         
@@ -203,7 +206,7 @@ impl StealthUtils {
             let cx = start_x + (x - start_x) * ease + (rand::random::<f64>() - 0.5) * 2.0;
             let cy = start_y + (y - start_y) * ease + (rand::random::<f64>() - 0.5) * 2.0;
             
-            page.mouse().move_(cx, cy).await?;
+            page.mouse().move_to(cx, cy, None).await?;
             tokio::time::sleep(tokio::time::Duration::from_millis(10 + rand::random::<u64>() % 20)).await;
         }
         
@@ -212,10 +215,10 @@ impl StealthUtils {
     
     /// Simulate human typing with delays
     pub async fn human_type(page: &Page, selector: &str, text: &str) -> Result<()> {
-        page.click(selector).await?;
+        page.locator(selector).click(None).await?;
         
         for ch in text.chars() {
-            page.keyboard().type_text(&ch.to_string()).await?;
+            page.keyboard().type_text(&ch.to_string(), None).await?;
             // Random delay between 50-200ms
             let delay = 50 + rand::random::<u64>() % 150;
             tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
@@ -227,7 +230,7 @@ impl StealthUtils {
     /// Random scroll behavior
     pub async fn random_scroll(page: &Page) -> Result<()> {
         let scroll_amount = 100 + rand::random::<i32>() % 500;
-        page.evaluate(&format!("window.scrollBy(0, {})", scroll_amount)).await?;
+        let _: Option<serde_json::Value> = page.evaluate(&format!("() => window.scrollBy(0, {})", scroll_amount), None::<&()>).await.ok();
         tokio::time::sleep(tokio::time::Duration::from_millis(100 + rand::random::<u64>() % 500)).await;
         Ok(())
     }

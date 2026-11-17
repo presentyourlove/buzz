@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Credential type for browser automation
@@ -190,10 +190,10 @@ impl VaultClient {
         let antigravity_cred = Credential {
             id: credential.id,
             credential_type: credential.credential_type,
-            domain: credential.domain,
-            username: credential.username,
-            secret: credential.secret,
-            metadata: credential.metadata,
+            domain: credential.domain.clone(),
+            username: credential.username.clone(),
+            secret: credential.secret.clone(),
+            metadata: credential.metadata.clone(),
             last_used: credential.last_used,
             usage_count: credential.usage_count,
             created_at: chrono::Utc::now(),
@@ -216,10 +216,10 @@ impl VaultClient {
         let antigravity_cred = Credential {
             id: credential.id,
             credential_type: credential.credential_type,
-            domain: credential.domain,
-            username: credential.username,
-            secret: credential.secret,
-            metadata: credential.metadata,
+            domain: credential.domain.clone(),
+            username: credential.username.clone(),
+            secret: credential.secret.clone(),
+            metadata: credential.metadata.clone(),
             last_used: Some(chrono::Utc::now()),
             usage_count: credential.usage_count + 1,
             created_at: chrono::Utc::now(), // Will be overwritten by storage
@@ -319,11 +319,9 @@ impl CredentialSelector {
         // Prefer credentials that have the required action in metadata
         domain_matches.sort_by(|a, b| {
             let a_has_action = a.metadata.get("actions")
-                .and_then(|v| v.as_str())
                 .map(|s| s.contains(action))
                 .unwrap_or(false);
             let b_has_action = b.metadata.get("actions")
-                .and_then(|v| v.as_str())
                 .map(|s| s.contains(action))
                 .unwrap_or(false);
             b_has_action.cmp(&a_has_action)

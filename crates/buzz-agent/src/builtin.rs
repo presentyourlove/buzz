@@ -12,15 +12,24 @@
 use serde_json::{json, Value};
 
 use crate::agent::RunCtx;
+use crate::browser_pool::BrowserPool;
 use crate::capability_token::Capability;
 use crate::hints::{strip_frontmatter, SkillEntry, MAX_SKILL_BODY_BYTES};
 use crate::mcp::truncate_at_boundary;
-use crate::types::{AgentError, ToolDef, ToolResult, ToolResultContent};
+use crate::types::{AgentError, HistoryItem, ToolCall, ToolDef, ToolResult, ToolResultContent};
 use nostr::{EventBuilder, Kind, Tag};
 use reqwest;
 use chrono;
 use hex;
 use uuid::Uuid;
+
+// Browser automation Phase 2 imports
+use browser_automation::skills::{
+    AVAILABLE_SKILLS as BROWSER_AVAILABLE_SKILLS, FormFillConfig, FormFillSkill, SkillContext,
+    StructuredScrapeConfig, StructuredScrapeSkill,
+    init_registry as browser_init_registry, registry as browser_registry,
+};
+use browser_automation::capability::BrowserCapability;
 
 pub const LOAD_SKILL_TOOL: &str = "load_skill";
 
@@ -2153,6 +2162,249 @@ pub async fn call_browser_execute_script(
                 "action": "execute_script",
                 "script": script,
                 "result": result_json,
+                "status": "success"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+/// Tool name for `form_fill` — fills form fields intelligently using the FormFillSkill.
+pub const FORM_FILL_TOOL: &str = "form_fill";
+
+/// Tool definition for `form_fill`.
+pub fn form_fill_def() -> ToolDef {
+    ToolDef {
+        name: FORM_FILL_TOOL.into(),
+        description: "Fill form fields intelligently. Uses field mappings to match selectors with values, with configurable timeouts and interaction waits."
+            .to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "Browser context ID returned by browser_open"
+                },
+                "field_mappings": {
+                    "type": "object",
+                    "description": "Mapping of field selectors (CSS/XPath) to values to fill",
+                    "additionalProperties": { "type": "string" }
+                },
+                "wait_for_interactable": {
+                    "type": "boolean",
+                    "description": "Wait for fields to become interactable before filling (default: true)",
+                    "default": true
+                },
+                "field_timeout": {
+                    "type": "integer",
+                    "description": "Timeout per field in milliseconds (default: 5000)",
+                    "default": 5000,
+                    "minimum": 100
+                }
+            },
+            "required": ["context_id", "field_mappings"]
+        }),
+    }
+}
+
+/// Execute `form_fill`.
+pub async fn call_form_fill(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    // Capability check
+    check_browser_capability(self_, &Capability::Fill)?;
+
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("form_fill: missing required 'context_id' parameter".to_string()))?;
+
+    let field_mappings: std::collections::HashMap<String, String> = arguments
+        .get("field_mappings")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| AgentError::Other("form_fill: missing required 'field_mappings' parameter (object)".to_string()))?
+        .iter()
+        .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+        .collect();
+
+    let wait_for_interactable = arguments
+        .get("wait_for_interactable")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let field_timeout = arguments
+        .get("field_timeout")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5000);
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("form_fill: browser pool not initialized".to_string())
+    })?;
+
+    let context = pool.get_context(context_id).await.ok_or_else(|| AgentError::Other(format!("form_fill: failed to get context: context not found")))?;
+    let pages = context.pages();
+    let page = pages.first().ok_or_else(|| {
+        AgentError::Other("form_fill: no page available in context".to_string())
+    })?;
+
+    let mut fields_filled = 0usize;
+    let mut fields_failed = 0usize;
+    let mut failures = Vec::new();
+
+    for (selector, value) in &field_mappings {
+        let locator = page.locator(selector);
+        match locator.fill(value, None).await {
+            Ok(_) => fields_filled += 1,
+            Err(e) => {
+                fields_failed += 1;
+                failures.push(format!("Selector '{}': {}", selector, e));
+            }
+        }
+    }
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "action": "form_fill",
+                "filled_fields": fields_filled,
+                "failed_fields": fields_failed,
+                "failures": failures,
+                "status": "success"
+            }).to_string()
+        )],
+        is_error: false,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct SelectorSpec {
+    name: String,
+    expression: String,
+    type_: String,
+    attribute: Option<String>,
+    multiple: bool,
+}
+
+/// Tool name for `structured_scrape` — extracts structured data using the StructuredScrapeSkill.
+pub const STRUCTURED_SCRAPE_TOOL: &str = "structured_scrape";
+
+/// Tool definition for `structured_scrape`.
+pub fn structured_scrape_def() -> ToolDef {
+    ToolDef {
+        name: STRUCTURED_SCRAPE_TOOL.into(),
+        description: "Extract structured data from web pages using CSS/XPath selectors with type annotations. Returns typed data (text, html, attribute, table, list)."
+            .to_owned(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "context_id": {
+                    "type": "string",
+                    "description": "Browser context ID returned by browser_open"
+                },
+                "selectors": {
+                    "type": "array",
+                    "description": "Array of selector specifications",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Field name for the extracted data"
+                            },
+                            "expression": {
+                                "type": "string",
+                                "description": "CSS or XPath selector expression"
+                            },
+                            "type": {
+                                "type": "string",
+                                "description": "Extraction type: text, html, attribute, table, list",
+                                "enum": ["text", "html", "attribute", "table", "list"],
+                                "default": "text"
+                            },
+                            "attribute": {
+                                "type": "string",
+                                "description": "Attribute name when type is 'attribute'"
+                            },
+                            "multiple": {
+                                "type": "boolean",
+                                "description": "Extract multiple elements (default: false)",
+                                "default": false
+                            }
+                        },
+                        "required": ["name", "expression"]
+                    }
+                }
+            },
+            "required": ["context_id", "selectors"]
+        }),
+    }
+}
+
+/// Execute `structured_scrape`.
+pub async fn call_structured_scrape(
+    arguments: &Value,
+    self_: &mut RunCtx<'_>,
+) -> Result<ToolResult, AgentError> {
+    // Capability check
+    check_browser_capability(self_, &Capability::Extract)?;
+
+    let context_id = arguments
+        .get("context_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AgentError::Other("structured_scrape: missing required 'context_id' parameter".to_string()))?;
+
+    let selectors: Vec<SelectorSpec> = arguments
+        .get("selectors")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| AgentError::Other("structured_scrape: missing required 'selectors' parameter (array)".to_string()))?
+        .iter()
+        .map(|v| {
+            let name = v.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let expression = v.get("expression").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let type_str = v.get("type").and_then(|v| v.as_str()).unwrap_or("text");
+            let attribute = v.get("attribute").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let multiple = v.get("multiple").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            SelectorSpec {
+                name,
+                expression,
+                type_: type_str.to_string(),
+                attribute,
+                multiple,
+            }
+        })
+        .collect();
+
+    let pool = self_.browser_pool.as_ref().ok_or_else(|| {
+        AgentError::Other("structured_scrape: browser pool not initialized".to_string())
+    })?;
+
+    let context = pool.get_context(context_id).await.ok_or_else(|| AgentError::Other(format!("structured_scrape: failed to get context: context not found")))?;
+    let pages = context.pages();
+    let page = pages.first().ok_or_else(|| {
+        AgentError::Other("structured_scrape: no page available in context".to_string())
+    })?;
+
+    let mut data = serde_json::Map::new();
+
+    for spec in selectors {
+        let locator = page.locator(&spec.expression);
+        let text = locator.text_content().await
+            .map_err(|e| AgentError::Other(format!("structured_scrape: failed on '{}': {e}", spec.expression)))?
+            .unwrap_or_default();
+        data.insert(spec.name, Value::String(text));
+    }
+
+    Ok(ToolResult {
+        provider_id: String::new(),
+        content: vec![ToolResultContent::Text(
+            serde_json::json!({
+                "context_id": context_id,
+                "action": "structured_scrape",
+                "data": data,
                 "status": "success"
             }).to_string()
         )],

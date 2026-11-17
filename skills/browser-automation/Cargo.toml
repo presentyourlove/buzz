@@ -17,8 +17,7 @@ url = "2.0"
 rand = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 
-# Agent skill integration
-agent-skill = { path = "../agent-skill" }
+
 
 [dev-dependencies]
 tempfile = "3.0"
