@@ -1157,6 +1157,45 @@ just reset          # ⚠️  Wipe data + recreate
   - 編譯檢測：`cargo check --package buzz-agent --tests`：**0 Errors, 0 Warnings**！
   - 演練與實測：`python daily_evolution_dm.py` 成功將極簡雙層卡片送達主理人私訊視窗 (`af946a63-dd43-4050-baea-65140d47fc42`)。
 
+### 34. Phase 37：每日進化 v3.0（Honey2 全景記憶＋技能合成）、126 項問題清零、Git 雙軌修復與官方 25 項無損升級
+- **每日進化系統 v3.0 徹底重構 (`PLANS/daily_evolution/` 與 `C:\Users\user\.buzz\`)**：
+  - 直連讀取 `managed-agents.json` 中活躍的 **Honey2 模型 (`nvidia/nemotron-3-ultra-550b-a55b:free`)** 與 `OPENROUTER_API_KEY`（90s timeout / 4096 tokens ＋ 429/503 重試）。
+  - 跨頻道拉取**工程頻道＋主理人專屬 DM (`af946a63-dd43-4050-baea-65140d47fc42`)**，全景回顧 **Obsidian 核心記憶、冷記憶、對話綜述、前沿筆記 (`04-Social-Scraps`, `inbox/`) 與特工運行異常日誌**，嚴格過濾已結案回報與非系統對話，徹底杜絕總結型假建議。
+  - 重構 `skill_synthesizer.py` 為**新技能產出＋既有技能互相合成雙軌引擎**；實機運行共回顧 85 則訊息與 16 份記憶／筆記，由 Honey2 模型成功生成 6 項架構與應用進化建議及 **7 項技能產出／合成候選**（含 `proactive-trigger-runtime`、`chaos-failure-matrix`、`quant-portfolio-risk-sentinel`、`web-intel-to-obsidian`、`zero-defect-release-gate`、`proactive-trigger-orchestrator`、`long-turn-checkpoint-guard`），並成功推送卡片至主理人 DM。
+- **IDE 126 項 Problems 清零與 Rust 核心穩定化**：
+  - 修復 `crates/buzz-cli`、`crates/buzz-agent`（包含協助去重與修復進行中之 `types.rs` 重複定義與 `nostr v0.44` 型別錯誤）、`skills/env-guardian`、`skills/daily-digest`、`skills/antigravity`（補入 `rusqlite` `bundled`）、`skills/qa-guard` 與 `skills/browser-automation` 的全數編譯錯誤與警告。
+  - 更新 `crates/buzz-cli/src/lib.rs` CLI 穩定性測試納入 Pollen 新增之 `agents status` 子命令。
+- **Git 原始檔控制圖表修復與官方最新 25 項更新無損升級**：
+  - 將 `remote.upstream.fetch` 鎖定為僅追蹤 `main`，清除 1,617 條冗餘的 `upstream/*` 遠端追蹤分支指標，還原清爽的 `main`（官方進度）與 `feature/custom-local-core`（本地自研）雙軌圖表檢視。
+  - 快進 `main` 與 `origin/main` 至官方最新提交 `25b58ab98`，並於 `feature/custom-local-core` 零衝突無損合流（`61c586632`），凍結檢查點 `checkpoint-20261117-stable` 維持於 `aec632dcc758c03e35777e11443dc53896d2438b`。
+- **Release 編譯、原地重命名熱更新與桌面捷徑驗證**：
+  - 完成 `release` 版 `buzz-agent.exe` (`18,497,217` bytes) 與 `buzz.exe` (`13,524,906` bytes) 編譯並原地熱更新至 `C:\Users\user\AppData\Local\Buzz\`；驗證桌面捷徑 `"C:\Users\user\Desktop\Buzz.lnk"` 指向最新執行環境。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `PLANS/AGENT_ALWAYS_ON_AND_PERSONALIZED_IDENTITY_PLAN.md`
+    - `skills/env-guardian/src/{config.rs,circuit_breaker.rs,dependency_tool_checker.rs,service_health_probe.rs}`
+    - `skills/qa-guard/src/syntax_checker.rs`
+    - `C:\Users\user\.buzz\PLANS\DAILY_EVOLUTION_PROPOSAL_20261118.md` 與 `C:\Users\user\.buzz\PLANS\SKILL_CANDIDATES\*/SKILL.md` (7 項候選技能)
+  - **修改 (Modified)**：
+    - `Cargo.lock`、`crates/buzz-cli/{Cargo.toml,src/lib.rs,src/agent_management.rs,src/commands/agents.rs}`
+    - `crates/buzz-agent/src/{agent.rs,catalog.rs,daemon.rs,lib.rs,types.rs,triggers/{mod.rs,types.rs,event_bus.rs,scheduler.rs,trigger_registry.rs}}`
+    - `skills/antigravity/{Cargo.toml,src/evolution_pipeline.rs}`
+    - `skills/daily-digest/{Cargo.toml,src/vault_sync.rs,tests/digest_generator_tests.rs}`
+    - `skills/env-guardian/{Cargo.toml,src/env_checker.rs,src/lib.rs}`
+    - `skills/qa-guard/{Cargo.toml,src/lib.rs,src/encoding_validator.rs,src/patch_parser.rs,src/report_generator.rs}`
+    - `skills/browser-automation/src/skills/screenshot.rs`
+    - `PLANS/daily_evolution/{daily_evolution.py,skill_synthesizer.py,codebase_verifier.py,test_daily_evolution.py}`（並同步至 `scripts/{03_daily_evolution.py,daily_evolution_dm.py}`、`C:\Users\user\.buzz\{PLANS\daily_evolution,scripts}\` 及 `C:\私人\tools\codebase_verifier.py`）
+    - `C:\私人\ai agent\block-buzz.md`（清理 44 次重複 Phase 35 雜訊並增補 Phase 37 紀錄）
+    - `README.md`（增設 Phase 34 / Phase 37 總結與檔案異動清單）
+  - **刪除 / 清理 (Deleted)**：
+    - 清理 `C:\Users\user\.buzz\` 下 6 個 0-byte 異常亂碼空檔
+    - 清除本地 1,617 條冗餘 `upstream/*` 遠端追蹤分支指標與 `block-buzz.md` 44 次重複段落
+- **測試驗證 (Testing & QA)**：
+  - Python 單元測試：`python -m unittest discover`：**16/16 全數通過 (OK)**；`daily_evolution_dm.py` Honey2 實機推播驗證成功。
+  - Rust Skill Crates (`antigravity`, `daily-digest-skill`, `env-guardian`, `qa-guard`)：單元、整合與 doc-tests 全數通過（`16+15+3+2+3+1=40 passed; 0 failed`）。
+  - Rust CLI (`buzz-cli --lib`)：**647 passed; 0 failed**；Triggers (`buzz-agent --lib triggers`)：**19 passed; 0 failed**。
+  - 17 個 Windows 相容工作區套件 `cargo check --all-targets`：**0 Errors**（修復之 7 大目標套件與其中 16 個套件均為 0 Warnings，排除 `buzz-audio-client`、`buzz-voice` 與依賴 `openssl-sys` 之純 Linux 伺服器套件）。
+
 ---
 
 <p align="center">
