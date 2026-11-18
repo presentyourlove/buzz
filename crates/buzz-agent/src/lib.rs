@@ -41,13 +41,26 @@ mod mcp;
 pub mod model_capabilities;
 mod permission;
 pub mod ticket_sandbox;
-// pub mod triggers; // WIP by Pollen
+pub mod triggers {
+    pub mod event_bus;
+    pub mod scheduler;
+    pub mod trigger_registry;
+    pub mod types;
+
+    pub use self::event_bus::{EventBus, EventBusConfig};
+    pub use self::scheduler::{Scheduler, SchedulerConfig};
+    pub use self::trigger_registry::TriggerRegistry;
+    pub use self::types::{Trigger, TriggerType, TriggerStatus, EventSource};
+}
 pub mod types;
 mod wire;
 
 pub use catalog::{
     discover_databricks_models, discover_databricks_models_with_cache_dir, ModelEntry,
 };
+use crate::triggers::TriggerRegistry;
+use std::path::PathBuf;
+
 pub use config::Provider;
 pub use types::AgentError;
 
@@ -990,6 +1003,14 @@ async fn run_prompt(app: Arc<App>, id: Value, params: Value, wire_tx: WireSender
         usage_baseline,
         ledger: &mut ledger,
         browser_pool: &app.browser_pool,
+        trigger_registry: Arc::new(
+            TriggerRegistry::new(PathBuf::from("data/triggers.json"))
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Failed to create trigger registry: {}", e);
+                    TriggerRegistry::new_in_memory()
+                }),
+        ),
     };
     let result = ctx.run(p.prompt).await;
     if let Some(s) = app.sessions.lock().await.get_mut(&sid) {
@@ -997,6 +1018,10 @@ async fn run_prompt(app: Arc<App>, id: Value, params: Value, wire_tx: WireSender
         // Clear run state so a late steer can't queue into a finished turn.
         s.active_run_id = None;
         s.steer_tx = None;
+        // Shutdown trigger registry to stop background scheduler tasks
+        // Note: We can't access trigger_registry from here directly since it's in RunCtx
+        // The trigger registry will be dropped when RunCtx goes out of scope, 
+        // which will trigger its Drop impl to shutdown gracefully.
         s.history = history;
         s.original_task = original_task;
         s.handoff_count = handoff_count;

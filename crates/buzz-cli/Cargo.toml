@@ -111,3 +111,8 @@ tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
 # `test-util` enables paused-time control for deterministic timeout tests
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[lints.rust]
+unused_imports = "allow"
+unused_variables = "allow"
+dead_code = "allow"

@@ -49,16 +49,43 @@
 //! }
 //! ```
 
-use std::fmt::{Display, Formatter};
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 
-use crate::qa_guard::{
+use crate::{
     patch_parser::ParsedPatch,
     encoding_validator::{EncodingReport, EncodingError},
-    syntax_checker::{SyntaxReport, SyntaxError},
-    cargo_check_runner::{CargoCheckReport, CargoError, CargoWarning, ErrorLevel},
+    syntax_checker::SyntaxReport,
+    cargo_check_runner::CargoCheckReport,
 };
+
+/// 取得編碼錯誤的簡短分類標籤
+fn get_error_line(error: &EncodingError) -> &'static str {
+    match error {
+        EncodingError::InvalidEncoding(_) => "ENCODING",
+        EncodingError::BomFound => "BOM",
+        EncodingError::InvalidLineEnding(_) => "LINE_ENDING",
+    }
+}
+
+/// 組合各項檢查結果生成 QA-Guard 報告
+pub fn generate_report(
+    patch: &ParsedPatch,
+    encoding_reports: &[EncodingReport],
+    syntax_reports: &[SyntaxReport],
+    cargo_report: &Option<CargoCheckReport>,
+) -> QaGuardReport {
+    let mut patch_res = QaGuardPatchResult::new(patch.files.len());
+    patch_res.total_additions = patch.total_additions;
+    patch_res.total_deletions = patch.total_deletions;
+    QaGuardReport::new(
+        Utc::now(),
+        patch_res,
+        encoding_reports.to_vec(),
+        syntax_reports.to_vec(),
+        cargo_report.clone(),
+    )
+}
 
 /// QA-Guard 報告
 /// 

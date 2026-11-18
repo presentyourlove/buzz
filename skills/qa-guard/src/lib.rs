@@ -14,11 +14,46 @@
 //! - 載入時機 (buzz-agent/src/builtin.rs:52-124)
 //! - Hook 整合 (hooks/mod.rs:63-74)
 
+use std::fmt;
+use std::path::PathBuf;
+use chrono::Utc;
+
 pub mod patch_parser;
 pub mod encoding_validator;
 pub mod syntax_checker;
 pub mod cargo_check_runner;
 pub mod report_generator;
+
+/// QA-Guard 技能配置
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct QaGuardConfig {
+    pub enforce_utf8_no_bom: bool,
+    pub enforce_lf: bool,
+}
+
+/// QA-Guard 執行錯誤
+#[derive(Debug)]
+pub enum QaGuardError {
+    ParseError(ParseError),
+    EncodingError(EncodingError),
+    SyntaxError(SyntaxError),
+    CargoError(CargoError),
+    Other(String),
+}
+
+impl fmt::Display for QaGuardError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ParseError(e) => write!(f, "Patch 解析錯誤: {e}"),
+            Self::EncodingError(e) => write!(f, "編碼驗證錯誤: {e}"),
+            Self::SyntaxError(e) => write!(f, "語法檢查錯誤: {} (L{})", e.message, e.line),
+            Self::CargoError(e) => write!(f, "Cargo 檢查錯誤: {}", e.message),
+            Self::Other(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for QaGuardError {}
 
 /// 重新導出常用類型和結構，方便技能實現
 pub use patch_parser::{ParsedPatch, ParseError};
@@ -205,11 +240,16 @@ impl QaGuardSkill {
         let cargo_report = if parsed_patch.get_rust_files().is_empty() {
             None
         } else {
-            Some(self.cargo_runner.check_incremental(&parsed_patch.get_rust_files().iter().map(|f| f.old_path.clone()).collect()).await.map_err(QaGuardError::CargoError)?)
+            let rust_paths: Vec<PathBuf> = parsed_patch
+                .get_rust_files()
+                .iter()
+                .map(|f| f.old_path.clone())
+                .collect();
+            Some(self.cargo_runner.check_incremental(&rust_paths).await.map_err(QaGuardError::CargoError)?)
         };
         
         // 5. 生成報告
-        let mut report = QaGuardReport::new(
+        let report = QaGuardReport::new(
             Utc::now(),
             report_generator::QaGuardPatchResult::new(parsed_patch.files.len()),
             encoding_reports,
@@ -261,14 +301,14 @@ impl QaGuardSkill {
         // 2. 編碼檢查 - 遍歷專案中的所有 Rust 檔案
         let mut encoding_reports = Vec::new();
         let rust_files = self.find_rust_files();
-        for file_path in rust_files {
+        for file_path in &rust_files {
             // 讀取檔案內容
-            let content = match std::fs::read(&file_path) {
+            let content = match std::fs::read(file_path) {
                 Ok(content) => content,
                 Err(_) => continue,
             };
             
-            let report = self.encoding_validator.validate(&content, &file_path);
+            let report = self.encoding_validator.validate(&content, file_path);
             encoding_reports.push(report);
         }
         
@@ -291,5 +331,20 @@ impl QaGuardSkill {
 
     fn find_rust_files(&self) -> Vec<std::path::PathBuf> {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_qa_guard_skill_new_and_patch_parse() {
+        let skill = QaGuardSkill::new();
+        assert!(skill.find_rust_files().is_empty());
+
+        let patch_content = "diff --git a/src/main.rs b/src/main.rs\nindex 1234567..89abcde 100644\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,2 +1,2 @@\n-fn main() {}\n+fn main() { println!(\"ok\"); }\n";
+        let parsed = patch_parser::PatchParser::parse(patch_content).expect("patch should parse");
+        assert_eq!(parsed.files.len(), 1);
     }
 }

@@ -7,6 +7,8 @@ pub mod scheduler;
 pub mod trigger_registry;
 pub mod types;
 
+pub use self::types::{Trigger, TriggerType, TriggerStatus};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,7 +110,7 @@ mod tests {
     #[test]
     fn test_event_bus_backpressure() {
         let config = EventBusConfig {
-            channel_capacity: 2,
+            buffer_size: 2,
             ..Default::default()
         };
         let bus = EventBus::new(config);
@@ -219,10 +221,10 @@ mod tests {
                 jitter_secs: 5,
             },
         );
-        
+        let trigger_id = trigger.id;
         scheduler.add_trigger(trigger).unwrap();
         
-        let next_fire = scheduler.next_fire_time();
+        let next_fire = scheduler.next_fire_time_for(trigger_id);
         assert!(next_fire.is_some());
         
         // 同一觸發器的下次觸發時間應該因為抖動而不同
@@ -251,7 +253,7 @@ mod tests {
         assert_eq!(scheduler.trigger_count(), 1);
         
         // 停用的觸發器不應該有下次觸發時間
-        let next_fire = scheduler.next_fire_time();
+        let next_fire = scheduler.next_fire_time_for(trigger_id);
         assert!(next_fire.is_none() || scheduler.has_trigger(trigger_id));
     }
 
@@ -333,7 +335,7 @@ mod tests {
         assert!(scheduler.has_trigger(id3));
         
         // 下次觸發應該是最早的那個
-        let next_fire = scheduler.next_fire_time();
+        let next_fire = scheduler.next_fire_time(); // 獲取最早的觸發時間
         assert!(next_fire.is_some());
     }
 
@@ -353,11 +355,13 @@ mod tests {
             },
         );
         
+        let trigger_id = trigger.id;
         scheduler.add_trigger(trigger).unwrap();
         
-        let next_fire = scheduler.next_fire_time();
+        let next_fire = scheduler.next_fire_time_for(trigger_id);
         assert!(next_fire.is_some());
-        assert!(*next_fire.unwrap() >= future_time - chrono::Duration::seconds(1));
+        let next_fire_val = next_fire.unwrap();
+        assert!(next_fire_val >= future_time - chrono::Duration::seconds(1));
     }
 
     #[test]
@@ -462,11 +466,11 @@ mod tests {
         );
         
         scheduler.add_trigger(trigger1).unwrap();
-        scheduler.add_trigger(trigger2).unwrap();
+        scheduler.add_trigger(trigger2.clone()).unwrap();
         scheduler.add_trigger(trigger3).unwrap();
         
         // 下次觸發應該是最早的
-        let next_fire = scheduler.next_fire_time().unwrap();
+        let next_fire = scheduler.next_fire_time_for(trigger2.id).unwrap(); // earlier trigger
         assert!((next_fire - (now + chrono::Duration::seconds(10))).num_seconds().abs() <= 2);
     }
 }

@@ -531,6 +531,34 @@ pub enum AgentsCmd {
         /// Proposed instructions; use '-' to read from stdin
         #[arg(long)]
         system_prompt: String,
+        #[arg(long)]
+        runtime: Option<String>,
+        #[arg(long)]
+        provider: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long, value_enum)]
+        respond_to: Option<RespondToArg>,
+        // Identity fields (Phase 1)
+        #[arg(long)]
+        avatar_url: Option<String>,
+        #[arg(long)]
+        signature_tag: Option<String>,
+        #[arg(long)]
+        business_card: Option<String>,
+        #[arg(long)]
+        memory_namespace: Option<String>,
+        // Always-on fields (Phase 2)
+        #[arg(long)]
+        always_on: Option<bool>,
+        #[arg(long)]
+        idle_timeout_secs: Option<u64>,
+        #[arg(long)]
+        max_concurrent_tasks: Option<u32>,
+        #[arg(long)]
+        max_memory_mb: Option<u32>,
+        #[arg(long, value_delimiter = ',')]
+        monitored_channels: Option<Vec<String>>,
     },
     /// Open a prefilled edit-agent form in the owner's Buzz Desktop
     DraftUpdate {
@@ -553,6 +581,35 @@ pub enum AgentsCmd {
         model: Option<String>,
         #[arg(long, value_enum)]
         respond_to: Option<RespondToArg>,
+        // Identity fields (Phase 1)
+        #[arg(long)]
+        avatar_url: Option<String>,
+        #[arg(long)]
+        signature_tag: Option<String>,
+        #[arg(long)]
+        business_card: Option<String>,
+        #[arg(long)]
+        memory_namespace: Option<String>,
+        // Always-on fields (Phase 2)
+        #[arg(long)]
+        always_on: Option<bool>,
+        #[arg(long)]
+        idle_timeout_secs: Option<u64>,
+        #[arg(long)]
+        max_concurrent_tasks: Option<u32>,
+        #[arg(long)]
+        max_memory_mb: Option<u32>,
+        #[arg(long, value_delimiter = ',')]
+        monitored_channels: Option<Vec<String>>,
+    },
+    /// Show status of an agent (always-on state, identity fields, etc.)
+    Status {
+        /// Current channel UUID
+        #[arg(long)]
+        channel: String,
+        /// Agent name to check
+        #[arg(long)]
+        agent_name: String,
     },
     /// Submit a NIP-IA archive request for an identity (kind 9035)
     #[command(
@@ -3116,6 +3173,7 @@ mod tests {
                 "archived",
                 "draft-create",
                 "draft-update",
+                "status",
                 "unarchive"
             ]
         );
@@ -3263,7 +3321,7 @@ mod tests {
     #[test]
     fn subcommand_counts_are_stable() {
         let expected: Vec<(&str, usize)> = vec![
-            ("agents", 5),
+            ("agents", 6),
             ("canvas", 4),
             ("channels", 17),
             ("dms", 4),

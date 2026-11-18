@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::sync::Arc;
 use dashmap::DashMap;
@@ -740,6 +740,7 @@ pub enum AgentError {
     Mcp(String),
     EventBusNoSubscribers { event_type: String },
     Cancelled,
+    Internal(String),
     Other(String),
 }
 
@@ -755,6 +756,7 @@ impl std::fmt::Display for AgentError {
             Self::Mcp(s) => write!(f, "mcp: {s}"),
             Self::EventBusNoSubscribers { event_type } => write!(f, "event bus: no subscribers for '{event_type}'"),
             Self::Cancelled => write!(f, "cancelled"),
+            Self::Internal(s) => write!(f, "internal: {s}"),
             Self::Other(s) => write!(f, "other: {s}"),
         }
     }
@@ -810,6 +812,189 @@ pub fn clamp(mut s: String, max: usize) -> String {
 
 /// Type alias for agent's Nostr keys (used in daemon mode)
 pub type AgentKeys = nostr::Keys;
+
+/// AgentProfile (Kind:10100) - Replaceable event representing an agent's identity and configuration
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case", default)]
+pub struct AgentProfile {
+    pub name: Option<String>,
+    pub system_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub business_card: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_namespace: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_on_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_tasks: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_memory_mb: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub monitored_channels: Option<Vec<String>>,
+}
+
+impl AgentProfile {
+    /// Parse AgentProfile from Nostr event tags
+    pub fn from_tags(tags: &nostr::Tags) -> Result<Self, AgentError> {
+        let mut profile = Self::default();
+        for tag in tags.iter() {
+            let tag_vec = tag.as_slice();
+            if tag_vec.len() < 2 {
+                continue;
+            }
+            match tag_vec[0].as_str() {
+                "name" => profile.name = Some(tag_vec[1].to_string()),
+                "system_prompt" => profile.system_prompt = Some(tag_vec[1].to_string()),
+                "avatar_url" => profile.avatar_url = Some(tag_vec[1].to_string()),
+                "signature_tag" => profile.signature_tag = Some(tag_vec[1].to_string()),
+                "business_card" => profile.business_card = Some(tag_vec[1].to_string()),
+                "memory_namespace" => profile.memory_namespace = Some(tag_vec[1].to_string()),
+                "always_on" => profile.always_on_enabled = Some(tag_vec[1] == "true"),
+                "idle_timeout_secs" | "idle_timeout" => {
+                    if let Ok(v) = tag_vec[1].parse::<u64>() {
+                        profile.idle_timeout_secs = Some(v);
+                    }
+                }
+                "max_concurrent_tasks" => {
+                    if let Ok(v) = tag_vec[1].parse::<u32>() {
+                        profile.max_concurrent_tasks = Some(v);
+                    }
+                }
+                "max_memory_mb" => {
+                    if let Ok(v) = tag_vec[1].parse::<u32>() {
+                        profile.max_memory_mb = Some(v);
+                    }
+                }
+                "monitored_channels" => {
+                    profile.monitored_channels = Some(
+                        tag_vec[1]
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect(),
+                    );
+                }
+                _ => {}
+            }
+        }
+        Ok(profile)
+    }
+
+    /// Convert AgentProfile to Nostr tags for publishing
+    pub fn to_tags(&self) -> nostr::Tags {
+        let mut tags = Vec::new();
+        if let Some(v) = &self.name {
+            tags.push(nostr::Tag::custom(nostr::TagKind::custom("name"), vec![v.clone()]));
+        }
+        if let Some(v) = &self.avatar_url {
+            tags.push(nostr::Tag::custom(nostr::TagKind::custom("avatar_url"), vec![v.clone()]));
+        }
+        if let Some(v) = &self.signature_tag {
+            tags.push(nostr::Tag::custom(nostr::TagKind::custom("signature_tag"), vec![v.clone()]));
+        }
+        if let Some(v) = &self.business_card {
+            tags.push(nostr::Tag::custom(nostr::TagKind::custom("business_card"), vec![v.clone()]));
+        }
+        if let Some(v) = &self.memory_namespace {
+            tags.push(nostr::Tag::custom(nostr::TagKind::custom("memory_namespace"), vec![v.clone()]));
+        }
+        if let Some(v) = self.always_on_enabled {
+            tags.push(nostr::Tag::custom(nostr::TagKind::custom("always_on"), vec![v.to_string()]));
+        }
+        if let Some(v) = self.idle_timeout_secs {
+            tags.push(nostr::Tag::custom(nostr::TagKind::custom("idle_timeout_secs"), vec![v.to_string()]));
+        }
+        if let Some(v) = self.max_concurrent_tasks {
+            tags.push(nostr::Tag::custom(nostr::TagKind::custom("max_concurrent_tasks"), vec![v.to_string()]));
+        }
+        if let Some(v) = self.max_memory_mb {
+            tags.push(nostr::Tag::custom(nostr::TagKind::custom("max_memory_mb"), vec![v.to_string()]));
+        }
+        if let Some(v) = &self.monitored_channels {
+            if !v.is_empty() {
+                tags.push(nostr::Tag::custom(nostr::TagKind::custom("monitored_channels"), vec![v.join(",")]));
+            }
+        }
+        nostr::Tags::from_list(tags)
+    }
+}
+
+/// Configuration for Always-On daemon behavior
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case", default)]
+pub struct AlwaysOnConfig {
+    pub enabled: bool,
+    pub idle_timeout_secs: u64,
+    pub max_concurrent_tasks: u32,
+    pub max_memory_mb: u32,
+    pub monitored_channels: Vec<String>,
+    pub memory_namespace: String,
+}
+
+impl AlwaysOnConfig {
+    pub fn default_config() -> Self {
+        Self {
+            enabled: false,
+            idle_timeout_secs: 300,
+            max_concurrent_tasks: 3,
+            max_memory_mb: 256,
+            monitored_channels: Vec::new(),
+            memory_namespace: "default".to_string(),
+        }
+    }
+
+    pub fn default_always_on() -> Self {
+        Self {
+            enabled: true,
+            ..Self::default_config()
+        }
+    }
+
+    pub fn default_off() -> Self {
+        Self::default_config()
+    }
+}
+
+/// Agent configuration combining identity and always-on settings
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case", default)]
+pub struct AgentConfig {
+    pub name: Option<String>,
+    pub system_prompt: Option<String>,
+    pub avatar_url: Option<String>,
+    pub signature_tag: Option<String>,
+    pub business_card: Option<String>,
+    pub memory_namespace: Option<String>,
+    pub always_on: AlwaysOnConfig,
+}
+
+impl AgentConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        if other.name.is_some() { self.name = other.name; }
+        if other.system_prompt.is_some() { self.system_prompt = other.system_prompt; }
+        if other.avatar_url.is_some() { self.avatar_url = other.avatar_url; }
+        if other.signature_tag.is_some() { self.signature_tag = other.signature_tag; }
+        if other.business_card.is_some() { self.business_card = other.business_card; }
+        if other.memory_namespace.is_some() { self.memory_namespace = other.memory_namespace; }
+        if other.always_on.enabled
+            || other.always_on.idle_timeout_secs != 300
+            || !other.always_on.monitored_channels.is_empty()
+            || (!other.always_on.memory_namespace.is_empty() && other.always_on.memory_namespace != "default")
+        {
+            self.always_on = other.always_on;
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

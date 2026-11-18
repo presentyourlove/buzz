@@ -11,9 +11,8 @@
 //! 注意：該模組僅在配置了 vault_path 時啟用，可選啟用
 
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::NaiveDate;
 
@@ -166,7 +165,7 @@ impl VaultSync {
     fn ensure_directory_exists(&self, dir_path: &Path) -> Result<(), SyncError> {
         if !dir_path.exists() {
             fs::create_dir_all(dir_path)
-                .map_err(|e| SyncError::IoError(format!("無法創建目錄 {:?}: {}", dir_path, e)));
+                .map_err(|e| SyncError::IoError(format!("無法創建目錄 {:?}: {}", dir_path, e)))?;
         } else if !dir_path.is_dir() {
             return Err(SyncError::InvalidPath(format!("路徑 {:?} 存在但不是目錄", dir_path)));
         }

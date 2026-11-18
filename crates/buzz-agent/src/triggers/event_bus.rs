@@ -160,6 +160,20 @@ impl EventBus {
         self.receiver.try_recv().map(Some).map_err(|e| e.into())
     }
 
+    /// 獲取訂閱者數量
+    pub fn subscriber_count(&self) -> usize {
+        self.subscribers.read().unwrap().len()
+    }
+
+    /// 關閉事件總線
+    pub fn shutdown(&self) -> Result<()> {
+        // 清除所有訂閱者
+        self.subscribers.write().unwrap().clear();
+        // 清除去重緩存
+        self.recent_events.write().unwrap().clear();
+        Ok(())
+    }
+
     /// 分發事件給所有訂閱者
     pub fn dispatch(&self, event: &BusEvent) {
         let subs = self.subscribers.read().unwrap();
@@ -170,11 +184,6 @@ impl EventBus {
                 }
             }
         }
-    }
-
-    /// 獲取訂閱者數量
-    pub fn subscriber_count(&self) -> usize {
-        self.subscribers.read().unwrap().len()
     }
 
     /// 計算事件雜湊（用於去重）
@@ -278,5 +287,191 @@ mod tests {
         // 取消訂閱
         assert!(bus.unsubscribe(handler_id));
         assert_eq!(bus.subscriber_count(), 0);
+    }
+
+    #[test]
+    fn test_event_bus_fanout_multiple_subscribers() {
+        let bus = EventBus::new(EventBusConfig::default());
+        let received1 = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let received2 = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let r1 = received1.clone();
+        let r2 = received2.clone();
+
+        bus.subscribe(make_handler("sub1", vec![EventSource::Manual], move |event| {
+            r1.lock().unwrap().push(event.payload);
+            Ok(())
+        }));
+        bus.subscribe(make_handler("sub2", vec![EventSource::Manual], move |event| {
+            r2.lock().unwrap().push(event.payload);
+            Ok(())
+        }));
+
+        bus.publish_simple(EventSource::Manual, json!({"fanout": true})).unwrap();
+
+        if let Ok(Some(event)) = bus.try_recv() {
+            bus.dispatch(&event);
+        }
+
+        assert_eq!(received1.lock().unwrap().len(), 1);
+        assert_eq!(received2.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_event_bus_subscription_filter_by_event_type() {
+        let bus = EventBus::new(EventBusConfig::default());
+        let received = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let rc = received.clone();
+
+        // 只訂閱 Scheduler 事件
+        bus.subscribe(make_handler("filtered", vec![EventSource::Scheduler], move |event| {
+            rc.lock().unwrap().push(event.payload);
+            Ok(())
+        }));
+
+        bus.publish_simple(EventSource::Scheduler, json!({"type": "scheduler"})).unwrap();
+        bus.publish_simple(EventSource::Manual, json!({"type": "manual"})).unwrap();
+
+        if let Ok(Some(event)) = bus.try_recv() {
+            bus.dispatch(&event);
+        }
+        if let Ok(Some(event)) = bus.try_recv() {
+            bus.dispatch(&event);
+        }
+
+        let msgs = received.lock().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0], json!({"type": "scheduler"}));
+    }
+
+    #[test]
+    fn test_event_bus_wildcard_subscription() {
+        let bus = EventBus::new(EventBusConfig::default());
+        let received = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let rc = received.clone();
+
+        // 空 event_types = 訂閱所有事件
+        bus.subscribe(make_handler("wildcard", vec![], move |event| {
+            rc.lock().unwrap().push(event.payload);
+            Ok(())
+        }));
+
+        bus.publish_simple(EventSource::Scheduler, json!({"a": 1})).unwrap();
+        bus.publish_simple(EventSource::Manual, json!({"b": 2})).unwrap();
+
+        if let Ok(Some(event)) = bus.try_recv() {
+            bus.dispatch(&event);
+        }
+        if let Ok(Some(event)) = bus.try_recv() {
+            bus.dispatch(&event);
+        }
+
+        assert_eq!(received.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_event_bus_deduplication() {
+        let config = EventBusConfig {
+            dedup_window_secs: 60,
+            ..Default::default()
+        };
+        let bus = EventBus::new(config);
+        let received = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let rc = received.clone();
+
+        bus.subscribe(make_handler("dedup", vec![EventSource::Scheduler], move |event| {
+            rc.lock().unwrap().push(event.payload);
+            Ok(())
+        }));
+
+        // 發布相同事件兩次
+        let payload = json!({"id": "dup-test"});
+        bus.publish_simple(EventSource::Scheduler, payload.clone()).unwrap();
+        bus.publish_simple(EventSource::Scheduler, payload).unwrap();
+
+        // 消費兩個事件
+        if let Ok(Some(event)) = bus.try_recv() {
+            bus.dispatch(&event);
+        }
+        if let Ok(Some(event)) = bus.try_recv() {
+            bus.dispatch(&event);
+        }
+
+        // 第二個應被去重
+        assert_eq!(received.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_event_bus_shutdown_clears_subscribers() {
+        let bus = EventBus::new(EventBusConfig::default());
+        let received = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let rc = received.clone();
+
+        bus.subscribe(make_handler("test", vec![EventSource::Scheduler], move |event| {
+            rc.lock().unwrap().push(event.payload);
+            Ok(())
+        }));
+
+        assert_eq!(bus.subscriber_count(), 1);
+
+        bus.shutdown().unwrap();
+
+        assert_eq!(bus.subscriber_count(), 0);
+
+        // 發布事件後不應有任何分發
+        bus.publish_simple(EventSource::Scheduler, json!({"x": 1})).unwrap();
+        if let Ok(Some(event)) = bus.try_recv() {
+            bus.dispatch(&event);
+        }
+        assert_eq!(received.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_event_bus_backpressure_channel_full() {
+        let config = EventBusConfig {
+            buffer_size: 1,
+            backpressure_strategy: BackpressureStrategy::ReturnError,
+            ..Default::default()
+        };
+        let bus = EventBus::new(config);
+
+        // 填滿通道
+        bus.publish_simple(EventSource::Scheduler, json!({"first": 1})).unwrap();
+        // 第二個應該失敗（通道已滿，ReturnError 策略）
+        let result = bus.publish_simple(EventSource::Scheduler, json!({"second": 2}));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_event_bus_cleanup_dedup_expired() {
+        let config = EventBusConfig {
+            dedup_window_secs: 1,
+            ..Default::default()
+        };
+        let bus = EventBus::new(config);
+        let received = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let rc = received.clone();
+
+        bus.subscribe(make_handler("dedup", vec![EventSource::Scheduler], move |event| {
+            rc.lock().unwrap().push(event.payload);
+            Ok(())
+        }));
+
+        let payload = json!({"id": "cleanup-test"});
+        bus.publish_simple(EventSource::Scheduler, payload.clone()).unwrap();
+        if let Ok(Some(event)) = bus.try_recv() {
+            bus.dispatch(&event);
+        }
+
+        // 等待去重窗口過期
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        bus.cleanup_dedup();
+
+        // 再次發布相同 payload 應該會通過
+        bus.publish_simple(EventSource::Scheduler, payload).unwrap();
+        if let Ok(Some(event)) = bus.try_recv() {
+            bus.dispatch(&event);
+        }
+
+        assert_eq!(received.lock().unwrap().len(), 2);
     }
 }

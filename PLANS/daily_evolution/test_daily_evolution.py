@@ -73,6 +73,34 @@ class TestDailyEvolution(unittest.TestCase):
             self.assertNotIn("## ✅ Phase", item["description"])
             self.assertNotIn("【安全與品質驗收", item["description"])
 
+    def test_is_closure_or_offtopic(self):
+        """測試雜訊與非系統話題過濾：結案報告與股票諮詢須被過濾，真實系統瓶頸應保留"""
+        self.assertTrue(
+            self.evolution._is_closure_or_offtopic("【Phase 1 完成確認】瀏覽器基建全部交付完成")
+        )
+        self.assertTrue(
+            self.evolution._is_closure_or_offtopic("請問 6855 股票轉倉怎麼辦理比較划算？")
+        )
+        self.assertFalse(
+            self.evolution._is_closure_or_offtopic("buzz-acp 單回合超過 7200 秒 timeout 導致任務中斷")
+        )
+
+    def test_synthesize_skill_compositions(self):
+        """測試既有技能互相合成配方是否可產出 synthesis 候選"""
+        from skill_synthesizer import SkillSynthesizer
+
+        synthesizer = SkillSynthesizer(workspace_root=self.test_dir)
+        installed_details = {
+            "browser-automation": {"description": "browser"},
+            "obsidian-digest-sync": {"description": "obsidian"},
+        }
+        candidates = synthesizer.synthesize_skill_compositions(installed_details, [])
+        matched = [c for c in candidates if c.name == "web-intel-to-obsidian"]
+        self.assertEqual(len(matched), 1)
+        self.assertEqual(matched[0].kind, "synthesis")
+        self.assertIn("browser-automation", matched[0].base_skills)
+        self.assertIn("obsidian-digest-sync", matched[0].base_skills)
+
     def test_proposal_dual_track_generation(self):
         """測試雙軌提案生成：全量備查版 vs 頻道專用精簡版"""
         analysis = {
@@ -87,19 +115,23 @@ class TestDailyEvolution(unittest.TestCase):
 
         full_proposal, channel_proposal = self.evolution.generate_proposal(analysis, "2026-10-29")
 
-        # 1. 驗證全量版 (含活動摘要、元數據 JSON)
-        self.assertIn("## 📊 本日活動摘要", full_proposal)
+        # 1. 驗證全量版 (含活動與記憶回顧摘要、元數據 JSON)
+        self.assertIn("## 📊 本日活動與知識庫回顧摘要 (Daily & Memory Summary)", full_proposal)
         self.assertIn("## 📎 結構化元數據 (Metadata)", full_proposal)
         self.assertIn("```json", full_proposal)
 
-        # 2. 驗證頻道專用精簡版 (剔除分析雜訊，僅保留建議項目與審核)
-        self.assertNotIn("## 📊 本日活動摘要", channel_proposal)
+        # 2. 驗證頻道專用精簡版 (剔除分析雜訊，僅保留建議項目、技能合成與快捷批示)
+        self.assertNotIn("## 📊 本日活動與知識庫回顧摘要", channel_proposal)
         self.assertNotIn("## 📎 結構化元數據", channel_proposal)
         self.assertNotIn("```json", channel_proposal)
-        self.assertIn("## 💡 系統優化建議項目", channel_proposal)
-        self.assertIn("## 📋 老闆審核機制", channel_proposal)
-        self.assertIn("同意", channel_proposal)
-        self.assertIn("部分同意", channel_proposal)
+        self.assertIn("Honey2 每日系統進化速讀卡片", channel_proposal)
+        self.assertIn("後台架構進化建議", channel_proposal)
+        self.assertIn("特工自主進化建議", channel_proposal)
+        self.assertIn("技能產出與互相合成建議", channel_proposal)
+        self.assertIn("主理人快捷批示", channel_proposal)
+        self.assertIn("同意特工", channel_proposal)
+        self.assertIn("交由後台", channel_proposal)
+        self.assertIn("同意技能:", channel_proposal)
 
         # 3. 嚴格防吞字規範驗證：禁止未轉義角括號
         self.assertNotIn("<CHANNEL_UUID>", full_proposal)

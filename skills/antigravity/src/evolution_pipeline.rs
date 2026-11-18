@@ -56,15 +56,15 @@ impl EvolutionPipeline {
         Ok(Self {
             config: config.clone(),
             pipeline_config,
-            store,
+            store: Arc::clone(&store),
             nostr_bridge,
             discipline_guard: DisciplineGuard::new(),
             consensus_ingest: ConsensusIngest::new(),
             bottleneck_rca: BottleneckRca::new(),
             code_health: CodeHealthCheck::new(),
-            task_sync: TaskSync::new(),
-            knowledge_sync: KnowledgeSync::new(),
-            cicd_heal: CicdHeal::new(config.clone(), store.clone()),
+            task_sync: TaskSync::new(config.clone(), (*store).clone()),
+            knowledge_sync: KnowledgeSync::new(config.clone(), (*store).clone()),
+            cicd_heal: CicdHeal::new(config, (*store).clone()),
         })
     }
     

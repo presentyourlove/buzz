@@ -25,8 +25,73 @@
 //! }
 //! ```
 
-use std::path::Path;
-use std::fs;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use serde::{Deserialize, Serialize};
+
+/// 偵測到的字元編碼類型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DetectedEncoding {
+    Utf8,
+    Utf8Bom,
+    Utf16Le,
+    Utf16Be,
+    Unknown,
+}
+
+/// 換行符類型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LineEnding {
+    Lf,
+    Crlf,
+    Cr,
+    Mixed,
+}
+
+/// 編碼驗證錯誤項目
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EncodingError {
+    InvalidEncoding(String),
+    BomFound,
+    InvalidLineEnding(LineEnding),
+}
+
+impl fmt::Display for EncodingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidEncoding(msg) => write!(f, "無效編碼: {msg}"),
+            Self::BomFound => write!(f, "檔案包含 UTF-8 BOM"),
+            Self::InvalidLineEnding(le) => write!(f, "換行符須為 LF，實際為 {:?}", le),
+        }
+    }
+}
+
+/// 編碼自動修復錯誤
+#[derive(Debug)]
+pub enum FixError {
+    InvalidEncoding(std::string::FromUtf8Error),
+}
+
+impl fmt::Display for FixError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidEncoding(err) => write!(f, "無法轉碼為 UTF-8: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for FixError {}
+
+/// 單檔編碼與換行符驗證報告
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncodingReport {
+    pub file_path: PathBuf,
+    pub is_valid: bool,
+    pub encoding: DetectedEncoding,
+    pub line_ending: LineEnding,
+    pub has_bom: bool,
+    pub errors: Vec<EncodingError>,
+}
 
 /// 編碼驗證器
 /// 
@@ -175,18 +240,13 @@ impl EncodingValidator {
         // 嘗試解碼為 UTF-8
         match String::from_utf8(content.to_vec()) {
             Ok(text) => {
-                // 已經是有效的 UTF-8，檢查 BOM 和換行符
-                let mut result = text.into_bytes();
-                
-                // 移除 BOM
-                if result.starts_with(&[0xEF, 0xBB, 0xBF]) {
-                    result.drain(0..3);
-                }
-                
-                // 正規化換行符
-                result = result.replace(&b"\r\n"[..], &b"\n"[..]).replace(&b"\r"[..], &b"\n"[..]);
-                
-                Ok(result)
+                // 已經是有效的 UTF-8，移除 BOM 並正規化換行符為 LF
+                let normalized = text
+                    .trim_start_matches('\u{feff}')
+                    .replace("\r\n", "\n")
+                    .replace('\r', "\n");
+
+                Ok(normalized.into_bytes())
             }
             Err(e) => Err(FixError::InvalidEncoding(e)),
         }
@@ -231,16 +291,16 @@ impl EncodingValidator {
         }
         
         // 嘗試解碼為 UTF-16 LE
-        if let Ok(_) = String::from_utf16(&content.chunks_exact(2).map(|chunk| {
-            if chunk.len() == 2 { ((chunk[0] as u16) | ((chunk[1] as u16) << 8)) } else { chunk[0] as u16 }
-        }).collect::<Vec<u16>>()) {
+        if String::from_utf16(&content.chunks_exact(2).map(|chunk| {
+            if chunk.len() == 2 { (chunk[0] as u16) | ((chunk[1] as u16) << 8) } else { chunk[0] as u16 }
+        }).collect::<Vec<u16>>()).is_ok() {
             return DetectedEncoding::Utf16Le;
         }
         
         // 嘗試解碼為 UTF-16 BE
-        if let Ok(_) = String::from_utf16(&content.chunks_exact(2).map(|chunk| {
+        if String::from_utf16(&content.chunks_exact(2).map(|chunk| {
             if chunk.len() == 2 { ((chunk[1] as u16) << 8) | (chunk[0] as u16) } else { chunk[0] as u16 }
-        }).collect::<Vec<u16>>()) {
+        }).collect::<Vec<u16>>()).is_ok() {
             return DetectedEncoding::Utf16Be;
         }
         

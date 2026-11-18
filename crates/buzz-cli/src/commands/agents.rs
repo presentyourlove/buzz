@@ -1,4 +1,4 @@
-use buzz_core::kind::KIND_IA_ARCHIVED_LIST;
+use buzz_core::kind::{KIND_AGENT_PROFILE, KIND_IA_ARCHIVED_LIST};
 use buzz_sdk::builders::{build_archive_identity_request, build_unarchive_identity_request};
 use nostr::PublicKey;
 use serde_json::json;
@@ -15,6 +15,21 @@ pub async fn dispatch(command: AgentsCmd, client: &BuzzClient) -> Result<(), Cli
             channel,
             display_name,
             system_prompt,
+            runtime,
+            provider,
+            model,
+            respond_to,
+            // Identity fields (Phase 1)
+            avatar_url,
+            signature_tag,
+            business_card,
+            memory_namespace,
+            // Always-on fields (Phase 2)
+            always_on,
+            idle_timeout_secs,
+            max_concurrent_tasks,
+            max_memory_mb,
+            monitored_channels,
         } => {
             let owner = require_owner(client)?;
             let built = build_create(
@@ -24,6 +39,21 @@ pub async fn dispatch(command: AgentsCmd, client: &BuzzClient) -> Result<(), Cli
                     channel_id: channel,
                     display_name,
                     system_prompt: read_or_stdin(&system_prompt)?,
+                    runtime,
+                    provider,
+                    model,
+                    respond_to: respond_to.map(RespondToArg::to_wire),
+                    // Identity fields (Phase 1)
+                    avatar_url,
+                    signature_tag,
+                    business_card,
+                    memory_namespace,
+                    // Always-on fields (Phase 2)
+                    always_on,
+                    idle_timeout_secs,
+                    max_concurrent_tasks,
+                    max_memory_mb,
+                    monitored_channels,
                 },
             )
             .await?;
@@ -53,6 +83,17 @@ pub async fn dispatch(command: AgentsCmd, client: &BuzzClient) -> Result<(), Cli
             provider,
             model,
             respond_to,
+            // Identity fields (Phase 1)
+            avatar_url,
+            signature_tag,
+            business_card,
+            memory_namespace,
+            // Always-on fields (Phase 2)
+            always_on,
+            idle_timeout_secs,
+            max_concurrent_tasks,
+            max_memory_mb,
+            monitored_channels,
         } => {
             let owner = require_owner(client)?;
             let built = build_update(
@@ -67,6 +108,17 @@ pub async fn dispatch(command: AgentsCmd, client: &BuzzClient) -> Result<(), Cli
                     provider,
                     model,
                     respond_to: respond_to.map(RespondToArg::to_wire),
+                    // Identity fields (Phase 1)
+                    avatar_url,
+                    signature_tag,
+                    business_card,
+                    memory_namespace,
+                    // Always-on fields (Phase 2)
+                    always_on,
+                    idle_timeout_secs,
+                    max_concurrent_tasks,
+                    max_memory_mb,
+                    monitored_channels,
                 },
             )
             .await?;
@@ -166,7 +218,131 @@ pub async fn dispatch(command: AgentsCmd, client: &BuzzClient) -> Result<(), Cli
         }
 
         AgentsCmd::Archived => cmd_archived(client).await,
+
+        AgentsCmd::Status { channel, agent_name } => {
+            // Fetch agent profile from relay
+            let agent_pubkey = get_agent_pubkey(&client, &channel, &agent_name).await?;
+            
+            // Fetch kind:10100 AgentProfile event
+            let filter = serde_json::json!({
+                "kinds": [KIND_AGENT_PROFILE],
+                "authors": [agent_pubkey.to_hex()],
+                "limit": 1
+            });
+            
+            let events_json = client.query(&filter).await?;
+            let events: Vec<nostr::Event> = serde_json::from_str(&events_json).unwrap_or_default();
+            
+            if let Some(event) = events.first() {
+                let tags = parse_agent_profile_tags(&event.tags)?;
+                
+                println!("{}", json!({
+                    "ok": true,
+                    "agent_name": agent_name,
+                    "pubkey": agent_pubkey.to_hex(),
+                    "always_on_enabled": tags.always_on_enabled,
+                    "idle_timeout_secs": tags.idle_timeout_secs,
+                    "max_concurrent_tasks": tags.max_concurrent_tasks,
+                    "max_memory_mb": tags.max_memory_mb,
+                    "monitored_channels": tags.monitored_channels,
+                    "memory_namespace": tags.memory_namespace,
+                    "avatar_url": tags.avatar_url,
+                    "signature_tag": tags.signature_tag,
+                    "business_card": tags.business_card,
+                }));
+            } else {
+                println!("{}", json!({
+                    "ok": false,
+                    "error": "Agent profile not found",
+                    "agent_name": agent_name,
+                }));
+            }
+            Ok(())
+        }
     }
+}
+
+/// Fetch the agent's pubkey by querying the channel for the agent's profile event
+async fn get_agent_pubkey(
+    client: &BuzzClient,
+    channel: &str,
+    agent_name: &str,
+) -> Result<PublicKey, CliError> {
+    // Fetch kind:10100 AgentProfile events from the channel
+    let filter = serde_json::json!({
+        "kinds": [KIND_AGENT_PROFILE],
+        "limit": 50
+    });
+
+    let events_json = client.query(&filter).await?;
+    let events: Vec<nostr::Event> = serde_json::from_str(&events_json).unwrap_or_default();
+
+    for event in events {
+        // Check if this event has a "name" tag matching agent_name
+        for tag in event.tags.iter() {
+            let tag_vec = tag.as_slice();
+            if tag_vec.len() >= 2 && tag_vec[0] == "name" && tag_vec[1] == agent_name {
+                return Ok(event.pubkey);
+            }
+        }
+    }
+
+    Err(CliError::Usage(format!(
+        "agent '{}' not found in channel {}",
+        agent_name, channel
+    )))
+}
+
+/// Parsed AgentProfile tags for identity and always-on fields
+#[derive(Debug, serde::Serialize)]
+struct ParsedAgentProfileTags {
+    always_on_enabled: Option<bool>,
+    idle_timeout_secs: Option<u64>,
+    max_concurrent_tasks: Option<u32>,
+    max_memory_mb: Option<u32>,
+    monitored_channels: Option<Vec<String>>,
+    memory_namespace: Option<String>,
+    avatar_url: Option<String>,
+    signature_tag: Option<String>,
+    business_card: Option<String>,
+}
+
+fn parse_agent_profile_tags(tags: &nostr::Tags) -> Result<ParsedAgentProfileTags, CliError> {
+    let mut result = ParsedAgentProfileTags {
+        always_on_enabled: None,
+        idle_timeout_secs: None,
+        max_concurrent_tasks: None,
+        max_memory_mb: None,
+        monitored_channels: None,
+        memory_namespace: None,
+        avatar_url: None,
+        signature_tag: None,
+        business_card: None,
+    };
+    
+    for tag in tags.iter() {
+        let tag_vec = tag.as_slice();
+        if tag_vec.len() >= 2 {
+            let key = tag_vec[0].as_str();
+            let value = tag_vec[1].as_str();
+            match key {
+                "always_on" => result.always_on_enabled = value.parse().ok(),
+                "idle_timeout" => result.idle_timeout_secs = value.parse().ok(),
+                "max_concurrent_tasks" => result.max_concurrent_tasks = value.parse().ok(),
+                "max_memory_mb" => result.max_memory_mb = value.parse().ok(),
+                "monitored_channels" => {
+                    result.monitored_channels = Some(value.split(',').map(|s| s.trim().to_string()).collect())
+                }
+                "memory_namespace" => result.memory_namespace = Some(value.to_string()),
+                "avatar_url" => result.avatar_url = Some(value.to_string()),
+                "signature_tag" => result.signature_tag = Some(value.to_string()),
+                "business_card" => result.business_card = Some(value.to_string()),
+                _ => {}
+            }
+        }
+    }
+    
+    Ok(result)
 }
 
 /// Require `BUZZ_AUTH_TAG` and parse the owner pubkey from it. Used only by

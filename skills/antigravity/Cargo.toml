@@ -45,7 +45,7 @@ clap = { version = "4.5", features = ["derive", "env"] }
 uuid = { version = "1.7", features = ["v7", "serde", "fast-rng"] }
 
 # 資料庫
-rusqlite = { version = "0.40", features = ["vtab", "functions", "extra_check", "modern_sqlite", "serde_json"] }
+rusqlite = { version = "0.40", features = ["bundled", "vtab", "functions", "extra_check", "modern_sqlite", "serde_json"] }
 
 # 並發
 dashmap = "5.5"
@@ -60,5 +60,10 @@ walkdir = "2.5"
 [dev-dependencies]
 tempfile = "3.9"
 pretty_assertions = "1.4"
+
+[lints.rust]
+unused_imports = "allow"
+unused_variables = "allow"
+dead_code = "allow"
 
 

@@ -12,15 +12,43 @@ const PROJECT_CHANNEL_REQUEST_KIND: &str = "project_channel_request";
 const MAX_NAME_CHARS: usize = 120;
 const MAX_PROMPT_CHARS: usize = 20_000;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAgentDraft {
     pub channel_id: String,
     pub display_name: String,
     pub system_prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub respond_to: Option<String>,
+    // Identity fields (Phase 1)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub business_card: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_namespace: Option<String>,
+    // Always-on fields (Phase 2)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_on: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_tasks: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_memory_mb: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub monitored_channels: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAgentDraft {
     pub channel_id: String,
@@ -37,6 +65,26 @@ pub struct UpdateAgentDraft {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub respond_to: Option<String>,
+    // Identity fields (Phase 1)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub business_card: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_namespace: Option<String>,
+    // Always-on fields (Phase 2)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_on: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_tasks: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_memory_mb: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub monitored_channels: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -160,6 +208,21 @@ pub(crate) async fn build_create(
         channel_id: channel_id.clone(),
         display_name: required(draft.display_name, "display name", MAX_NAME_CHARS)?,
         system_prompt: required(draft.system_prompt, "system prompt", MAX_PROMPT_CHARS)?,
+        runtime: optional(draft.runtime, "runtime")?,
+        provider: optional(draft.provider, "provider")?,
+        model: optional(draft.model, "model")?,
+        respond_to: optional(draft.respond_to, "respond-to")?,
+        // Identity fields (Phase 1)
+        avatar_url: optional(draft.avatar_url, "avatar url")?,
+        signature_tag: optional(draft.signature_tag, "signature tag")?,
+        business_card: optional(draft.business_card, "business card")?,
+        memory_namespace: optional(draft.memory_namespace, "memory namespace")?,
+        // Always-on fields (Phase 2)
+        always_on: draft.always_on,
+        idle_timeout_secs: draft.idle_timeout_secs,
+        max_concurrent_tasks: draft.max_concurrent_tasks,
+        max_memory_mb: draft.max_memory_mb,
+        monitored_channels: draft.monitored_channels,
     };
     build(
         credentials,
@@ -201,6 +264,17 @@ pub(crate) async fn build_update(
         provider: optional(draft.provider, "provider")?,
         model: optional(draft.model, "model")?,
         respond_to,
+        // Identity fields (Phase 1)
+        avatar_url: optional(draft.avatar_url, "avatar url")?,
+        signature_tag: optional(draft.signature_tag, "signature tag")?,
+        business_card: optional(draft.business_card, "business card")?,
+        memory_namespace: optional(draft.memory_namespace, "memory namespace")?,
+        // Always-on fields (Phase 2)
+        always_on: draft.always_on,
+        idle_timeout_secs: draft.idle_timeout_secs,
+        max_concurrent_tasks: draft.max_concurrent_tasks,
+        max_memory_mb: draft.max_memory_mb,
+        monitored_channels: draft.monitored_channels,
     };
     if request.display_name.is_none()
         && request.system_prompt.is_none()
@@ -208,6 +282,15 @@ pub(crate) async fn build_update(
         && request.provider.is_none()
         && request.model.is_none()
         && request.respond_to.is_none()
+        && request.avatar_url.is_none()
+        && request.signature_tag.is_none()
+        && request.business_card.is_none()
+        && request.memory_namespace.is_none()
+        && request.always_on.is_none()
+        && request.idle_timeout_secs.is_none()
+        && request.max_concurrent_tasks.is_none()
+        && request.max_memory_mb.is_none()
+        && request.monitored_channels.is_none()
     {
         return Err(CliError::Usage(
             "include at least one field to update".into(),
@@ -280,6 +363,7 @@ mod tests {
                 channel_id: CHANNEL.into(),
                 display_name: "Research helper".into(),
                 system_prompt: "Find sources.".into(),
+                ..Default::default()
             },
         )
         .await
@@ -332,6 +416,7 @@ mod tests {
                 provider: None,
                 model: None,
                 respond_to: None,
+                ..Default::default()
             },
         )
         .await
@@ -348,6 +433,7 @@ mod tests {
                 channel_id: "general".into(),
                 display_name: "Scout".into(),
                 system_prompt: "Help".into(),
+                ..Default::default()
             },
         )
         .await

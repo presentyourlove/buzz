@@ -29,8 +29,71 @@
 //! }
 //! ```
 
-use std::path::{Path, PathBuf};
-use std::collections::HashSet;
+use std::fmt;
+use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+
+/// Patch 中的單個變更區塊 (Hunk)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Hunk {
+    pub header: String,
+    pub lines: Vec<String>,
+}
+
+/// Patch 解析所包含的單一檔案異動資訊
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatchFile {
+    pub old_path: PathBuf,
+    pub new_path: PathBuf,
+    pub is_new: bool,
+    pub is_deleted: bool,
+    pub is_renamed: bool,
+    pub hunks: Vec<Hunk>,
+}
+
+impl PatchFile {
+    pub fn new(
+        old_path: PathBuf,
+        new_path: PathBuf,
+        is_new: bool,
+        is_deleted: bool,
+        is_renamed: bool,
+    ) -> Self {
+        Self {
+            old_path,
+            new_path,
+            is_new,
+            is_deleted,
+            is_renamed,
+            hunks: Vec::new(),
+        }
+    }
+
+    pub fn is_rust_file(&self) -> bool {
+        self.old_path.extension().and_then(|s| s.to_str()) == Some("rs")
+            || self.new_path.extension().and_then(|s| s.to_str()) == Some("rs")
+    }
+}
+
+/// Patch 解析錯誤
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ParseError {
+    InvalidHeader(String),
+    InvalidHunk(String),
+    InvalidContent(String),
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidHeader(msg) => write!(f, "無效的 Patch 檔頭: {msg}"),
+            Self::InvalidHunk(msg) => write!(f, "無效的 Patch Hunk: {msg}"),
+            Self::InvalidContent(msg) => write!(f, "無效的 Patch 內容: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ParseError {}
 
 /// 完整的 Patch 文件結構
 /// 
@@ -269,5 +332,35 @@ impl PatchParser {
             total_deletions,
             patch_content.to_string(),
         ))
+    }
+
+    /// 解析 `diff --git a/... b/...` 頭部資訊
+    pub fn parse_file_header(line: &str) -> Result<(PathBuf, PathBuf, bool, bool, bool), ParseError> {
+        let rest = line
+            .strip_prefix("diff --git ")
+            .ok_or_else(|| ParseError::InvalidHeader(line.to_string()))?;
+        let parts: Vec<&str> = rest.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Err(ParseError::InvalidHeader(line.to_string()));
+        }
+        let old_p = parts[0].strip_prefix("a/").unwrap_or(parts[0]);
+        let new_p = parts[1].strip_prefix("b/").unwrap_or(parts[1]);
+        Ok((PathBuf::from(old_p), PathBuf::from(new_p), false, false, old_p != new_p))
+    }
+
+    /// 將 hunk 行集合組裝成結構化 Hunk
+    pub fn parse_hunk(lines: &[String]) -> Option<Hunk> {
+        if lines.is_empty() {
+            return None;
+        }
+        let header = lines
+            .iter()
+            .find(|l| l.starts_with("@@ "))
+            .cloned()
+            .unwrap_or_else(|| "@@ -0,0 +0,0 @@".to_string());
+        Some(Hunk {
+            header,
+            lines: lines.to_vec(),
+        })
     }
 }

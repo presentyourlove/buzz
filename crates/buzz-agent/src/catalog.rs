@@ -396,6 +396,7 @@ fn catalog_error_kind(error: &AgentError) -> &'static str {
         AgentError::Mcp(_) => "mcp",
         AgentError::Cancelled => "cancelled",
         AgentError::EventBusNoSubscribers { .. } => "event_bus_no_subscribers",
+        AgentError::Internal(_) => "internal",
         AgentError::Other(_) => "other",
     }
 }

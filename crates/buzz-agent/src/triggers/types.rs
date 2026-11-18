@@ -24,6 +24,7 @@ pub struct Trigger {
     pub updated_at: DateTime<Utc>,
     pub last_fired_at: Option<DateTime<Utc>>,
     pub fire_count: u64,
+    pub next_fire: Option<DateTime<Utc>>,
 }
 
 /// 觸發類型枚舉
@@ -351,6 +352,24 @@ impl Trigger {
             updated_at: now,
             last_fired_at: None,
             fire_count: 0,
+            next_fire: None,
         }
     }
+}
+
+/// 觸發器狀態
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TriggerStatus {
+    /// 正常運行中
+    Active,
+    /// 已禁用
+    Disabled,
+    /// 等待觸發
+    Pending,
+    /// 執行中
+    Running,
+    /// 錯誤狀態
+    Error(String),
+    /// 已完成（一次性觸發器）
+    Completed,
 }

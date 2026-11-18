@@ -13,8 +13,7 @@
 //! 
 //! ```rust
 //! use env_guardian::env_checker::{EnvChecker, EnvVarSpec, EnvValidator};
-//! use std::path::PathBuf;
-//! 
+//!
 //! fn main() {
 //!     // 定義環境變數規範
 //!     let specs = vec![
@@ -45,9 +44,10 @@
 //!     ];
 //!     
 //!     let checker = EnvChecker::new(specs);
-//!     let reports = checker.check_all();
+//!     let rt = tokio::runtime::Runtime::new().unwrap();
+//!     let full = rt.block_on(checker.check_all());
 //!     
-//!     for report in reports {
+//!     for report in full.results {
 //!         println!("變數: {:?}, 狀態: {:?}, 錯誤: {:?}", report.var_name, report.status, report.error);
 //!     }
 //! }
@@ -58,7 +58,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
-use crate::env_guardian::{config::EnvVarSpec, config::EnvValidator, config::CheckStatus, config::EnvCheckReport};
+pub use crate::config::{CheckStatus, EnvCheckReport, EnvFullReport, EnvValidator, EnvVarSpec};
 
 /// 環境變數檢查器
 /// 
@@ -100,9 +100,10 @@ use crate::env_guardian::{config::EnvVarSpec, config::EnvValidator, config::Chec
 ///     ];
 ///     
 ///     let checker = EnvChecker::new(specs);
-///     let reports = checker.check_all();
+///     let rt = tokio::runtime::Runtime::new().unwrap();
+///     let full = rt.block_on(checker.check_all());
 ///     
-///     for report in reports {
+///     for report in full.results {
 ///         println!("變數: {:?}, 狀態: {:?}, 錯誤: {:?}", report.var_name, report.status, report.error);
 ///     }
 /// }
@@ -112,93 +113,114 @@ pub struct EnvChecker {
     specs: Vec<EnvVarSpec>,
 }
 
+impl Default for EnvChecker {
+    fn default() -> Self {
+        Self {
+            specs: vec![
+                EnvVarSpec {
+                    name: "BUZZ_RELAY_URL".to_string(),
+                    required: false,
+                    description: "Nostr Relay 連線位址".to_string(),
+                    validator: Some(EnvValidator::Url {
+                        schemes: vec!["wss".to_string(), "ws".to_string()],
+                    }),
+                    default: Some("wss://presentyourlove.communities.buzz.xyz".to_string()),
+                    secret: false,
+                },
+                EnvVarSpec {
+                    name: "PATH".to_string(),
+                    required: true,
+                    description: "系統可執行檔搜尋路徑".to_string(),
+                    validator: Some(EnvValidator::NonEmpty),
+                    default: None,
+                    secret: false,
+                },
+            ],
+        }
+    }
+}
+
 impl EnvChecker {
     /// 創建新的環境變數檢查器
-    /// 
-    /// # 參數
-    /// 
-    /// * `specs` - 環境變數規範列表
-    /// 
-    /// # 返回值
-    /// 
-    /// 返回新的 EnvChecker 實例
-    /// 
-    /// # 示例
-    /// 
-    /// ```rust
-    /// use env_guardian::env_checker::EnvChecker;
-    /// use env_guardian::config::EnvVarSpec;
-    /// use env_guardian::config::EnvValidator;
-    /// 
-    /// fn main() {
-    ///     let specs = vec![
-    ///         EnvVarSpec {
-    ///             name: "BUZZ_RELAY_URL".to_string(),
-    ///             required: true,
-    ///             description: "Nostr Relay 連線位址".to_string(),
-    ///             validator: Some(EnvValidator::Url { schemes: vec!["wss".to_string(), "ws".to_string()] }),
-    ///             default: None,
-    ///             secret: false,
-    ///         },
-    ///     ];
-    ///     
-    ///     let checker = EnvChecker::new(specs);
-    ///     println!("創建了 EnvChecker");
-    /// }
-    /// ```
     pub fn new(specs: Vec<EnvVarSpec>) -> Self {
         Self { specs }
     }
-    
+
     /// 檢查所有環境變數
-    /// 
-    /// # 返回值
-    /// 
-    /// 返回包含所有檢查結果的向量
-    /// 
-    /// # 檢查邏輯
-    /// 
-    /// 1. **載入 .env 檔案** - 載入 .env 檔案中的環境變數
-    /// 2. **檢查系統環境變數** - 檢查系統環境變數
-    /// 3. **檢查預設值** - 檢查預設值
-    /// 4. **生成報告** - 生成檢查報告
-    /// 
-    /// # 示例
-    /// 
-    /// ```rust
-    /// use env_guardian::env_checker::EnvChecker;
-    /// use env_guardian::config::EnvVarSpec;
-    /// use env_guardian::config::EnvValidator;
-    /// 
-    /// fn main() {
-    ///     let specs = vec![
-    ///         EnvVarSpec {
-    ///             name: "BUZZ_RELAY_URL".to_string(),
-    ///             required: true,
-    ///             description: "Nostr Relay 連線位址".to_string(),
-    ///             validator: Some(EnvValidator::Url { schemes: vec!["wss".to_string(), "ws".to_string()] }),
-    ///             default: None,
-    ///             secret: false,
-    ///         },
-    ///     ];
-    ///     
-    ///     let checker = EnvChecker::new(specs);
-    ///     let reports = checker.check_all();
-    ///     
-    ///     for report in reports {
-    ///         println!("變數: {:?}, 狀態: {:?}, 錯誤: {:?}", report.var_name, report.status, report.error);
-    ///     }
-    /// }
-    /// ```
-    pub fn check_all(&self) -> Vec<EnvCheckReport> {
-        let mut reports = Vec::new();
-        
+    pub async fn check_all(&self) -> EnvFullReport {
+        let mut results = Vec::new();
+        let mut all_passed = true;
+
         for spec in &self.specs {
             let report = self.check_env_var(spec);
-            reports.push(report);
+            if matches!(report.status, CheckStatus::Failed) {
+                all_passed = false;
+            }
+            results.push(report);
         }
-        
-        reports
+
+        EnvFullReport {
+            all_passed,
+            results,
+        }
+    }
+
+    /// 驗證單一環境變數數值與規則
+    fn validate_env_var(
+        &self,
+        spec: &EnvVarSpec,
+        value: &Option<String>,
+    ) -> (CheckStatus, Option<String>, Option<String>) {
+        let Some(val) = value.as_deref() else {
+            if spec.required {
+                return (
+                    CheckStatus::Failed,
+                    Some(format!("缺少必填環境變數 {}", spec.name)),
+                    Some(format!("請設定 {} ({})", spec.name, spec.description)),
+                );
+            }
+            return (
+                CheckStatus::Warning,
+                None,
+                Some(format!("選填環境變數 {} 未設定，已啟用保護降級", spec.name)),
+            );
+        };
+
+        if let Some(validator) = &spec.validator {
+            match validator {
+                EnvValidator::Url { schemes } => {
+                    if !schemes.iter().any(|s| val.starts_with(&format!("{s}://"))) {
+                        return (
+                            CheckStatus::Failed,
+                            Some(format!("{} URL 協議不在允許範圍內", spec.name)),
+                            Some(format!("應以 {:?} 開頭", schemes)),
+                        );
+                    }
+                }
+                EnvValidator::Hex { length } => {
+                    let valid_hex = val.chars().all(|c| c.is_ascii_hexdigit());
+                    let valid_len = length.map_or(true, |l| val.len() == l);
+                    if !valid_hex || !valid_len {
+                        return (
+                            CheckStatus::Failed,
+                            Some(format!("{} Hex 格式或長度無效", spec.name)),
+                            None,
+                        );
+                    }
+                }
+                EnvValidator::NonEmpty => {
+                    if val.trim().is_empty() {
+                        return (
+                            CheckStatus::Failed,
+                            Some(format!("{} 不可為空白字串", spec.name)),
+                            None,
+                        );
+                    }
+                }
+            }
+        }
+
+        (CheckStatus::Passed, None, None)
     }
     
     /// 檢查單個環境變數
@@ -236,12 +258,12 @@ impl EnvChecker {
     ///         secret: false,
     ///     };
     ///     
-    ///     let checker = EnvChecker::new(vec![spec]);
+    ///     let checker = EnvChecker::new(vec![spec.clone()]);
     ///     let report = checker.check_env_var(&spec);
     ///     println!("變數: {:?}, 狀態: {:?}, 錯誤: {:?}", report.var_name, report.status, report.error);
     /// }
     /// ```
-    fn check_env_var(&self, spec: &EnvVarSpec) -> EnvCheckReport {
+    pub fn check_env_var(&self, spec: &EnvVarSpec) -> EnvCheckReport {
         // 嘗試獲取環境變數
         let value = env::var(&spec.name).ok();
         

@@ -28,5 +28,10 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 
+[lints.rust]
+unused_imports = "allow"
+unused_variables = "allow"
+dead_code = "allow"
+
 
 

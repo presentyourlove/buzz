@@ -112,16 +112,28 @@ impl Scheduler {
         Ok(())
     }
 
-    /// 移除觸發器
-    pub fn remove_trigger(&self, trigger_id: Uuid) -> bool {
+    /// 移除觸發器並返回被移除的觸發器
+    pub fn remove_trigger(&self, trigger_id: Uuid) -> Option<Trigger> {
         let mut heap = self.heap.lock().unwrap();
         let len_before = heap.len();
+        let mut removed_trigger = None;
         let new_heap: BinaryHeap<ScheduledItem> = heap
             .drain()
-            .filter(|item| item.trigger_id != trigger_id)
+            .filter(|item| {
+                if item.trigger_id == trigger_id {
+                    removed_trigger = Some(item.trigger.clone());
+                    false
+                } else {
+                    true
+                }
+            })
             .collect();
         *heap = new_heap;
-        heap.len() < len_before
+        if heap.len() < len_before {
+            removed_trigger
+        } else {
+            None
+        }
     }
 
     /// 更新觸發器（移除舊的，添加新的）
@@ -186,6 +198,30 @@ impl Scheduler {
         }
     }
 
+    /// 獲取觸發器總數
+    pub fn trigger_count(&self) -> usize {
+        self.heap.lock().unwrap().len()
+    }
+
+    /// 獲取下一次觸發時間（最早的觸發器）
+    pub fn next_fire_time(&self) -> Option<DateTime<Utc>> {
+        self.heap.lock().unwrap().peek().map(|item| item.next_fire)
+    }
+
+    /// 檢查觸發器是否存在
+    pub fn has_trigger(&self, id: Uuid) -> bool {
+        let heap = self.heap.lock().unwrap();
+        heap.iter().any(|item| item.trigger_id == id)
+    }
+
+    /// 獲取指定觸發器的下次觸發時間
+    pub fn next_fire_time_for(&self, id: Uuid) -> Option<DateTime<Utc>> {
+        let heap = self.heap.lock().unwrap();
+        heap.iter()
+            .find(|item| item.trigger_id == id)
+            .map(|item| item.next_fire)
+    }
+
     /// 獲取下一個待觸發的項目（不移除）
     pub fn peek_next(&self) -> Option<NextFireTime> {
         let heap = self.heap.lock().unwrap();
@@ -222,6 +258,11 @@ impl Scheduler {
                 next_fire: item.next_fire,
             })
             .collect()
+    }
+
+    /// 檢查排程器是否正在運行
+    pub fn is_running(&self) -> bool {
+        *self.running.lock().unwrap()
     }
 
     /// 啟動背景檢查循環
@@ -268,16 +309,6 @@ impl Scheduler {
         *running = false;
         *self.check_interval.lock().unwrap() = None;
     }
-
-    /// 獲取待處理觸發器數量
-    pub fn pending_count(&self) -> usize {
-        self.heap.lock().unwrap().len()
-    }
-
-    /// 是否正在運行
-    pub fn is_running(&self) -> bool {
-        *self.running.lock().unwrap()
-    }
 }
 
 /// 解析 cron 表達式並獲取未來 N 次觸發時間（用於測試/預覽）
@@ -305,5 +336,254 @@ pub fn parse_interval(interval_str: &str) -> Result<u64> {
     } else {
         let val: u64 = interval_str.parse()?;
         Ok(val)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn test_scheduler_parse_interval() {
+        assert_eq!(parse_interval("30s").unwrap(), 30);
+        assert_eq!(parse_interval("5m").unwrap(), 300);
+        assert_eq!(parse_interval("1h").unwrap(), 3600);
+        assert_eq!(parse_interval("1d").unwrap(), 86400);
+        assert_eq!(parse_interval("60").unwrap(), 60);
+    }
+
+    #[test]
+    fn test_scheduler_compute_next_fire_cron() {
+        let scheduler = Scheduler::new(SchedulerConfig {
+            check_interval_secs: 1,
+            max_concurrent: 10,
+            enable_jitter: false,
+            default_jitter_secs: 0,
+        });
+
+        let trigger = Trigger::new(
+            "test".to_string(),
+            "test trigger".to_string(),
+            TriggerType::Schedule {
+                cron: Some("0 * * * * *".to_string()), // Every minute
+                interval_secs: None,
+                timezone: "UTC".to_string(),
+                jitter_secs: 0,
+            },
+        );
+
+        let next_fire = scheduler.compute_next_fire(&Some("0 * * * * *".to_string()), None, 0).unwrap();
+        let now = Utc::now();
+        // Next fire should be within the next minute
+        assert!(next_fire > now);
+        assert!(next_fire <= now + Duration::minutes(1));
+    }
+
+    #[test]
+    fn test_scheduler_compute_next_fire_interval() {
+        let scheduler = Scheduler::new(SchedulerConfig {
+            check_interval_secs: 1,
+            max_concurrent: 10,
+            enable_jitter: false,
+            default_jitter_secs: 0,
+        });
+
+        let trigger = Trigger::new(
+            "test".to_string(),
+            "test trigger".to_string(),
+            TriggerType::Schedule {
+                cron: None,
+                interval_secs: Some(60),
+                timezone: "UTC".to_string(),
+                jitter_secs: 0,
+            },
+        );
+
+        let next_fire = scheduler.compute_next_fire(&None, Some(60), 0).unwrap();
+        let now = Utc::now();
+        assert!(next_fire > now);
+        assert!(next_fire <= now + Duration::seconds(61)); // 60s + small buffer
+    }
+
+    #[test]
+    fn test_scheduler_compute_next_fire_with_jitter() {
+        let scheduler = Scheduler::new(SchedulerConfig {
+            check_interval_secs: 1,
+            max_concurrent: 10,
+            enable_jitter: true,
+            default_jitter_secs: 30,
+        });
+
+        let next_fire = scheduler.compute_next_fire(&None, Some(60), 10).unwrap();
+        let now = Utc::now();
+        // With 10s jitter, next fire should be between 60-70 seconds from the internal now
+        // Allow 2 seconds tolerance for test execution time difference
+        assert!(next_fire >= now + Duration::seconds(58));
+        assert!(next_fire <= now + Duration::seconds(72));
+    }
+
+    #[test]
+    fn test_scheduler_jitter_variance() {
+        let scheduler = Scheduler::new(SchedulerConfig {
+            check_interval_secs: 1,
+            max_concurrent: 10,
+            enable_jitter: true,
+            default_jitter_secs: 30,
+        });
+
+        let mut samples = Vec::new();
+        for _ in 0..100 {
+            let next = scheduler.compute_next_fire(&None, Some(60), 30).unwrap();
+            let offset = (next - Utc::now()).num_seconds();
+            samples.push(offset);
+        }
+
+        // Check variance - with 30s jitter, we should see spread
+        let min = *samples.iter().min().unwrap();
+        let max = *samples.iter().max().unwrap();
+        assert!(max - min > 5, "Jitter should produce variance, got min={}, max={}", min, max);
+    }
+
+    #[test]
+    fn test_scheduler_reschedule() {
+        let scheduler = Scheduler::new(SchedulerConfig {
+            check_interval_secs: 1,
+            max_concurrent: 10,
+            enable_jitter: false,
+            default_jitter_secs: 0,
+        });
+
+        let mut trigger = Trigger::new(
+            "test".to_string(),
+            "test trigger".to_string(),
+            TriggerType::Schedule {
+                cron: Some("0 * * * * *".to_string()), // Every minute
+                interval_secs: None,
+                timezone: "UTC".to_string(),
+                jitter_secs: 0,
+            },
+        );
+
+        let next1 = scheduler.reschedule(&trigger).unwrap();
+        assert!(next1 > Utc::now());
+
+        // Trigger should be in heap
+        assert_eq!(scheduler.trigger_count(), 1);
+
+        // Reschedule again - should add another entry to heap
+        let next2 = scheduler.reschedule(&trigger).unwrap();
+        assert!(next2 > Utc::now());
+        
+        // Should have 2 entries now
+        assert_eq!(scheduler.trigger_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_start_stop() {
+        let scheduler = Scheduler::new(SchedulerConfig {
+            check_interval_secs: 1,
+            max_concurrent: 10,
+            enable_jitter: false,
+            default_jitter_secs: 0,
+        });
+
+        assert!(!scheduler.is_running());
+
+        scheduler.start();
+        assert!(scheduler.is_running());
+
+        scheduler.stop();
+        assert!(!scheduler.is_running());
+    }
+
+    #[test]
+    fn test_scheduler_next_fire_time() {
+        let scheduler = Scheduler::new(SchedulerConfig {
+            check_interval_secs: 1,
+            max_concurrent: 10,
+            enable_jitter: false,
+            default_jitter_secs: 0,
+        });
+
+        assert!(scheduler.next_fire_time().is_none());
+
+        let trigger = Trigger::new(
+            "test".to_string(),
+            "test trigger".to_string(),
+            TriggerType::Schedule {
+                cron: Some("0 * * * * *".to_string()), // Every minute
+                interval_secs: None,
+                timezone: "UTC".to_string(),
+                jitter_secs: 0,
+            },
+        );
+
+        scheduler.reschedule(&trigger).unwrap();
+        assert!(scheduler.next_fire_time().is_some());
+    }
+
+    #[test]
+    fn test_scheduler_peek_next() {
+        let scheduler = Scheduler::new(SchedulerConfig {
+            check_interval_secs: 1,
+            max_concurrent: 10,
+            enable_jitter: false,
+            default_jitter_secs: 0,
+        });
+
+        assert!(scheduler.peek_next().is_none());
+
+        let trigger = Trigger::new(
+            "test".to_string(),
+            "test trigger".to_string(),
+            TriggerType::Schedule {
+                cron: Some("0 * * * * *".to_string()), // Every minute
+                interval_secs: None,
+                timezone: "UTC".to_string(),
+                jitter_secs: 0,
+            },
+        );
+
+        scheduler.reschedule(&trigger).unwrap();
+        let peeked = scheduler.peek_next().unwrap();
+        assert_eq!(peeked.trigger_id, trigger.id);
+    }
+
+    #[test]
+    fn test_scheduler_pop_due_triggers() {
+        let scheduler = Scheduler::new(SchedulerConfig {
+            check_interval_secs: 1,
+            max_concurrent: 10,
+            enable_jitter: false,
+            default_jitter_secs: 0,
+        });
+
+        let trigger = Trigger::new(
+            "test".to_string(),
+            "test trigger".to_string(),
+            TriggerType::Schedule {
+                cron: Some("0 * * * * *".to_string()), // Every minute
+                interval_secs: None,
+                timezone: "UTC".to_string(),
+                jitter_secs: 0,
+            },
+        );
+
+        scheduler.reschedule(&trigger).unwrap();
+
+        // Trigger is in future, shouldn't be due yet
+        let due = scheduler.pop_due();
+        assert!(due.is_empty());
+    }
+
+    #[test]
+    fn test_scheduler_preview_cron() {
+        let times = preview_cron("0 * * * * *", 5).unwrap();
+        assert_eq!(times.len(), 5);
+        // All should be at second 0 (every minute at :00 seconds)
+        for t in &times {
+            assert_eq!(t.second(), 0);
+        }
     }
 }

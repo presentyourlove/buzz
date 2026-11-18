@@ -9,6 +9,7 @@
 //! - `circuit_breaker`: 三态熔断器
 //! - `EnvGuardianSkill`: 技能主入口点
 
+pub mod config;
 pub mod env_checker;
 pub mod dependency_tool_checker;
 pub mod service_health_probe;
@@ -16,8 +17,73 @@ pub mod circuit_breaker;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use buzz_agent::skill::{Skill, SkillContext, SkillResult, SkillMetadata};
-use buzz_core::AgentEvent;
+
+/// 技能中繼資料
+#[derive(Debug, Clone)]
+pub struct SkillMetadata {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub author: String,
+    pub tags: Vec<String>,
+    pub required_permissions: Vec<String>,
+}
+
+/// 技能執行上下文
+#[derive(Debug, Clone, Default)]
+pub struct SkillContext {
+    pub workspace_root: Option<String>,
+}
+
+/// 技能執行結果
+#[derive(Debug, Clone)]
+pub struct SkillResult {
+    pub success: bool,
+    pub data: serde_json::Value,
+    pub error: Option<String>,
+}
+
+impl SkillResult {
+    pub fn success(data: serde_json::Value) -> Self {
+        Self {
+            success: true,
+            data,
+            error: None,
+        }
+    }
+
+    pub fn error(msg: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            data: serde_json::Value::Null,
+            error: Some(msg.into()),
+        }
+    }
+
+    pub fn ignored() -> Self {
+        Self {
+            success: true,
+            data: serde_json::json!({ "ignored": true }),
+            error: None,
+        }
+    }
+}
+
+/// 代理人事件封包
+#[derive(Debug, Clone)]
+pub struct AgentEvent {
+    pub kind: u32,
+    pub content: serde_json::Value,
+}
+
+/// 內建技能通用介面
+#[async_trait::async_trait]
+pub trait Skill: Send + Sync {
+    fn metadata(&self) -> SkillMetadata;
+    async fn initialize(&mut self, context: &SkillContext) -> SkillResult;
+    async fn handle_event(&mut self, event: &AgentEvent, context: &SkillContext) -> SkillResult;
+    async fn shutdown(&mut self, context: &SkillContext) -> SkillResult;
+}
 
 /// env-guardian 技能主入口
 pub struct EnvGuardianSkill {
@@ -132,7 +198,12 @@ impl Skill for EnvGuardianSkill {
             version: "0.1.0".to_string(),
             description: "环境变量检查与依赖工具管理技能 - 确保系统环境安全完整，依赖工具正常运行".to_string(),
             author: "Pollen".to_string(),
-            tags: vec!["environment", "validation", "health-check", "circuit-breaker".to_string()],
+            tags: vec![
+                "environment".to_string(),
+                "validation".to_string(),
+                "health-check".to_string(),
+                "circuit-breaker".to_string(),
+            ],
             required_permissions: vec!["system.env.read".to_string(), "system.process.execute".to_string()],
         }
     }
@@ -215,4 +286,9 @@ mod tests {
     }
     
     #[tokio::test]
-    async fn test_full_c
+    async fn test_full_check() {
+        let skill = EnvGuardianSkill::new();
+        let result = skill.run_full_check().await;
+        assert!(result.success);
+    }
+}

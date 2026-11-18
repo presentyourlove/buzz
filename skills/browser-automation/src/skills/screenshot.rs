@@ -263,7 +263,7 @@ mod tests {
     fn test_screenshot_config_defaults() {
         let config = ScreenshotConfig {
             path: Some(PathBuf::from("screenshot.png")),
-            options: ScreenshotOptions::default(),
+            options: ScreenshotConfigOptions::default(),
             timeout_ms: 10000,
         };
 

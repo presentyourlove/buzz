@@ -14,7 +14,7 @@ use daily_digest::{
         ThreadCategory, ActionItem, DailyDigest,
     },
     markdown_renderer::MarkdownRenderer,
-    spec_validator::{SpecValidator, ValidationError, ValidationWarning},
+    spec_validator::{SpecValidator, ValidationError},
 };
 
 /// 測試行級雜訊過濾器基本功能

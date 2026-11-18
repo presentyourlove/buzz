@@ -11,6 +11,7 @@ use crate::config::{
     pricing_authority, Config, MAX_PROMPT_BYTES, MAX_TOOL_CALLS_PER_TURN, MAX_TOOL_RESULT_BYTES,
 };
 use crate::handoff::{ContextRecovery, HandoffOutcome};
+use crate::triggers::{Trigger, TriggerType, trigger_registry::TriggerRegistry, EventBus, Scheduler, EventBusConfig, SchedulerConfig, TriggerStatus};
 use crate::hints::SkillEntry;
 use crate::llm::Llm;
 use crate::mcp::McpRegistry;
@@ -24,6 +25,7 @@ use crate::types::{
 };
 use crate::wire::{self, WireSender};
 use nostr::Keys;
+use uuid::Uuid;
 
 const ERROR_REFLECTION_SUFFIX: &str =
     "\n\n[Reflect] Before retrying, identify the cause and change your approach.";
@@ -459,6 +461,38 @@ pub struct RunCtx<'a> {
     /// Shared browser pool for builtin browser tools. May be None if Playwright
     /// runtime was not ready at startup.
     pub browser_pool: &'a Option<Arc<BrowserPool>>,
+    /// Trigger registry for proactive autonomous triggers (cron, event-based, etc.)
+    pub trigger_registry: Arc<TriggerRegistry>,
+}
+
+/// Methods for managing custom triggers in the agent runtime.
+impl RunCtx<'_> {
+    /// Register a new custom trigger (cron, interval, event-based, or one-shot).
+    ///
+    /// The trigger will be automatically managed by the agent's trigger registry.
+    /// Returns the UUID of the registered trigger.
+    pub fn register_trigger(&mut self, trigger: Trigger) -> Result<Uuid, AgentError> {
+        self.trigger_registry
+            .register(trigger)
+            .map_err(|e| AgentError::Internal(format!("Failed to register trigger: {}", e)))
+    }
+
+    /// Unregister a trigger by its UUID.
+    ///
+    /// Returns `true` if the trigger was found and removed, `false` otherwise.
+    pub fn unregister_trigger(&mut self, id: Uuid) -> bool {
+        self.trigger_registry.unregister(id)
+    }
+
+    /// Enable or disable a registered trigger.
+    pub fn set_trigger_enabled(&mut self, id: Uuid, enabled: bool) -> bool {
+        self.trigger_registry.set_enabled_sync(id, enabled)
+    }
+
+    /// Get a list of all registered triggers.
+    pub fn list_triggers(&self) -> Vec<Trigger> {
+        self.trigger_registry.list_sync()
+    }
 }
 
 /// Fold one round's proven identity into the per-turn identity accumulator.

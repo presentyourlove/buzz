@@ -1,9 +1,195 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::config::Config;
 use crate::health_guardian::phase_b_run_daemon;
-use crate::types::{AgentError, AgentKeys};
-use tokio::sync::watch;
+use crate::types::{AgentError, AgentKeys, AlwaysOnConfig};
+use tokio::sync::{watch, mpsc, Semaphore};
+use tokio::time::interval;
+
+/// Daemon lifecycle states for Always-On agent
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DaemonState {
+    /// Daemon is starting up
+    Starting,
+    /// Daemon is actively processing events
+    Active,
+    /// Daemon is sleeping (idle timeout reached)
+    Sleeping,
+    /// Daemon is waking up from sleep
+    Waking,
+    /// Daemon is stopping gracefully
+    Stopping,
+    /// Daemon has failed
+    Failed,
+}
+
+impl DaemonState {
+    /// Check if daemon is in a running state (can process events)
+    pub fn is_running(&self) -> bool {
+        matches!(self, DaemonState::Active | DaemonState::Waking)
+    }
+    
+    /// Check if daemon is in a terminal state
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, DaemonState::Stopping | DaemonState::Failed)
+    }
+}
+
+/// Background listener configuration
+#[derive(Debug, Clone)]
+pub struct BackgroundListenerConfig {
+    /// Concurrency semaphore for limiting parallel tasks
+    pub task_semaphore: Arc<Semaphore>,
+    /// Memory limit in bytes
+    pub memory_limit_bytes: u64,
+    /// Current memory usage tracker
+    pub memory_usage: Arc<std::sync::atomic::AtomicU64>,
+    /// Idle timeout duration
+    pub idle_timeout: Duration,
+    /// Channels to monitor
+    pub monitored_channels: Vec<String>,
+}
+
+/// Background listener for Always-On agent
+/// Handles event subscription, concurrency control, memory tracking, and sleep/wake logic
+pub struct BackgroundListener {
+    config: BackgroundListenerConfig,
+    state: Arc<std::sync::RwLock<DaemonState>>,
+    last_activity: Arc<std::sync::RwLock<std::time::Instant>>,
+    shutdown_tx: watch::Sender<bool>,
+    shutdown_rx: watch::Receiver<bool>,
+    event_tx: mpsc::UnboundedSender<nostr::Event>,
+}
+
+impl BackgroundListener {
+    /// Create a new background listener from AlwaysOnConfig
+    pub fn new(always_on_config: &AlwaysOnConfig) -> Self {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        
+        let task_semaphore = Arc::new(Semaphore::new(always_on_config.max_concurrent_tasks as usize));
+        let memory_limit_bytes = (always_on_config.max_memory_mb as u64) * 1024 * 1024;
+        let memory_usage = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        
+        Self {
+            config: BackgroundListenerConfig {
+                task_semaphore,
+                memory_limit_bytes,
+                memory_usage,
+                idle_timeout: Duration::from_secs(always_on_config.idle_timeout_secs),
+                monitored_channels: always_on_config.monitored_channels.clone(),
+            },
+            state: Arc::new(std::sync::RwLock::new(DaemonState::Starting)),
+            last_activity: Arc::new(std::sync::RwLock::new(std::time::Instant::now())),
+            shutdown_tx,
+            shutdown_rx,
+            event_tx,
+        }
+    }
+    
+    /// Get current daemon state
+    pub fn state(&self) -> DaemonState {
+        *self.state.read().unwrap()
+    }
+    
+    /// Transition to a new state
+    pub fn transition_state(&self, new_state: DaemonState) {
+        let mut state = self.state.write().unwrap();
+        tracing::info!("Daemon state transition: {:?} -> {:?}", *state, new_state);
+        *state = new_state;
+    }
+    
+    /// Record activity (resets idle timer)
+    pub fn record_activity(&self) {
+        *self.last_activity.write().unwrap() = std::time::Instant::now();
+        // If sleeping, transition to waking
+        if self.state() == DaemonState::Sleeping {
+            self.transition_state(DaemonState::Waking);
+        }
+    }
+    
+    /// Check if idle timeout has been reached
+    pub fn is_idle(&self) -> bool {
+        let last_activity = *self.last_activity.read().unwrap();
+        last_activity.elapsed() >= self.config.idle_timeout
+    }
+    
+    /// Try to acquire a task permit (for concurrency control)
+    pub async fn acquire_task_permit(&self) -> Result<tokio::sync::SemaphorePermit<'_>, AgentError> {
+        self.config.task_semaphore.acquire().await
+            .map_err(|_| AgentError::Other("Failed to acquire task permit - semaphore closed".to_string()))
+    }
+    
+    /// Track memory allocation
+    pub fn allocate_memory(&self, bytes: u64) -> Result<(), AgentError> {
+        let current = self.config.memory_usage.load(std::sync::atomic::Ordering::Relaxed);
+        let new_total = current.saturating_add(bytes);
+        if new_total > self.config.memory_limit_bytes {
+            return Err(AgentError::Other(format!(
+                "Memory limit exceeded: {} bytes allocated, limit {} bytes",
+                new_total, self.config.memory_limit_bytes
+            )));
+        }
+        self.config.memory_usage.store(new_total, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+    
+    /// Release memory allocation
+    pub fn release_memory(&self, bytes: u64) {
+        let current = self.config.memory_usage.load(std::sync::atomic::Ordering::Relaxed);
+        self.config.memory_usage.store(current.saturating_sub(bytes), std::sync::atomic::Ordering::Relaxed);
+    }
+    
+    /// Get current memory usage
+    pub fn memory_usage(&self) -> u64 {
+        self.config.memory_usage.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    
+    /// Start the background listener loop (sleep/wake monitoring)
+    pub async fn run_sleep_wake_loop(&mut self) {
+        let mut check_interval = interval(Duration::from_secs(10)); // Check every 10 seconds
+        
+        loop {
+            tokio::select! {
+                _ = self.shutdown_rx.changed() => {
+                    if *self.shutdown_rx.borrow() {
+                        tracing::info!("Background listener received shutdown signal");
+                        self.transition_state(DaemonState::Stopping);
+                        break;
+                    }
+                }
+                _ = check_interval.tick() => {
+                    // Check if we should transition to sleep
+                    if self.state() == DaemonState::Active && self.is_idle() {
+                        tracing::info!("Idle timeout reached, transitioning to Sleeping");
+                        self.transition_state(DaemonState::Sleeping);
+                        // Unsubscribe from relays to save resources
+                        // TODO: Implement relay unsubscription
+                    }
+                    
+                    // Check if we should wake up (handled by record_activity)
+                    if self.state() == DaemonState::Waking {
+                        tracing::info!("Waking up from sleep, transitioning to Active");
+                        self.transition_state(DaemonState::Active);
+                        // Re-subscribe to relays
+                        // TODO: Implement relay resubscription
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Send shutdown signal
+    pub fn shutdown(&self) {
+        let _ = self.shutdown_tx.send(true);
+    }
+    
+    /// Get event sender for publishing events
+    pub fn event_sender(&self) -> mpsc::UnboundedSender<nostr::Event> {
+        self.event_tx.clone()
+    }
+}
 
 /// Daemon lifecycle management for Mode B Agent reminder proxy.
 ///
