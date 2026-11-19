@@ -14,6 +14,7 @@ mod validate;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use client::BuzzClient;
 use error::CliError;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Run the Buzz CLI from raw arguments (including `argv[0]`).
@@ -2553,6 +2554,13 @@ pub enum PackCmd {
         /// Path to the pack directory
         path: String,
     },
+    /// Validate command syntax before execution (dry-run gate)
+    #[command(name = "syntax-gate")]
+    SyntaxGate {
+        /// Command and arguments to validate (e.g., "messages send --channel x --content hello")
+        #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
+        args: Vec<String>,
+    },
 }
 
 /// Subcommands for `buzz reminders`.
@@ -2776,6 +2784,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         return match sub {
             PackCmd::Validate { path } => commands::pack::cmd_validate(path),
             PackCmd::Inspect { path } => commands::pack::cmd_inspect(path),
+            PackCmd::SyntaxGate { args } => commands::pack::cmd_syntax_gate(args),
         };
     }
 

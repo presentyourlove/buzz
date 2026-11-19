@@ -3,7 +3,6 @@
 //! These commands operate on local pack directories. No relay connection needed.
 
 use std::path::Path;
-
 use crate::error::CliError;
 
 /// Run `buzz pack validate <path>`.
@@ -148,4 +147,79 @@ pub fn cmd_inspect(path: &str) -> Result<(), CliError> {
     }
 
     Ok(())
+}
+
+/// Run `buzz pack syntax-gate <args>` - Syntax Gate 前置語法稽核門禁
+///
+/// 依據 DESIGN_SPEC_B_TRIPLE_GATE.md §Syntax Gate 規格實作。
+/// 驗證指令參數的語意與語法合法性，不向 Relay 廣播，純本地靜態檢查。
+pub fn cmd_syntax_gate(args: &[String]) -> Result<(), CliError> {
+    if args.is_empty() {
+        return Err(CliError::Usage("syntax-gate requires command arguments to validate".to_string()));
+    }
+
+    println!("🔍 執行 Syntax Gate 語法靜態稽核: {:?}", args);
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+
+        if arg == "--event" || arg == "--event-id" {
+            if i + 1 < args.len() {
+                let id = &args[i + 1];
+                if !is_valid_event_id(id) {
+                    return Err(CliError::Usage(format!("無效的 Event ID: '{}' (必須為 64 位元 Hex 字串)", id)));
+                }
+                i += 1;
+            }
+        } else if arg == "--author" || arg == "--pubkey" || arg == "--mention" || arg == "--assignee" {
+            if i + 1 < args.len() {
+                let pk = &args[i + 1];
+                if !is_valid_pubkey(pk) {
+                    return Err(CliError::Usage(format!("無效的公鑰 '{}' (必須為 64 位元 Hex 或 npub1...)", pk)));
+                }
+                i += 1;
+            }
+        } else if arg == "--channel" {
+            if i + 1 < args.len() {
+                let ch = &args[i + 1];
+                if !is_valid_uuid(ch) {
+                    return Err(CliError::Usage(format!("無效的 Channel UUID: '{}'", ch)));
+                }
+                i += 1;
+            }
+        } else if arg == "--content" || arg == "--json" {
+            if i + 1 < args.len() {
+                let content = &args[i + 1];
+                if content.trim().starts_with('{') || content.trim().starts_with('[') {
+                    if let Err(e) = serde_json::from_str::<serde_json::Value>(content) {
+                        return Err(CliError::Usage(format!("JSON 內容語法錯誤: {e}")));
+                    }
+                }
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+
+    println!("✅ Syntax Gate 驗證通過: 語意與參數合法");
+    Ok(())
+}
+
+fn is_valid_event_id(s: &str) -> bool {
+    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn is_valid_pubkey(s: &str) -> bool {
+    if s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return true;
+    }
+    if s.starts_with("npub1") && s.len() >= 60 {
+        return true;
+    }
+    false
+}
+
+fn is_valid_uuid(s: &str) -> bool {
+    uuid::Uuid::parse_str(s).is_ok()
 }
