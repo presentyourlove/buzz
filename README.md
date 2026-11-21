@@ -1363,6 +1363,29 @@ just reset          # ⚠️  Wipe data + recreate
   - **修改 (Modified)**：
     - `README.md`：記錄 Phase 61 儲存空間審計深度清理與 antigravity-google-manager 倉庫同步成果。
 
+### [Phase 62] Upstream 97-Commit Lossless Merge, CLI Command Alignment & Triple Gate Verification (2026-11-21)
+- **官方最新 97 項提交無損升級與自研特徵分支融合**：
+  - **快照備份與資產封存 (Zero Data Loss)**：
+    - 建立升級專屬快照分支 `backup/pre-upgrade-20261121_1330`。
+    - 備份特工配置檔至 `managed-agents.json.bak_upgrade_20261121`。
+    - 將 Phase 50 ~ Phase 61 核心自研資產（ACP RBAC、Triple Gate 三閘斷路器、Trigger Orchestrator、Dashboard、全域 Prompt 體系、Persona 與三大實裝技能）安全封存為檢查點 Commit (`1a08e5e0c`)。
+  - **雙軌分支無損合流 (Dual-Track Architecture)**：
+    - 官方主幹 `main`：自 `25b58ab98` 以 Fast-forward 模式追平官方最新提交 `d1236080e`（97 項提交，新增 83,548 行 / 刪除 11,309 行），並成功同步至 `origin/main`。
+    - 自研分支 `feature/custom-local-core`：零代碼遺失合流 `main`（Commit `ec599060d`），官方未改動 `crates/buzz-agent`（特工核心 0 改動），自研邏輯完好無損。
+  - **CLI 子命令對齊與衝突解決**：
+    - 精準合併 `crates/buzz-cli/src/lib.rs` 與 `Cargo.lock`，保留官方新增之 `raw` 子命令，同時完整保留自研 `PackCmd::TripleGate` 與 `PackCmd::SyntaxGate`。
+    - 更新 `subcommand_names_are_stable` 與 `subcommand_counts_are_stable` 單元測試斷言，納入 `triple-gate`，CLI 單元測試 4/4 100% 通過。
+  - **編譯、測試與發版三閘嚴格驗證 (Verification Gate)**：
+    - `cargo check -p buzz-cli` 與 `cargo check -p buzz-agent`：**0 Error 順利通過**。
+    - 技能組單元測試（`comm-quality-guard` 10/10、`quant-portfolio-risk-sentinel` 9/9、`daily-evolution-generators` 4/4）：**共計 23/23 項測試 100% 綠燈 PASS**。
+    - 實機驗收三閘斷路器：`buzz pack triple-gate --path . --timeout 120` **三大閘門全數通過（PASS 17ms）**。
+    - 雙軌推送：`feature/custom-local-core` 成功推送至 `origin/feature/custom-local-core`。
+- **檔案清單 (File Inventory)**：
+  - **修改 (Modified)**：
+    - `crates/buzz-cli/src/lib.rs`：合併官方最新子命令，更新測試斷言納入 `triple-gate`。
+    - `Cargo.lock`：合流官方相依更新與自研版本鎖定。
+    - `README.md`：記錄 Phase 62 官方 97 項提交無損升級與全量測試驗收結果。
+
 ---
 
 <p align="center">
