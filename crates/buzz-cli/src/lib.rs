@@ -3408,7 +3408,7 @@ mod tests {
         );
         assert_eq!(names(&cmd, "media"), vec!["get"]);
         assert_eq!(names(&cmd, "upload"), vec!["file"]);
-        assert_eq!(names(&cmd, "pack"), vec!["inspect", "syntax-gate", "validate"]);
+        assert_eq!(names(&cmd, "pack"), vec!["inspect", "syntax-gate", "triple-gate", "validate"]);
         assert_eq!(names(&cmd, "raw"), vec!["publish", "query"]);
         assert_eq!(
             names(&cmd, "moderation"),
@@ -3439,7 +3439,7 @@ mod tests {
             ("issues", 6),
             ("media", 1),
             ("messages", 9),
-            ("pack", 3),
+            ("pack", 4),
             ("patches", 4),
             ("pr", 5),
             ("projects", 8),
