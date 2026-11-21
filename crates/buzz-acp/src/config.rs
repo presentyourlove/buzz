@@ -34,6 +34,40 @@ pub(crate) const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 1_500;
 /// Override via `--max-turn-duration` / `BUZZ_ACP_MAX_TURN_DURATION`.
 pub(crate) const DEFAULT_MAX_TURN_DURATION_SECS: u64 = 7200;
 
+/// Default connect timeout: max seconds to establish connection to LLM/ACP provider.
+pub(crate) const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 60;
+
+/// Default first-byte timeout: max seconds to receive initial chunk/token after prompt dispatch.
+pub(crate) const DEFAULT_FIRST_BYTE_TIMEOUT_SECS: u64 = 300;
+
+/// Default streaming chunk timeout: max seconds between consecutive chunks in an active turn.
+pub(crate) const DEFAULT_STREAMING_CHUNK_TIMEOUT_SECS: u64 = 600;
+
+/// Tiered timeout configuration for fine-grained multi-phase lifecycle management.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TieredTimeoutConfig {
+    pub connect_timeout_secs: u64,
+    pub first_byte_timeout_secs: u64,
+    pub streaming_chunk_timeout_secs: u64,
+    pub idle_timeout_secs: u64,
+    pub max_turn_duration_secs: u64,
+    pub heartbeat_interval_secs: u64,
+}
+
+impl Default for TieredTimeoutConfig {
+    fn default() -> Self {
+        Self {
+            connect_timeout_secs: DEFAULT_CONNECT_TIMEOUT_SECS,
+            first_byte_timeout_secs: DEFAULT_FIRST_BYTE_TIMEOUT_SECS,
+            streaming_chunk_timeout_secs: DEFAULT_STREAMING_CHUNK_TIMEOUT_SECS,
+            idle_timeout_secs: DEFAULT_IDLE_TIMEOUT_SECS,
+            max_turn_duration_secs: DEFAULT_MAX_TURN_DURATION_SECS,
+            heartbeat_interval_secs: 0,
+        }
+    }
+}
+
 /// Upper bound for `max_turn_duration` (7 days). Any higher is operationally
 /// meaningless and risks arithmetic overflow when deriving the in-flight
 /// deadline (`max_turn_duration + IN_FLIGHT_DEADLINE_BUFFER_SECS`).
@@ -284,6 +318,18 @@ pub struct CliArgs {
     /// Deprecated: alias for --idle-timeout. If both set, --idle-timeout wins.
     #[arg(long, env = "BUZZ_ACP_TURN_TIMEOUT", hide = true)]
     pub turn_timeout: Option<u64>,
+
+    /// Connect timeout: max seconds to establish connection to LLM/ACP provider.
+    #[arg(long, env = "BUZZ_ACP_CONNECT_TIMEOUT", default_value_t = DEFAULT_CONNECT_TIMEOUT_SECS)]
+    pub connect_timeout: u64,
+
+    /// First-byte timeout: max seconds to receive initial chunk/token after prompt dispatch.
+    #[arg(long, env = "BUZZ_ACP_FIRST_BYTE_TIMEOUT", default_value_t = DEFAULT_FIRST_BYTE_TIMEOUT_SECS)]
+    pub first_byte_timeout: u64,
+
+    /// Streaming chunk timeout: max seconds between consecutive chunks in an active turn.
+    #[arg(long, env = "BUZZ_ACP_STREAMING_CHUNK_TIMEOUT", default_value_t = DEFAULT_STREAMING_CHUNK_TIMEOUT_SECS)]
+    pub streaming_chunk_timeout: u64,
 
     #[arg(
         long,
@@ -552,6 +598,9 @@ pub struct Config {
     pub mcp_command: String,
     pub idle_timeout_secs: u64,
     pub max_turn_duration_secs: u64,
+    pub connect_timeout_secs: u64,
+    pub first_byte_timeout_secs: u64,
+    pub streaming_chunk_timeout_secs: u64,
     pub agents: u32,
     pub heartbeat_interval_secs: u64,
     /// Seconds between per-turn liveness pings. 0 = disabled. Distinct from
@@ -1191,6 +1240,9 @@ impl Config {
             mcp_command: args.mcp_command,
             idle_timeout_secs,
             max_turn_duration_secs,
+            connect_timeout_secs: args.connect_timeout,
+            first_byte_timeout_secs: args.first_byte_timeout,
+            streaming_chunk_timeout_secs: args.streaming_chunk_timeout,
             agents: args.agents,
             heartbeat_interval_secs: heartbeat_interval,
             turn_liveness_secs,
@@ -1240,6 +1292,19 @@ impl Config {
         };
 
         Ok(config)
+    }
+
+    /// Retrieve the resolved tiered timeout and heartbeat configuration.
+    #[allow(dead_code)]
+    pub fn tiered_timeouts(&self) -> TieredTimeoutConfig {
+        TieredTimeoutConfig {
+            connect_timeout_secs: self.connect_timeout_secs,
+            first_byte_timeout_secs: self.first_byte_timeout_secs,
+            streaming_chunk_timeout_secs: self.streaming_chunk_timeout_secs,
+            idle_timeout_secs: self.idle_timeout_secs,
+            max_turn_duration_secs: self.max_turn_duration_secs,
+            heartbeat_interval_secs: self.heartbeat_interval_secs,
+        }
     }
 
     /// Human-readable summary (no secrets).
@@ -1613,6 +1678,9 @@ mod tests {
             idle_pool_sleep_secs: 0,
             replay_floor_unix: None,
             agent_owner: None,
+            connect_timeout_secs: 10,
+            first_byte_timeout_secs: 30,
+            streaming_chunk_timeout_secs: 15,
             no_base_prompt: false,
             base_prompt_content: None,
         }

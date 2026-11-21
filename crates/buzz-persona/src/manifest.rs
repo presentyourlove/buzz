@@ -67,6 +67,34 @@ pub struct BehavioralDefaults {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub broadcast_replies: Option<bool>,
+
+    // Agent identity & always-on fields (from Persona Pack)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_tag: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub business_card: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_namespace: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub always_on: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_timeout_secs: Option<u64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_tasks: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_memory_mb: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub monitored_channels: Option<Vec<String>>,
 }
 
 /// The pack manifest from `.plugin/plugin.json`.

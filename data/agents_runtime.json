@@ -1,0 +1,108 @@
+[
+  {
+    "capabilities": [
+      "coordination",
+      "task-dispatch",
+      "communication"
+    ],
+    "displayName": "Fizz (秘書)",
+    "id": "fizz",
+    "lastActiveAt": "2026-11-20T07:27:37.782354+00:00",
+    "metadata": {
+      "department": "秘書處",
+      "model": "gemini-3.1-flash-lite"
+    },
+    "name": "Fizz",
+    "role": "秘書處總管 / 任務派單與跨特工分流",
+    "status": "idle"
+  },
+  {
+    "capabilities": [
+      "code-search",
+      "research",
+      "fact-check"
+    ],
+    "displayName": "Honey (大腦)",
+    "id": "honey",
+    "lastActiveAt": "2026-11-20T15:00:00Z",
+    "metadata": {
+      "department": "資料研究部",
+      "model": "gemini-3.5-flash-lite"
+    },
+    "name": "Honey",
+    "role": "資料研究部 / 高頻代碼檢索與前沿情報",
+    "status": "idle"
+  },
+  {
+    "capabilities": [
+      "frontend",
+      "architecture",
+      "vue3",
+      "tailwind"
+    ],
+    "displayName": "Honey2 (架構企劃官)",
+    "id": "honey2",
+    "lastActiveAt": "2026-11-20T07:27:37.782354+00:00",
+    "metadata": {
+      "department": "技術開發部",
+      "model": "nemotron-3-ultra-550b-a55b:free"
+    },
+    "name": "Honey2",
+    "role": "技術開發部 / 儀表板架構設計與開源雷達",
+    "status": "idle"
+  },
+  {
+    "capabilities": [
+      "rust",
+      "backend",
+      "gates",
+      "unit-tests"
+    ],
+    "displayName": "Pollen (技術架構師)",
+    "id": "pollen",
+    "lastActiveAt": "2026-11-20T07:27:37.782354+00:00",
+    "metadata": {
+      "department": "技術開發部",
+      "model": "nemotron-3-ultra-550b-a55b"
+    },
+    "name": "Pollen",
+    "role": "技術開發部 / 核心代碼實作與 Patch 補丁",
+    "status": "idle"
+  },
+  {
+    "capabilities": [
+      "security",
+      "qa",
+      "audit",
+      "circuit-breaker"
+    ],
+    "displayName": "Sentry (品質與資安總監)",
+    "id": "sentry",
+    "lastActiveAt": "2026-11-20T07:27:37.782354+00:00",
+    "metadata": {
+      "department": "品質監控部",
+      "model": "nemotron-3.5-lightning:free"
+    },
+    "name": "Sentry",
+    "role": "品質監控部 / Triple Gate 門禁與 QA 簽核",
+    "status": "idle"
+  },
+  {
+    "capabilities": [
+      "memory",
+      "obsidian",
+      "knowledge-base",
+      "cleanup"
+    ],
+    "displayName": "Wax (記憶整理員)",
+    "id": "wax",
+    "lastActiveAt": "2026-11-20T07:27:37.782354+00:00",
+    "metadata": {
+      "department": "記憶整理部",
+      "model": "nemotron-3.5-super-vl:free"
+    },
+    "name": "Wax",
+    "role": "記憶整理部 / Obsidian 知識庫與對話清洗",
+    "status": "idle"
+  }
+]

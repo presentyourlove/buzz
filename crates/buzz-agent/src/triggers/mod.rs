@@ -1,13 +1,24 @@
-//! 觸發器模組 - 核心觸發器類型定義與引擎組件
-//!
-//! 依據 PLANS/PROACTIVE_TRIGGERS_PLAN.md 設計
+//! Trigger Runtime — Background service that evaluates conditions on schedule and fires triggers
 
+pub mod condition;
 pub mod event_bus;
+pub mod orchestrator;
+pub mod runtime;
 pub mod scheduler;
 pub mod trigger_registry;
 pub mod types;
 
-pub use self::types::{Trigger, TriggerType, TriggerStatus};
+pub use self::types::{
+    Trigger, TriggerType, TriggerStatus, EventSource, TriggerFiredEvent, DeduplicationConfig,
+    Action, BusEvent, NextFireTime, TriggerRuntimeConfig, TriggerRuntimeHealth, TriggerRuntimeError,
+    SchedulerConfig, EventBusConfig, EngineConfig,
+};
+pub use self::condition::{
+    Condition, ConditionNode, AtomicCondition, ComparisonOperator, Operator,
+    FactProvider, EvaluationContext, ConditionEvaluator, EvaluationResult, EvaluationError,
+    evaluate_condition, SimpleProvider,
+};
+pub use self::runtime::{TriggerRuntime, TriggerRuntimeConfig as RuntimeConfig};
 
 #[cfg(test)]
 mod tests {

@@ -24,7 +24,9 @@ use runtime::{AgentRuntime, PoolStartup, SessionMode};
 mod scope;
 mod setup_mode;
 mod usage;
+pub mod rbac;
 
+pub use rbac::{Action, AgentRole, RbacPolicy, RbacViolation};
 pub use usage::TurnUsage;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -9581,6 +9583,9 @@ mod build_mcp_servers_tests {
             agent_owner: None,
             no_base_prompt: false,
             base_prompt_content: None,
+            connect_timeout_secs: 10,
+            first_byte_timeout_secs: 30,
+            streaming_chunk_timeout_secs: 15,
         }
     }
 
@@ -10718,6 +10723,9 @@ mod error_outcome_emission_tests {
             agent_owner: None,
             no_base_prompt: false,
             base_prompt_content: None,
+            connect_timeout_secs: 10,
+            first_byte_timeout_secs: 30,
+            streaming_chunk_timeout_secs: 15,
         }
     }
 

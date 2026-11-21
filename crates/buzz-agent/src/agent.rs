@@ -636,6 +636,7 @@ impl RunCtx<'_> {
         let mut reply_nags = 0u32;
         let mut silent_turns = 0u32;
         let mut successful_tool_rounds = 0u32;
+        let mut last_extended_tool_count = 0u32;
         let mut dynamic_extended_budget = 40u32;
         // Per-`run()` reactive context-recovery budget. Per-turn, not
         // per-session: a fresh prompt deserves a fresh chance to recover, and
@@ -654,7 +655,7 @@ impl RunCtx<'_> {
             let max_rounds_ceiling: u32 = std::env::var("BUZZ_MAX_ROUNDS_CEILING")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(1000);
+                .unwrap_or(120);
 
             let mut effective_max_rounds = if self.cfg.max_rounds > 0 {
                 self.cfg.max_rounds
@@ -665,9 +666,11 @@ impl RunCtx<'_> {
             if self.cfg.max_rounds == 0 && round >= effective_max_rounds {
                 let is_truly_stuck = identical_call_failures >= 3 || total_consecutive_tool_failures >= 4;
                 let is_absolute_ceiling = round >= max_rounds_ceiling;
+                let had_recent_tool_progress = successful_tool_rounds > last_extended_tool_count;
 
-                if !is_truly_stuck && !is_absolute_ceiling && successful_tool_rounds > 0 {
-                    // 真係做緊嘢！自動展期 40 輪，不打擾主理人
+                if !is_truly_stuck && !is_absolute_ceiling && had_recent_tool_progress {
+                    // 真係做緊嘢且有新工具調用進展！自動展期 40 輪，不打擾主理人
+                    last_extended_tool_count = successful_tool_rounds;
                     dynamic_extended_budget = dynamic_extended_budget.saturating_add(40);
                     effective_max_rounds = dynamic_extended_budget;
                     tracing::info!(

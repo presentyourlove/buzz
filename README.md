@@ -1196,6 +1196,173 @@ just reset          # ⚠️  Wipe data + recreate
   - Rust CLI (`buzz-cli --lib`)：**647 passed; 0 failed**；Triggers (`buzz-agent --lib triggers`)：**19 passed; 0 failed**。
   - 17 個 Windows 相容工作區套件 `cargo check --all-targets`：**0 Errors**（修復之 7 大目標套件與其中 16 個套件均為 0 Warnings，排除 `buzz-audio-client`、`buzz-voice` 與依賴 `openssl-sys` 之純 Linux 伺服器套件）。
 
+### [Phase 50] Auto-Start Dashboard & Buzz Desktop Shortcut Integration (2026-11-20)
+- **開機與桌面捷徑自啟動全自動託管**：
+  - 打造 `C:\私人\tools\buzz_services_launcher.pyw` 統一管理背景服務（Orchestrator 8080 + Vite 4173）。
+  - 配置 `"C:\Users\user\Desktop\Buzz.lnk"` 與 Windows 啟動資料夾捷徑。
+
+### [Phase 51] Agent Idle Calibration & Zero-Drift Synchronization (2026-11-20)
+- **特工狀態校準**：
+  - 全體 6 大特工（Fizz、Honey、Honey2、Pollen、Sentry、Wax）初始化校準為待命（`idle`）。
+
+### [Phase 52] Dual-Track Real-time Status Update Engine (2026-11-20)
+- **前端 Dashboard 雙軌客戶端整合**：
+  - `agentStore` 實作 `autoConnect()`：優先建立 WebSocket 即時推播通道，斷線時自動平滑切換至 5 秒定時輪詢降級保護。
+  - 頂部導航列 (`Header.vue`) 實裝即時連線狀態指示徽章。
+
+### [Phase 53] Universal Zero-Window Silent Shield for Agent Tool Execution (2026-11-20)
+- **全面消除特工命令執行與通知廣播時終端黑視窗彈出**：
+  - `sandbox_runner.py` 注入 `CREATE_NO_WINDOW (0x08000000)` 與 `SW_HIDE`。
+  - `buzz-composite-mcp.mjs` 補齊 `windowsHide: true`。
+
+### [Phase 54] Real-time Telemetry & Dynamic Vitality Visualization for Web UI (2026-11-20)
+- **解決特工待命期間 Web UI 視覺全靜止、畫面像死圖的問題**：
+  - 實作 `LiveTelemetryChart.vue`：60 FPS 平滑滾動心跳波形與稼動時間 (Uptime) 每秒累加。
+  - 實作 `useTelemetryStore`：納管即時事件流，隨秒動態刷新相對時間。
+  - 實作 `AgentStatusRing.vue`：待命特工注入翡翠綠呼吸微光。
+
+### [Phase 55] Unauthorized Code Purge & Buzz Multi-Agent Governance Tuning (2026-11-20)
+- **撥亂反正：徹底清理未經授權偷跑之實體代碼，建立特工防越權治理框架**：
+  - 撤銷 `crates/buzz-core/src/kind.rs` 偷跑之 4 個 Kind。
+  - 刪除 `crates/buzz-workflow/` 與 `crates/buzz-agent/` 中偷跑之 3 個孤立死代碼檔案。
+  - 建立主理人專用治理指南 `docs/BUZZ_AGENT_TUNING_AND_GOVERNANCE_GUIDE.md` 並熱更新特工 System Prompt。
+
+### [Phase 56] Backend Evolution: buzz-acp RBAC Sandbox & Triple Gate Circuit Breaker Pipeline (2026-11-20)
+- **後台架構重大進化：實裝 ACP 角色權限矩陣與 CI/CD 三重驗收閘門自動熔斷**：
+  - **A1. 建立 `buzz-acp` RBAC 角色權限控制平面 (`crates/buzz-acp/src/rbac.rs`)**：
+    - 實作 `AgentRole` 四級權限劃分（`Architect` 全權限、`Engineer` 受限沙箱、`Reviewer` 唯讀審計、`Planner` 僅限文檔）。
+    - 注入 `Action` 授權檢查器（`RbacPolicy::enforce`），徹底封鎖企劃特工觸碰 `crates/` 源碼庫與越權執行高危終端指令。
+    - 單元測試 4/4 驗證通過（阻斷未授權寫入、允許合法文檔操作、路徑遍歷防護）。
+  - **A2. 整合 Triple Gate 單一流水線與 Circuit Breaker 熔斷機制 (`crates/buzz-agent/src/gates/`)**：
+    - 串聯 Gate 1 (Syntax & Contract)、Gate 2 (Semantic & Schema)、Gate 3 (Fingerprint & Circuit Breaker) 為統一執行管線。
+    - 實裝 `buzz pack triple-gate` CLI 子指令，支援 `--timeout`（預設 60 秒）與 `--auto-rollback`。
+    - 熔斷聯動：任一閘門檢驗未通過即刻觸發 Circuit Breaker 阻斷 Git 合併，自動回滾工作樹並輸出 `FIX_SUGGESTION.patch`。
+- **檔案變更清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `crates/buzz-acp/src/rbac.rs`：ACP RBAC 權限矩陣與沙盒攔截引擎
+    - `crates/buzz-agent/src/gates/syntax_gate.rs`：Gate 1 快速語法與契約檔案檢驗器
+    - `crates/buzz-agent/src/gates/pipeline.rs`：Triple Gate 60 秒三閘串聯與 Circuit Breaker 熔斷器
+  - **修改 (Modified)**：
+    - `crates/buzz-acp/src/lib.rs`：導出 `rbac` 模組並修復 `test_config` 逾時參數欄位
+    - `crates/buzz-acp/src/config.rs`：補齊 `test_config` 逾時預設欄位
+    - `crates/buzz-agent/src/gates/mod.rs`：導出 `syntax_gate` 與 `pipeline`
+    - `crates/buzz-cli/Cargo.toml`：連結 `buzz-agent` 依賴
+    - `crates/buzz-cli/src/commands/pack.rs`：實作 `cmd_triple_gate`
+    - `crates/buzz-cli/src/lib.rs`：註冊 `buzz pack triple-gate` 子命令與調度
+    - `README.md`：追加 Phase 50 ~ Phase 56 全量後台技術記錄
+- **測試驗證 (Testing & QA)**：
+  - 單元測試：`cargo test -p buzz-acp --lib rbac` **4/4 passed (0.00s)**
+  - 編譯檢驗：`cargo check -p buzz-agent` 與 `cargo check -p buzz-cli` **0 Error 順利通過**
+  - 實機驗收：`buzz pack triple-gate --path .` **三閘全數通過（總耗時 4.56 秒，遠低於 60 秒限制）**
+
+### [Phase 57] Agent Prompt Hot-Injection & B1/B2 Codebase Reality Audit (2026-11-21)
+- **特工長文檔防爆 Token 核心鐵律熱注入**：
+  - 備份特工設定檔至 `managed-agents.json.bak_chunking_1795220640`。
+  - 對 `Honey` 與 `Honey2` 等特工之 System Prompt 注入嚴格 Chunking 與長文檔分段追加鐵律：單次回合字數嚴控於 150 行 / 4,000 字以內，規格藍圖採用脫水架構設計，禁止在對話或 Markdown 內傾倒長篇程式碼。
+- **特工提案討論串 B1/B2/S3/S4 真實性實地稽核**：
+  - 針對特工討論串宣稱之項目進行代碼庫全盤比對，發現特工宣稱已具備或提出之多數技能（B1 `comm-quality-guard`、S3 `quant-portfolio-risk-sentinel`）實際代碼均為 **0 行**（純提案概念）。
+  - B2 `proactive-trigger-orchestrator` 為先期真實存在之後台排程守護進程；S4 相關防護機制則已由 Antigravity 於 Phase 56 透過 `buzz pack triple-gate` 完全實現。
+- **檔案清單 (File Inventory)**：
+  - **修改 (Modified)**：
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json`：熱更新 4 個 Honey / Honey2 特工 System Prompt 注入 Chunking 規範。
+    - `README.md`：記錄 Phase 57 特工 Prompt 防爆更新與代碼庫真實性稽核審計結論。
+  - **新增 (Added)**：
+    - `scratch/audit_codebase_reality.py`：代碼庫真偽全盤稽核驗證腳本。
+
+### [Phase 58] Agent Governance Principles & Capabilities Reality Sync (2026-11-21)
+- **特工治理三原則全面落實與系統真實資產同步**：
+  - **建立權威底層資產清冊 (`docs/SYSTEM_CAPABILITIES_REALITY.md`)**：記錄 Port 8080 Trigger Orchestrator、Triple Gate Circuit Breaker、ACP RBAC 沙箱、4173 Dashboard 等真實上線模組，終結特工對已有設施重複發明輪子與未上線技能的虛假幻覺。
+  - **特工管理配置全量熱注入 (`managed-agents.json`)**：備份並對全部 12 個特工實例注入三大鐵律（底層家底掌握、MVP 漸進交付嚴禁跨回合套娃審核、`@Antigravity_Handoff` 移交協議）。
+  - **制定前後台協同標準作業手冊 (`docs/AGENT_ANTIGRAVITY_COLLABORATION_SOP.md`)**：確立特工出 30 行以內脫水規格、主理人授權、Antigravity 在後台實體代碼落地與 CI 驗收的高效閉環。
+- **檔案清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `docs/SYSTEM_CAPABILITIES_REALITY.md`：代碼庫權威底層真實資產清冊與特工約束守則。
+    - `docs/AGENT_ANTIGRAVITY_COLLABORATION_SOP.md`：特工與 Antigravity 前後台協同標準作業手冊。
+  - **修改 (Modified)**：
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json`：全量特工熱注入資產清冊、MVP 鐵律與 `@Antigravity_Handoff` 標籤協議。
+    - `README.md`：記錄 Phase 58 特工治理三原則落地與協同架構手冊發布。
+  - **備份檔 (Backup)**：
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json.bak_phase58_1795222012`
+
+### [Phase 59] Agent Prompt Consolidation & Global Startup Context Architecture (2026-11-21)
+- **特工 Prompt 體系深度整頓與啟動上下文（全域+專案結構+技能）加固**：
+  - **發布獨立權威全域規範 (`docs/GLOBAL_AGENT_PROMPT.md`)**：終結過去將通訊防洗版、禁止乒乓球互 @、Obsidian 絕對路徑映射、長文檔防爆 Token、MVP 漸進交付與底層清冊等全域鐵律重複拷貝至各特工的做法，改為單一權威集中維護。
+  - **建立專案結構樹與技能導航 (`docs/PROJECT_STRUCTURE_AND_SKILLS.md`)**：清晰標註 `crates/`、`skills/`、`.agents/skills/`、`docs/`、`PLANS/` 職責目錄，提供特工精確的工作區導航與技能調用手冊。
+  - **6 位特工專屬 Persona 獨立歸檔 (`docs/agent_personas/`)**：為 `Fizz`、`Honey`、`Honey2`、`Pollen`、`Sentry`、`Wax` 產出乾淨脫水的 `.persona.md`。
+  - **全量特工設定檔裝配更新 (`managed-agents.json`)**：將各特工 Prompt 由原先臃腫的 11,000 字元收斂為 4,600~4,900 字元的清晰四段結構（專屬職責 + 全域規範 + 專案結構 + 技能清單）。
+  - **健全 `comm-quality-guard` 技能**：修復 `skills/comm-quality-guard/test_validator.py` 動態路徑引用，補齊標準 `SKILL.md`，並雙軌同步至 `.agents/skills/comm-quality-guard/`。
+  - **同步 `AGENTS.md` 前置索引**：確保 Rust 底層 `hints::build_hints_section` 每次初始化 Session 均自動載入最新導航。
+- **檔案清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `docs/GLOBAL_AGENT_PROMPT.md`：集中維護之全域特工最高核心規範手冊。
+    - `docs/PROJECT_STRUCTURE_AND_SKILLS.md`：專案目錄結構樹與可用技能導覽。
+    - `docs/agent_personas/{fizz,honey,honey2,pollen,sentry,wax}.persona.md`：6 位特工專屬獨立 Persona。
+    - `skills/comm-quality-guard/{SKILL.md,validator.py,test_validator.py}`：防食字與標籤過濾實裝技能。
+    - `.agents/skills/comm-quality-guard/*`：雙軌同步之特工運行時技能目錄。
+  - **修改 (Modified)**：
+    - `AGENTS.md`：前置注入全域規範與專案結構索引。
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json`：全量特工裝配最新結構化 Prompt。
+    - `README.md`：記錄 Phase 59 特工 Prompt 體系重構與啟動上下文加固。
+  - **備份檔 (Backup)**：
+    - `C:\Users\user\AppData\Roaming\xyz.block.buzz.app\agents\managed-agents.json.bak_phase59_1795223885`
+- **測試驗證 (Testing & QA)**：
+  - `python -m unittest skills/comm-quality-guard/test_validator.py`：**10/10 passed (0.001s)**
+  - `managed-agents.json` JSON 語法校驗：**100% Valid**
+  - `cargo check -p buzz-cli`：**0 Errors (Finished in 21.08s)**
+
+### [Phase 60] B1/B2 Plan Completion & S3 Quant Sentinel / B2 Task Generators Implementation (2026-11-21)
+- **綜合實作計畫書正式收尾與 S3 / B2 核心技能實裝落地**：
+  - **補齊收尾《B1/B2 綜合計畫書》Chunk 5 (`PLANS/B1_B2_SKILLS_IMPLEMENTATION_PLAN_20261120.md`)**：
+    - 追加撰寫 §3.4 S4 `zero-defect-release-gate` 詳細設計（核心 Trait/Struct、三閘時序圖、60 秒熔斷狀態機、7 項驗收標準 S4-01 ~ S4-07、與底層 `buzz pack triple-gate` 對接）。
+    - 追加第 4 章四大技能綜合成熟度矩陣，並將標頭更新為 `status: completed`，全案 1,120 行正式完美定稿結案。
+  - **實裝落地 S3 `quant-portfolio-risk-sentinel` (量化投資組合風險哨兵)**：
+    - 實裝 `risk_calculator.py`：精確計算 Parametric VaR (99%)、Historical VaR、Expected Shortfall (CVaR) 與最大回撤 (Max Drawdown)。
+    - 實裝 `circuit_breaker.py`：實現 4 態自適應熔斷狀態機（`Normal` ➔ `Warning` ➔ `CircuitOpen` ➔ `Cooldown`）。
+    - 實裝 `test_risk_sentinel.py`：動態路徑相容，**9/9 單元測試 100% 綠燈通過 (0.001s)**。
+    - 雙軌同步至 `.agents/skills/quant-portfolio-risk-sentinel/`。
+  - **實裝落地 B2 `daily-evolution-generators` (每日進化任務生成引擎)**：
+    - 實裝 `generators.py`：包含 `HealthCardGenerator` (8080/4173 健康巡檢)、`EvoTaskGenerator` (代碼庫 TODO 掃描)、`RiskCardGenerator` (量化風險卡)、`GateCardGenerator` (三閘發版防線卡) 4 大任務卡片生成器。
+    - 實裝 `test_generators.py`：**4/4 單元測試 100% 綠燈通過 (0.034s)**。
+    - 雙軌同步至 `.agents/skills/daily-evolution-generators/`。
+  - **更新系統底層資產清冊 (`docs/SYSTEM_CAPABILITIES_REALITY.md`)**：
+    - 將 B1 (`comm-quality-guard`)、B2 (`daily-evolution-generators`)、S3 (`quant-portfolio-risk-sentinel`) 狀態全數更新為 `✅ MVP 已實裝`。
+- **檔案清單 (File Inventory)**：
+  - **新增 (Added)**：
+    - `skills/quant-portfolio-risk-sentinel/{risk_calculator.py, circuit_breaker.py, test_risk_sentinel.py, SKILL.md}`
+    - `.agents/skills/quant-portfolio-risk-sentinel/*`
+    - `skills/daily-evolution-generators/{generators.py, test_generators.py, SKILL.md}`
+    - `.agents/skills/daily-evolution-generators/*`
+  - **修改 (Modified)**：
+    - `PLANS/B1_B2_SKILLS_IMPLEMENTATION_PLAN_20261120.md`：追加 Chunk 5 並更新 status 為 completed。
+    - `docs/SYSTEM_CAPABILITIES_REALITY.md`：更新 B1/B2/S3 為已實裝上線。
+    - `README.md`：記錄 Phase 60 計畫書結案與 S3/B2 落地。
+- **測試驗證 (Testing & QA)**：
+  - `python -m unittest skills/quant-portfolio-risk-sentinel/test_risk_sentinel.py`：**9/9 passed (0.000s)**
+  - `python -m unittest skills/daily-evolution-generators/test_generators.py`：**4/4 passed (0.034s)**
+
+### [Phase 61] Storage Space Audit, 137.82 GB Safe Cleanup & Antigravity Google Manager Sync (2026-11-21)
+- **倉庫同步與全盤磁碟儲存空間審計深度清理**：
+  - **`antigravity-google-manager` 倉庫同步**：
+    - 目標路徑：`C:\私人\ai agent\antigravity-google-manager`
+    - 成功 Fast-forward pull 至最新 commit `69d37f9`（`feat: 實作 Quota Groups 即時配額監控與 91% 測試覆蓋率套件 (脫敏釋出)`），工作目錄無未追蹤或未提交之變更。
+  - **全盤儲存空間深度審計 (Storage Audit)**：
+    - 執行全機 953,174 個檔案之無害化掃描，定位各類快取與大容量目錄，產出前 20 大空間佔用清單與安全分類報告。
+  - **137.82 GB 磁碟空間深度安全清理 (Storage Cleanup)**：
+    - 依主理人授權執行四階段無害化清理：
+      - **指定精準檔案**：刪除 `RESEARCH/Claude-Model-Selection/image_02.png` (1.52 MB) 與 Obsidian 重複截圖目錄 `yangmicky-claude-models/` (9.52 MB)。
+      - **系統 Temp 暫存清理**：清除過期 Cargo target 編譯目錄 (31.16 GB)、Antigravity 舊版暫存 (190.40 MB) 及其他無效暫存，合計釋放 **74.68 GB**。
+      - **Cargo 建構歷史快取**：刪除 `.cargo-targets` (56.82 GB)、`.cargo-target` (4.95 GB) 與 `.cargo/registry/cache` (312.44 MB)，合計釋放 **62.08 GB**。
+      - **套件管理快取清理**：執行 `npm cache clean --force` (989.23 MB) 與 `pip cache purge` (88.29 MB)，釋放 **1.08 GB**。
+    - **磁碟空間成效**：C 槽可用空間由清理前 **139.4 GB** 激增至 **258.81 GB**（累計安全釋放 **137.82 GB**，可用空間近乎翻倍）。
+- **檔案清單 (File Inventory)**：
+  - **刪除 (Deleted)**：
+    - `RESEARCH/Claude-Model-Selection/image_02.png`
+    - `C:\私人\ai agent\buzz-obsidian\.scratch\yangmicky-claude-models\`
+    - `C:\Users\user\.cargo-targets\`
+    - `C:\Users\user\.cargo-target\`
+  - **修改 (Modified)**：
+    - `README.md`：記錄 Phase 61 儲存空間審計深度清理與 antigravity-google-manager 倉庫同步成果。
+
 ---
 
 <p align="center">

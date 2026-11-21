@@ -419,6 +419,31 @@ impl EventQueue {
         }
     }
 
+    /// Heartbeat deadline renewal for long-running turns (e.g. Pollen multi-hour refactorings).
+    ///
+    /// Extends the active deadline by `heartbeat_extension_secs` from now, allowing the agent
+    /// to run without interruption as long as periodic heartbeats arrive.
+    #[allow(dead_code)]
+    pub fn renew_heartbeat_deadline<K: IntoScope>(&mut self, scope: K, heartbeat_extension_secs: u64) -> bool {
+        let scope = scope.into_scope();
+        if let Some(current) = self.in_flight_deadlines.get_mut(&scope) {
+            let extended = Instant::now() + Duration::from_secs(heartbeat_extension_secs + IN_FLIGHT_DEADLINE_BUFFER_SECS);
+            if extended > *current {
+                tracing::info!(
+                    channel_id = %scope.channel_id(),
+                    scope = %scope.telemetry_label(),
+                    "renewing in-flight deadline via heartbeat by {heartbeat_extension_secs}s"
+                );
+                *current = extended;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
     /// Push an event into the queue for its channel.
     ///
     /// In [`DedupMode::Drop`], events for any currently in-flight channel are

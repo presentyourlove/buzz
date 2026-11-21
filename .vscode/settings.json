@@ -1,5 +1,7 @@
 {
   "rust-analyzer.cargo.targetDir": true,
+  "npm.autoDetect": "off",
+  "npm.fetchOnlinePackageInfo": false,
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer",
     "editor.formatOnSave": true

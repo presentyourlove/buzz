@@ -2561,6 +2561,22 @@ pub enum PackCmd {
         #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
         args: Vec<String>,
     },
+    /// Run unified Triple Gate (Syntax, Semantic, Fingerprint) CI/CD pipeline
+    #[command(name = "triple-gate")]
+    TripleGate {
+        /// Target repository root directory
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// Maximum duration in seconds for verification (default: 60)
+        #[arg(long, default_value_t = 60)]
+        timeout: u64,
+        /// Automatically rollback worktree on validation failure (git checkout .)
+        #[arg(long)]
+        auto_rollback: bool,
+        /// Expected binary SHA256 build fingerprint (optional)
+        #[arg(long)]
+        expected_fingerprint: Option<String>,
+    },
 }
 
 /// Subcommands for `buzz reminders`.
@@ -2785,6 +2801,20 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             PackCmd::Validate { path } => commands::pack::cmd_validate(path),
             PackCmd::Inspect { path } => commands::pack::cmd_inspect(path),
             PackCmd::SyntaxGate { args } => commands::pack::cmd_syntax_gate(args),
+            PackCmd::TripleGate {
+                path,
+                timeout,
+                auto_rollback,
+                expected_fingerprint,
+            } => {
+                commands::pack::cmd_triple_gate(
+                    path,
+                    *timeout,
+                    *auto_rollback,
+                    expected_fingerprint.as_deref(),
+                )
+                .await
+            }
         };
     }
 
@@ -3310,7 +3340,7 @@ mod tests {
         );
         assert_eq!(names(&cmd, "media"), vec!["get"]);
         assert_eq!(names(&cmd, "upload"), vec!["file"]);
-        assert_eq!(names(&cmd, "pack"), vec!["inspect", "validate"]);
+        assert_eq!(names(&cmd, "pack"), vec!["inspect", "syntax-gate", "validate"]);
         assert_eq!(
             names(&cmd, "moderation"),
             vec![
@@ -3340,7 +3370,7 @@ mod tests {
             ("issues", 6),
             ("media", 1),
             ("messages", 9),
-            ("pack", 2),
+            ("pack", 3),
             ("patches", 4),
             ("pr", 5),
             ("projects", 8),

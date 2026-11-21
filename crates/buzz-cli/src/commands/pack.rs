@@ -206,6 +206,57 @@ pub fn cmd_syntax_gate(args: &[String]) -> Result<(), CliError> {
     Ok(())
 }
 
+/// Run `buzz pack triple-gate` — Triple Gate (Syntax, Semantic, Fingerprint) 統一驗收與 Circuit Breaker 熔斷
+///
+/// 依據 DESIGN_SPEC_B_TRIPLE_GATE.md 與 Phase 56 後台架構進化規格實作。
+/// 在 60 秒內完成三大閘門整合驗證，任一 Gate 失敗即刻觸發 Circuit Breaker 阻斷並可自動回滾工作樹。
+pub async fn cmd_triple_gate(
+    path: &str,
+    timeout_secs: u64,
+    auto_rollback: bool,
+    expected_fingerprint: Option<&str>,
+) -> Result<(), CliError> {
+    println!("🛡️ 啟動 Triple Gate 三重驗收閘門管線...");
+    println!("   目標路徑: {}", path);
+    println!("   超時限制: {}s | 自動回滾: {}", timeout_secs, auto_rollback);
+
+    let config = buzz_agent::gates::TripleGateConfig {
+        repo_root: std::path::PathBuf::from(path),
+        timeout_seconds: timeout_secs,
+        auto_rollback,
+        expected_fingerprint: expected_fingerprint.map(ToString::to_string),
+    };
+
+    let result = buzz_agent::gates::TripleGatePipeline::run(config).await;
+
+    println!("\n📋 閘門檢驗報告 (總耗時: {}ms):", result.total_duration_ms);
+    for step in &result.steps {
+        let mark = if step.passed { "✅ PASS" } else { "❌ FAIL" };
+        println!("   [{}] {} ({}ms)", mark, step.gate_name, step.duration_ms);
+        for detail in &step.details {
+            println!("       • {}", detail);
+        }
+    }
+
+    if result.passed {
+        println!("\n✨ 【TRIPLE GATE PASSED】三大驗收閘門全數通過，允許合併 (Merge Authorized)！");
+        Ok(())
+    } else {
+        eprintln!("\n🚨 【TRIPLE GATE REJECTED】驗收未通過！Circuit Breaker 熔斷器已觸發！");
+        if result.rollback_performed {
+            eprintln!("⚠️  工作樹污染已自動回滾 (git checkout .) 避免污染主線！");
+        }
+        if let Some(fix) = result.fix_suggestion {
+            eprintln!("\n🛠️  修復建議：\n{}", fix);
+            // 嘗試將修復建議寫入 WORK_LOGS
+            let log_dir = std::path::Path::new(".buzz/WORK_LOGS");
+            let _ = std::fs::create_dir_all(log_dir);
+            let _ = std::fs::write(log_dir.join("FIX_SUGGESTION.patch"), fix);
+        }
+        Err(CliError::Usage("Triple Gate validation failed. Git merge aborted.".to_string()))
+    }
+}
+
 fn is_valid_event_id(s: &str) -> bool {
     s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
@@ -222,4 +273,42 @@ fn is_valid_pubkey(s: &str) -> bool {
 
 fn is_valid_uuid(s: &str) -> bool {
     uuid::Uuid::parse_str(s).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_valid_event_id() {
+        assert!(is_valid_event_id("a".repeat(64).as_str()));
+        assert!(is_valid_event_id("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+        assert!(!is_valid_event_id("short"));
+        assert!(!is_valid_event_id("g".repeat(64).as_str())); // not hex
+        assert!(!is_valid_event_id("")); // empty
+        assert!(!is_valid_event_id("a".repeat(63).as_str())); // too short
+        assert!(!is_valid_event_id("a".repeat(65).as_str())); // too long
+    }
+
+    #[test]
+    fn test_is_valid_pubkey() {
+        // 64-char hex
+        assert!(is_valid_pubkey("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+        assert!(!is_valid_pubkey("short"));
+        assert!(!is_valid_pubkey("g".repeat(64).as_str()));
+        
+        // npub1... bech32 (known valid npub from test fixtures)
+        assert!(is_valid_pubkey("npub1g53mukx3qqv5q4z08e5kpnf0qgxw3u5d8nw7x3j0k8z5v0q5q5q5q5q5q"));
+        assert!(!is_valid_pubkey("npub1short"));
+        assert!(!is_valid_pubkey("npub0invalid")); // wrong prefix
+    }
+
+    #[test]
+    fn test_is_valid_uuid() {
+        assert!(is_valid_uuid("5ca019f6-1a27-592a-b015-4baf0eb33572"));
+        assert!(is_valid_uuid("00000000-0000-0000-0000-000000000000"));
+        assert!(!is_valid_uuid("invalid-uuid"));
+        assert!(!is_valid_uuid(""));
+        assert!(!is_valid_uuid("5ca019f6-1a27-592a-b015")); // incomplete
+    }
 }

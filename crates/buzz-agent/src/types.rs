@@ -1,9 +1,9 @@
+use blake3;
+use dashmap::DashMap;
+use nostr::event::tag::Error as TagError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::sync::Arc;
-use dashmap::DashMap;
-use blake3;
-use nostr::event::tag::Error as TagError;
 use tokio_tungstenite::tungstenite::Error as WsError;
 
 /// Byte-equivalent charged to the handoff/context-pressure gate for a single
@@ -126,7 +126,7 @@ impl HistoryItem {
 }
 
 /// HistoryItem 尺寸快取
-/// 
+///
 /// 鍵：HistoryItem 內容的 blake3 雜湊 (32 bytes)
 /// 值：(estimated_bytes, context_pressure_bytes)
 /// TTL：配置化，預設 5 分鐘
@@ -150,8 +150,14 @@ impl HistoryItemCache {
     fn hash_item(item: &HistoryItem) -> [u8; 32] {
         let mut hasher = blake3::Hasher::new();
         match item {
-            HistoryItem::User(s) => { hasher.update(s.as_bytes()); }
-            HistoryItem::Assistant { text, tool_calls, reasoning_details } => {
+            HistoryItem::User(s) => {
+                hasher.update(s.as_bytes());
+            }
+            HistoryItem::Assistant {
+                text,
+                tool_calls,
+                reasoning_details,
+            } => {
                 hasher.update(text.as_bytes());
                 for tc in tool_calls {
                     hasher.update(tc.provider_id.as_bytes());
@@ -171,7 +177,9 @@ impl HistoryItemCache {
                 hasher.update(r.provider_id.as_bytes());
                 for c in &r.content {
                     match c {
-                        ToolResultContent::Text(t) => { hasher.update(t.as_bytes()); }
+                        ToolResultContent::Text(t) => {
+                            hasher.update(t.as_bytes());
+                        }
                         ToolResultContent::Image { data, mime_type } => {
                             hasher.update(data.as_bytes());
                             hasher.update(mime_type.as_bytes());
@@ -248,13 +256,11 @@ impl HistoryItemCache {
         // 計算並存入
         let est = item.estimated_bytes();
         let pressure = item.context_pressure_bytes();
-        
+
         // LRU 淘汰：超過上限時移除最舊 20%
         if self.inner.len() >= self.max_entries {
             let to_remove = (self.max_entries / 5).max(1);
-            let mut entries: Vec<_> = self.inner.iter()
-                .map(|e| (*e.key(), *e.value()))
-                .collect();
+            let mut entries: Vec<_> = self.inner.iter().map(|e| (*e.key(), *e.value())).collect();
             entries.sort_by_key(|(_, (_, _, t))| *t);
             for (k, _) in entries.into_iter().take(to_remove) {
                 self.inner.remove(&k);
@@ -268,7 +274,8 @@ impl HistoryItemCache {
     /// 清理過期條目 (可定期調用)
     pub fn cleanup_expired(&self) {
         let now = std::time::Instant::now();
-        self.inner.retain(|_, (_, _, cached_at)| now.duration_since(*cached_at) < self.ttl);
+        self.inner
+            .retain(|_, (_, _, cached_at)| now.duration_since(*cached_at) < self.ttl);
     }
 }
 
@@ -738,7 +745,11 @@ pub enum AgentError {
     /// replayed history and give the model a recoverable tool error.
     UnsupportedImageInput(String),
     Mcp(String),
-    EventBusNoSubscribers { event_type: String },
+    EventBusNoSubscribers {
+        event_type: String,
+    },
+    WalIo(String),
+    RateLimit(String),
     Cancelled,
     Internal(String),
     Other(String),
@@ -754,7 +765,11 @@ impl std::fmt::Display for AgentError {
             Self::LlmContextExceeded(s) => write!(f, "llm context exceeded: {s}"),
             Self::UnsupportedImageInput(s) => write!(f, "llm image input unsupported: {s}"),
             Self::Mcp(s) => write!(f, "mcp: {s}"),
-            Self::EventBusNoSubscribers { event_type } => write!(f, "event bus: no subscribers for '{event_type}'"),
+            Self::EventBusNoSubscribers { event_type } => {
+                write!(f, "event bus: no subscribers for '{event_type}'")
+            }
+            Self::WalIo(s) => write!(f, "wal io: {s}"),
+            Self::RateLimit(s) => write!(f, "rate limit: {s}"),
             Self::Cancelled => write!(f, "cancelled"),
             Self::Internal(s) => write!(f, "internal: {s}"),
             Self::Other(s) => write!(f, "other: {s}"),
@@ -890,35 +905,65 @@ impl AgentProfile {
     pub fn to_tags(&self) -> nostr::Tags {
         let mut tags = Vec::new();
         if let Some(v) = &self.name {
-            tags.push(nostr::Tag::custom(nostr::TagKind::custom("name"), vec![v.clone()]));
+            tags.push(nostr::Tag::custom(
+                nostr::TagKind::custom("name"),
+                vec![v.clone()],
+            ));
         }
         if let Some(v) = &self.avatar_url {
-            tags.push(nostr::Tag::custom(nostr::TagKind::custom("avatar_url"), vec![v.clone()]));
+            tags.push(nostr::Tag::custom(
+                nostr::TagKind::custom("avatar_url"),
+                vec![v.clone()],
+            ));
         }
         if let Some(v) = &self.signature_tag {
-            tags.push(nostr::Tag::custom(nostr::TagKind::custom("signature_tag"), vec![v.clone()]));
+            tags.push(nostr::Tag::custom(
+                nostr::TagKind::custom("signature_tag"),
+                vec![v.clone()],
+            ));
         }
         if let Some(v) = &self.business_card {
-            tags.push(nostr::Tag::custom(nostr::TagKind::custom("business_card"), vec![v.clone()]));
+            tags.push(nostr::Tag::custom(
+                nostr::TagKind::custom("business_card"),
+                vec![v.clone()],
+            ));
         }
         if let Some(v) = &self.memory_namespace {
-            tags.push(nostr::Tag::custom(nostr::TagKind::custom("memory_namespace"), vec![v.clone()]));
+            tags.push(nostr::Tag::custom(
+                nostr::TagKind::custom("memory_namespace"),
+                vec![v.clone()],
+            ));
         }
         if let Some(v) = self.always_on_enabled {
-            tags.push(nostr::Tag::custom(nostr::TagKind::custom("always_on"), vec![v.to_string()]));
+            tags.push(nostr::Tag::custom(
+                nostr::TagKind::custom("always_on"),
+                vec![v.to_string()],
+            ));
         }
         if let Some(v) = self.idle_timeout_secs {
-            tags.push(nostr::Tag::custom(nostr::TagKind::custom("idle_timeout_secs"), vec![v.to_string()]));
+            tags.push(nostr::Tag::custom(
+                nostr::TagKind::custom("idle_timeout_secs"),
+                vec![v.to_string()],
+            ));
         }
         if let Some(v) = self.max_concurrent_tasks {
-            tags.push(nostr::Tag::custom(nostr::TagKind::custom("max_concurrent_tasks"), vec![v.to_string()]));
+            tags.push(nostr::Tag::custom(
+                nostr::TagKind::custom("max_concurrent_tasks"),
+                vec![v.to_string()],
+            ));
         }
         if let Some(v) = self.max_memory_mb {
-            tags.push(nostr::Tag::custom(nostr::TagKind::custom("max_memory_mb"), vec![v.to_string()]));
+            tags.push(nostr::Tag::custom(
+                nostr::TagKind::custom("max_memory_mb"),
+                vec![v.to_string()],
+            ));
         }
         if let Some(v) = &self.monitored_channels {
             if !v.is_empty() {
-                tags.push(nostr::Tag::custom(nostr::TagKind::custom("monitored_channels"), vec![v.join(",")]));
+                tags.push(nostr::Tag::custom(
+                    nostr::TagKind::custom("monitored_channels"),
+                    vec![v.join(",")],
+                ));
             }
         }
         nostr::Tags::from_list(tags)
@@ -980,16 +1025,29 @@ impl AgentConfig {
     }
 
     pub fn merge(&mut self, other: Self) {
-        if other.name.is_some() { self.name = other.name; }
-        if other.system_prompt.is_some() { self.system_prompt = other.system_prompt; }
-        if other.avatar_url.is_some() { self.avatar_url = other.avatar_url; }
-        if other.signature_tag.is_some() { self.signature_tag = other.signature_tag; }
-        if other.business_card.is_some() { self.business_card = other.business_card; }
-        if other.memory_namespace.is_some() { self.memory_namespace = other.memory_namespace; }
+        if other.name.is_some() {
+            self.name = other.name;
+        }
+        if other.system_prompt.is_some() {
+            self.system_prompt = other.system_prompt;
+        }
+        if other.avatar_url.is_some() {
+            self.avatar_url = other.avatar_url;
+        }
+        if other.signature_tag.is_some() {
+            self.signature_tag = other.signature_tag;
+        }
+        if other.business_card.is_some() {
+            self.business_card = other.business_card;
+        }
+        if other.memory_namespace.is_some() {
+            self.memory_namespace = other.memory_namespace;
+        }
         if other.always_on.enabled
             || other.always_on.idle_timeout_secs != 300
             || !other.always_on.monitored_channels.is_empty()
-            || (!other.always_on.memory_namespace.is_empty() && other.always_on.memory_namespace != "default")
+            || (!other.always_on.memory_namespace.is_empty()
+                && other.always_on.memory_namespace != "default")
         {
             self.always_on = other.always_on;
         }

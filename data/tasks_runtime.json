@@ -1,0 +1,93 @@
+[
+  {
+    "id": "DASH-001",
+    "title": "前端儀表板架構設計與基礎建設",
+    "description": "Vue 3 + TypeScript + Vite + Tailwind CSS 基礎架構搭建與路由設置",
+    "status": "done",
+    "priority": "high",
+    "assignedAgent": "honey2",
+    "assignedAgentName": "Honey2",
+    "progress": 100,
+    "tags": ["dashboard", "architecture", "frontend"],
+    "createdAt": "2026-11-19T00:00:00Z",
+    "updatedAt": "2026-11-20T12:00:00Z"
+  },
+  {
+    "id": "DASH-002",
+    "title": "組織架構拓撲圖與特工即時狀態",
+    "description": "Fizz、Honey、Pollen、Sentry 等六大特工拓撲節點，狀態環即時反映 idle/working/blocked",
+    "status": "in_progress",
+    "priority": "high",
+    "assignedAgent": "honey2",
+    "assignedAgentName": "Honey2",
+    "progress": 85,
+    "tags": ["dashboard", "org-chart", "d3"],
+    "createdAt": "2026-11-19T00:00:00Z",
+    "updatedAt": "2026-11-20T14:00:00Z"
+  },
+  {
+    "id": "DASH-003",
+    "title": "任務看板拖曳與即時進度監控",
+    "description": "Kanban 看板五大泳道與工單拖曳、狀態更新",
+    "status": "in_progress",
+    "priority": "medium",
+    "assignedAgent": "honey2",
+    "assignedAgentName": "Honey2",
+    "progress": 70,
+    "tags": ["dashboard", "kanban", "dnd"],
+    "createdAt": "2026-11-19T00:00:00Z",
+    "updatedAt": "2026-11-20T14:00:00Z"
+  },
+  {
+    "id": "GATE-001",
+    "title": "Triple Gate: Diff Budget Gate 代碼預算門禁",
+    "description": "單一 PR 變更限制在 500 行內，避免代碼失控",
+    "status": "done",
+    "priority": "critical",
+    "assignedAgent": "sentry",
+    "assignedAgentName": "Sentry",
+    "progress": 100,
+    "tags": ["gates", "security", "qa"],
+    "createdAt": "2026-11-18T00:00:00Z",
+    "updatedAt": "2026-11-19T00:00:00Z"
+  },
+  {
+    "id": "GATE-002",
+    "title": "Triple Gate: Semantic Review Gate 語意審查門禁",
+    "description": "AST 分析與資安掃描，阻絕硬編碼金鑰與未授權命令",
+    "status": "done",
+    "priority": "critical",
+    "assignedAgent": "sentry",
+    "assignedAgentName": "Sentry",
+    "progress": 100,
+    "tags": ["gates", "security", "ast"],
+    "createdAt": "2026-11-18T00:00:00Z",
+    "updatedAt": "2026-11-19T00:00:00Z"
+  },
+  {
+    "id": "GATE-003",
+    "title": "Triple Gate: Fingerprint Gate 指紋比對與熔斷門禁",
+    "description": "SHA-256 構建指紋與連續 3 次失敗熔斷保護",
+    "status": "done",
+    "priority": "critical",
+    "assignedAgent": "sentry",
+    "assignedAgentName": "Sentry",
+    "progress": 100,
+    "tags": ["gates", "fingerprint", "circuit-breaker"],
+    "createdAt": "2026-11-19T00:00:00Z",
+    "updatedAt": "2026-11-20T00:00:00Z"
+  },
+  {
+    "id": "SPRINT-3-PLAN",
+    "title": "Sprint 3: 投資部三大新特工 (Nectar, Comb, Royal) 擴充籌備",
+    "description": "籌組三位特工並開闢專屬 #investment-war-room 作戰頻道",
+    "status": "todo",
+    "priority": "high",
+    "assignedAgent": "fizz",
+    "assignedAgentName": "Fizz",
+    "progress": 10,
+    "tags": ["sprint3", "investment", "war-room"],
+    "createdAt": "2026-11-20T00:00:00Z",
+    "updatedAt": "2026-11-20T12:00:00Z"
+  }
+]

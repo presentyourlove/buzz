@@ -1,0 +1,24 @@
+[package]
+name = "buzz-cron"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cron expression parsing and scheduling for Buzz agents"
+keywords = ["cron", "schedule", "buzz"]
+categories = ["date-and-time"]
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+cron = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread", "macros", "time"] }
+serde_json = { workspace = true }

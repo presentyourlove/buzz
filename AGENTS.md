@@ -1,5 +1,11 @@
 # AGENTS.md — AI Agent Contributor Guide
 
+> **【全域特工啟動核心索引 (Phase 59)】**：
+> 1. 全域規範與底層家底清冊：請參閱 `docs/GLOBAL_AGENT_PROMPT.md`
+> 2. 專案結構與可用技能導覽：請參閱 `docs/PROJECT_STRUCTURE_AND_SKILLS.md`
+> 3. 特工專屬 Persona 定義：請參閱 `docs/agent_personas/`
+> 4. 通訊發言鐵律：全體特工由 @Fizz 代表發言；嚴禁對話乒乓球（回覆「收到」嚴禁帶 @ 標籤）；發訊必須使用反引號包裹路徑防止食字。
+
 This guide is for AI agents contributing to the Buzz codebase. It covers
 agent-specific context and conventions. For general contributor info (setup,
 code style, PR process, architecture), see [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -2,8 +2,9 @@
 //!
 //! 參考 skills/agent-skill/src/task_store.rs 的持久化模式
 
+use crate::triggers::condition::Condition;
 use crate::triggers::types::{
-    Action, Condition, DeduplicationConfig, Trigger, TriggerType,
+    Action, DeduplicationConfig, Trigger, TriggerType,
 };
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};

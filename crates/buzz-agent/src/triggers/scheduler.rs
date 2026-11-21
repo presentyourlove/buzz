@@ -4,8 +4,8 @@
 
 use crate::triggers::types::{NextFireTime, Trigger, TriggerType};
 use anyhow::Result;
+use buzz_cron::{BuzzSchedule, CronScheduleConfig, TimezoneConfig};
 use chrono::{DateTime, Duration, TimeZone, Timelike, Utc};
-use cron::Schedule;
 use rand::rng;
 use rand::rngs::ThreadRng;
 use rand::Rng;
@@ -15,8 +15,10 @@ use std::time::Duration as StdDuration;
 use tokio::time::{interval, Interval};
 use uuid::Uuid;
 
+use serde::{Deserialize, Serialize};
+
 /// 排程器配置
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SchedulerConfig {
     /// 檢查間隔（秒）
     pub check_interval_secs: u64,
@@ -69,6 +71,7 @@ impl Ord for ScheduledItem {
 }
 
 /// 排程器
+#[derive(Clone)]
 pub struct Scheduler {
     config: SchedulerConfig,
     heap: Arc<Mutex<BinaryHeap<ScheduledItem>>>,
@@ -151,11 +154,14 @@ impl Scheduler {
     ) -> Result<DateTime<Utc>> {
         let now = Utc::now();
         let mut next = if let Some(cron_expr) = cron {
-            // Cron 表達式
-            let schedule: Schedule = cron_expr.parse()?;
+            // Cron 表達式 (透過 buzz_cron 支援 5/6 欄位與時區)
+            let schedule = BuzzSchedule::from_config(CronScheduleConfig {
+                expression: cron_expr.clone(),
+                timezone: Some(TimezoneConfig::utc()),
+                with_seconds: false,
+            })?;
             schedule
-                .after(&now)
-                .next()
+                .next_after_utc(now)
                 .ok_or_else(|| anyhow::anyhow!("No next cron time"))?
         } else if let Some(secs) = interval_secs {
             // 固定間隔
@@ -313,9 +319,13 @@ impl Scheduler {
 
 /// 解析 cron 表達式並獲取未來 N 次觸發時間（用於測試/預覽）
 pub fn preview_cron(cron_expr: &str, count: usize) -> Result<Vec<DateTime<Utc>>> {
-    let schedule: Schedule = cron_expr.parse()?;
+    let schedule = BuzzSchedule::from_config(CronScheduleConfig {
+        expression: cron_expr.to_string(),
+        timezone: Some(TimezoneConfig::utc()),
+        with_seconds: false,
+    })?;
     let now = Utc::now();
-    Ok(schedule.after(&now).take(count).collect())
+    Ok(schedule.upcoming_after_utc(now).take(count).collect())
 }
 
 /// 解析人類可讀的間隔字串（如 "5m", "1h", "30s"）

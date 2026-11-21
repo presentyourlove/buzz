@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
-use crate::cron::CronSchedule;
+use buzz_cron::{BuzzSchedule, CronScheduleConfig, TimezoneConfig};
 use crate::event_bus::{Event, EventBus, BoxedEvent};
 use crate::types::AgentError;
 
@@ -65,13 +65,20 @@ fn default_jitter_seconds() -> u64 {
 impl TriggerSchedule {
     /// Compute the next fire time after the given time
     pub fn next_after(&self, after: SystemTime) -> Result<SystemTime, AgentError> {
+        let after_dt: DateTime<Utc> = after.into();
         match self {
             TriggerSchedule::Cron { expression } => {
-                let mut cron = CronSchedule::new(expression.clone());
-                cron.next_after(after)
+                let schedule = BuzzSchedule::from_config(CronScheduleConfig {
+                    expression: expression.clone(),
+                    timezone: Some(TimezoneConfig::utc()),
+                    with_seconds: false,
+                }).map_err(|e| AgentError::Other(format!("Invalid cron expression: {}", e)))?;
+                let next = schedule
+                    .next_after_utc(after_dt)
+                    .ok_or_else(|| AgentError::Other("No next cron time".to_string()))?;
+                Ok(next.into())
             }
             TriggerSchedule::Interval { seconds, jitter_seconds } => {
-                let after_dt: DateTime<Utc> = after.into();
                 let base_next = after_dt + chrono::Duration::seconds(*seconds as i64);
                 
                 if *jitter_seconds > 0 {
@@ -412,9 +419,12 @@ impl Scheduler {
         event_factory: Arc<dyn Fn() -> BoxedEvent + Send + Sync>,
     ) -> Result<TriggerId, AgentError> {
         let schedule = TriggerSchedule::Cron { expression: cron_expr.clone() };
-        // Validate the cron expression by creating a CronSchedule
-        let mut cron = CronSchedule::new(cron_expr.clone());
-        cron.get_schedule()?; // This validates the expression
+        // Validate the cron expression by creating a BuzzSchedule
+        let _ = BuzzSchedule::from_config(CronScheduleConfig {
+            expression: cron_expr.clone(),
+            timezone: Some(TimezoneConfig::utc()),
+            with_seconds: false,
+        }).map_err(|e| AgentError::Other(format!("Invalid cron expression: {}", e)))?;
         let next_fire = schedule.next_after(SystemTime::now())?;
         let id = TriggerId::new();
 

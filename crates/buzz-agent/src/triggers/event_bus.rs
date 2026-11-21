@@ -2,12 +2,22 @@
 //!
 //! 參考 skills/agent-skill/src/task_store.rs 的並發模式
 
-use crate::triggers::types::{BusEvent, EventSource};
+use crate::triggers::types::{BusEvent, EventSource, TriggerType};
 use anyhow::Result;
 use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError, TrySendError};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
+
+/// 觸發器事件（用於手動觸發或執行結果通知）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggerEvent {
+    pub trigger_id: Uuid,
+    pub trigger_name: String,
+    pub trigger_kind: TriggerType,
+    pub payload: serde_json::Value,
+    pub timestamp: i64,
+}
 
 /// 訂閱者 ID
 pub type SubscriberId = Uuid;
@@ -19,8 +29,10 @@ pub trait EventHandler: Send + Sync {
     fn name(&self) -> &str;
 }
 
+use serde::{Deserialize, Serialize};
+
 /// 事件總線配置
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventBusConfig {
     /// 事件緩衝區大小
     pub buffer_size: usize,
@@ -33,7 +45,7 @@ pub struct EventBusConfig {
 }
 
 /// 背壓策略
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BackpressureStrategy {
     /// 丟棄最舊事件
     DropOldest,
@@ -57,6 +69,7 @@ impl Default for EventBusConfig {
 }
 
 /// 事件總線
+#[derive(Clone)]
 pub struct EventBus {
     sender: Sender<BusEvent>,
     receiver: Receiver<BusEvent>,

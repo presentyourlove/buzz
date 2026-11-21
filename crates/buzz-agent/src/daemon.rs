@@ -4,8 +4,21 @@ use std::time::Duration;
 use crate::config::Config;
 use crate::health_guardian::phase_b_run_daemon;
 use crate::types::{AgentError, AgentKeys, AlwaysOnConfig};
+use async_trait::async_trait;
 use tokio::sync::{watch, mpsc, Semaphore};
 use tokio::time::interval;
+
+/// Background service trait for long-running services in the daemon
+#[async_trait]
+pub trait BackgroundService: Send + Sync {
+    type Error: std::error::Error + Send + Sync + 'static;
+    type Health: Send + Sync + 'static;
+
+    async fn start(&mut self) -> Result<(), Self::Error>;
+    async fn stop(&mut self) -> Result<(), Self::Error>;
+    fn health_check(&self) -> Self::Health;
+    fn name(&self) -> &'static str;
+}
 
 /// Daemon lifecycle states for Always-On agent
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

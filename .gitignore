@@ -67,6 +67,9 @@ identity.key
 # Claude Code worktrees
 .claude/worktrees/
 
+# Buzz Pollen worktrees
+.buzz/worktrees/
+
 # mesh-llm build cache
 .cache/
 

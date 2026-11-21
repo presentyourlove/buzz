@@ -12,6 +12,7 @@ members = [
     "crates/buzz-audit",
     "crates/buzz-acp",
     "crates/buzz-agent",
+    "crates/buzz-cron",
     "crates/sprig",
     "crates/buzz-test-client",
     "crates/buzz-ws-client",
@@ -56,6 +57,7 @@ description = "Buzz - Nostr-based messaging platform for human-agent collaborati
 # Runtime
 tokio       = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "signal", "process"] }
 tokio-util  = { version = "0.7", features = ["rt", "codec"] }
+chrono-tz   = "0.8"
 
 # HTTP + WebSocket
 axum        = { version = "0.8", features = ["ws", "macros"] }
@@ -167,6 +169,7 @@ buzz-sdk = { path = "crates/buzz-sdk" }
 buzz-ws-client = { path = "crates/buzz-ws-client" }
 buzz-relay-mesh = { path = "crates/buzz-relay-mesh" }
 buzz-datastore-tracing = { path = "crates/buzz-datastore-tracing" }
+buzz-cron = { path = "crates/buzz-cron" }
 
 [profile.release]
 lto = "thin"

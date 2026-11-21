@@ -28,7 +28,7 @@ mod health_reporter;
 mod hints;
 pub mod hooks;
 mod cron;
-mod event_bus;
+pub mod event_bus;
 mod scheduler;
 pub mod windows_job;
 pub mod harness;
@@ -41,13 +41,24 @@ mod mcp;
 pub mod model_capabilities;
 mod permission;
 pub mod ticket_sandbox;
+pub mod gates;
 pub mod triggers {
+    pub mod condition;
     pub mod event_bus;
+    pub mod orchestrator;
+    pub mod runtime;
     pub mod scheduler;
     pub mod trigger_registry;
     pub mod types;
 
+    pub use self::condition::{
+        AtomicCondition, ComparisonOperator, Condition, ConditionEvaluator, ConditionNode,
+        EvaluationContext, EvaluationError, EvaluationResult, FactProvider, Operator,
+        evaluate_condition,
+    };
     pub use self::event_bus::{EventBus, EventBusConfig};
+    pub use self::runtime::TriggerRuntime;
+pub use self::types::TriggerRuntimeConfig;
     pub use self::scheduler::{Scheduler, SchedulerConfig};
     pub use self::trigger_registry::TriggerRegistry;
     pub use self::types::{Trigger, TriggerType, TriggerStatus, EventSource};
@@ -63,6 +74,7 @@ use std::path::PathBuf;
 
 pub use config::Provider;
 pub use types::AgentError;
+pub use health_analyzer::{read_circuit_breaker, CircuitBreakerStatus, CircuitBreakerFile};
 
 // Browser Automation Phase 2 exports
 pub use capability_token::{Capability, CapabilityToken, CapabilityChecker, TokenFactory, CapabilityError};

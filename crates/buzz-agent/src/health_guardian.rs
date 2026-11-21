@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use cron::Schedule;
+use buzz_cron::{BuzzSchedule, TimezoneConfig, CronResult, CronScheduleConfig as BuzzCronScheduleConfig};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::time::sleep;
@@ -244,50 +245,33 @@ pub struct ConsecutiveFailures {
     pub last_status: OverallStatus,
 }
 
-/// Cron 排程表達式 (Phase B: 使用 cron crate 完整實作)
+/// Cron 排程表達式 (Phase 1.2: 遷移至 buzz-cron crate 完整實作)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CronSchedule {
+pub struct CronScheduleConfig {
     pub expression: String,
-    #[serde(skip)]
-    schedule: Option<Schedule>,
+    #[serde(default)]
+    pub timezone: Option<String>,  // IANA 時區名稱，如 "America/New_York", "Asia/Tokyo", "UTC"
 }
 
-impl CronSchedule {
+impl CronScheduleConfig {
     pub fn new(expression: String) -> Self {
-        Self { expression, schedule: None }
-    }
-
-    /// 取得或建立 cron Schedule (延遲初始化，支援 5 欄位自動補齊秒數為 6 欄位)
-    fn get_schedule(&mut self) -> Result<&Schedule, AgentError> {
-        if self.schedule.is_none() {
-            let parts: Vec<&str> = self.expression.split_whitespace().collect();
-            let normalized = if parts.len() == 5 {
-                format!("0 {}", parts.join(" "))
-            } else {
-                self.expression.clone()
-            };
-            let schedule: Schedule = normalized.parse()
-                .map_err(|e| AgentError::Other(format!("Invalid cron expression '{}': {}", self.expression, e)))?;
-            self.schedule = Some(schedule);
+        Self {
+            expression,
+            timezone: None,
         }
-        Ok(self.schedule.as_ref().unwrap())
     }
 
-    /// 檢查指定時間是否匹配排程
-    pub fn matches(&mut self, now: SystemTime) -> Result<bool, AgentError> {
-        let schedule = self.get_schedule()?;
-        let dt: chrono::DateTime<chrono::Utc> = now.into();
-        let prev = dt - chrono::Duration::seconds(1);
-        Ok(schedule.after(&prev).take(1).next() == Some(dt))
+    pub fn with_timezone(mut self, tz: String) -> Self {
+        self.timezone = Some(tz);
+        self
     }
 
-    /// 取得指定時間之後的下一次執行時間
-    pub fn next_after(&mut self, after: SystemTime) -> Result<SystemTime, AgentError> {
-        let schedule = self.get_schedule()?;
-        let after_dt: chrono::DateTime<chrono::Utc> = after.into();
-        let next = schedule.after(&after_dt).next()
-            .ok_or_else(|| AgentError::Other("No upcoming schedule found".into()))?;
-        Ok(next.into())
+    fn to_buzz_schedule(&self) -> CronResult<BuzzSchedule> {
+        let tz_config = match &self.timezone {
+            Some(tz_str) => TimezoneConfig::new(tz_str),
+            None => TimezoneConfig::utc(),
+        };
+        BuzzSchedule::from_str(&self.expression, tz_config)
     }
 }
 
@@ -367,9 +351,17 @@ pub async fn phase_b_run_daemon(config: Arc<Config>, agent_keys: Arc<crate::type
     let hg_config = config.health_guardian.as_ref()
         .ok_or_else(|| AgentError::Other("Health guardian not configured".into()))?;
     
-    // 解析排程
-    let mut schedule = CronSchedule::new(hg_config.schedule.clone());
-    let mut daily_deep_schedule = CronSchedule::new(hg_config.daily_deep_schedule.clone());
+    // 解析排程 - 使用 from_config 支援時區
+    let mut schedule = BuzzSchedule::from_config(BuzzCronScheduleConfig {
+        expression: hg_config.schedule.clone(),
+        timezone: Some(TimezoneConfig::utc()),
+        with_seconds: false,
+    }).map_err(|e| AgentError::Other(format!("Failed to parse schedule: {}", e)))?;
+    let mut daily_deep_schedule = BuzzSchedule::from_config(BuzzCronScheduleConfig {
+        expression: hg_config.daily_deep_schedule.clone(),
+        timezone: Some(TimezoneConfig::utc()),
+        with_seconds: false,
+    }).map_err(|e| AgentError::Other(format!("Failed to parse daily_deep_schedule: {}", e)))?;
     
     // 連續失敗計數檔案路徑
     let consecutive_path = hg_config.circuit_breaker_path.parent()
@@ -387,24 +379,13 @@ pub async fn phase_b_run_daemon(config: Arc<Config>, agent_keys: Arc<crate::type
         }
         
         let now = SystemTime::now();
+        let now_utc: DateTime<Utc> = now.into();
         
         // 檢查是否該執行常規檢查
-        let should_run = match schedule.matches(now) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::error!("Cron schedule error: {}", e);
-                false
-            }
-        };
+        let should_run = schedule.matches_utc(now_utc);
         
         // 檢查是否該執行深度檢查 (每日)
-        let should_deep = match daily_deep_schedule.matches(now) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::error!("Daily deep cron schedule error: {}", e);
-                false
-            }
-        };
+        let should_deep = daily_deep_schedule.matches_utc(now_utc);
         
         if should_run || should_deep {
             tracing::info!("Running health check (deep={})", should_deep);
@@ -465,11 +446,11 @@ pub async fn phase_b_run_daemon(config: Arc<Config>, agent_keys: Arc<crate::type
         
         // 計算下次檢查時間，避免忙等待
         let next_check = std::cmp::min(
-            schedule.next_after(now).unwrap_or(now + Duration::from_secs(60)),
-            daily_deep_schedule.next_after(now).unwrap_or(now + Duration::from_secs(60)),
+            schedule.next_after_utc(now_utc).unwrap_or(now_utc + Duration::from_secs(60)),
+            daily_deep_schedule.next_after_utc(now_utc).unwrap_or(now_utc + Duration::from_secs(60)),
         );
         
-        let sleep_duration = next_check.duration_since(now).unwrap_or(Duration::from_secs(60));
+        let sleep_duration = next_check.signed_duration_since(now_utc).to_std().unwrap_or(Duration::from_secs(60));
         let sleep_secs = sleep_duration.as_secs().min(60).max(1); // 最多睡 60 秒，最少 1 秒
         
         // 使用 select 等待關閉或超時
@@ -534,48 +515,40 @@ async fn send_alert_with_keys(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::SystemTime;
-    use chrono::{Utc, TimeZone};
+    use chrono::{TimeZone, Utc};
     
     #[test]
     fn test_cron_schedule_every_15_min() {
-        let mut cron = CronSchedule::new("*/15 * * * *".to_string());
-        // 2026-01-01 12:00:00 UTC
+        let cron = BuzzSchedule::from_expression("*/15 * * * *").unwrap();
         let t = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
-        let sys_time: SystemTime = t.into();
-        assert!(cron.matches(sys_time).unwrap());
+        assert!(cron.matches_utc(t));
         
         let t2 = Utc.with_ymd_and_hms(2026, 1, 1, 12, 15, 0).unwrap();
-        let sys_time2: SystemTime = t2.into();
-        assert!(cron.matches(sys_time2).unwrap());
+        assert!(cron.matches_utc(t2));
         
         let t3 = Utc.with_ymd_and_hms(2026, 1, 1, 12, 14, 0).unwrap();
-        let sys_time3: SystemTime = t3.into();
-        assert!(!cron.matches(sys_time3).unwrap());
+        assert!(!cron.matches_utc(t3));
     }
     
     #[test]
-    fn test_cron_schedule_daily_at_4am() {
-        let mut cron = CronSchedule::new("0 4 * * *".to_string());
+    fn test_cron_matches() {
+        let cron = BuzzSchedule::from_expression("0 4 * * *").unwrap();
         let t = Utc.with_ymd_and_hms(2026, 1, 1, 4, 0, 0).unwrap();
-        let sys_time: SystemTime = t.into();
-        assert!(cron.matches(sys_time).unwrap());
+        assert!(cron.matches_utc(t));
         
         let t2 = Utc.with_ymd_and_hms(2026, 1, 2, 4, 0, 0).unwrap();
-        let sys_time2: SystemTime = t2.into();
-        assert!(cron.matches(sys_time2).unwrap());
+        assert!(cron.matches_utc(t2));
         
         let t3 = Utc.with_ymd_and_hms(2026, 1, 1, 5, 0, 0).unwrap();
-        let sys_time3: SystemTime = t3.into();
-        assert!(!cron.matches(sys_time3).unwrap());
+        assert!(!cron.matches_utc(t3));
     }
     
     #[test]
     fn test_cron_next_after() {
-        let mut cron = CronSchedule::new("0 4 * * *".to_string());
+        let cron = BuzzSchedule::from_expression("0 4 * * *").unwrap();
         let t = Utc.with_ymd_and_hms(2026, 1, 1, 3, 30, 0).unwrap();
-        let next = cron.next_after(t.into()).unwrap();
-        let expected: SystemTime = Utc.with_ymd_and_hms(2026, 1, 1, 4, 0, 0).unwrap().into();
+        let next = cron.next_after(&t).unwrap();
+        let expected = Utc.with_ymd_and_hms(2026, 1, 1, 4, 0, 0).unwrap();
         assert_eq!(next, expected);
     }
 }

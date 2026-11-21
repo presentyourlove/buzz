@@ -2,6 +2,9 @@
 //!
 //! 依據 PLANS/PROACTIVE_TRIGGERS_PLAN.md 設計，參考 skills/agent-skill/src/task_store.rs 與 skills/antigravity/src/types.rs
 
+use crate::triggers::condition::{AtomicCondition, ComparisonOperator, Condition, ConditionNode, FactProvider};
+use crate::triggers::event_bus::EventBusConfig;
+use crate::triggers::scheduler::SchedulerConfig;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -103,43 +106,6 @@ pub enum SystemMetricType {
     ErrorRate,
 }
 
-/// 比較運算子
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
-pub enum ComparisonOperator {
-    Gt,
-    Gte,
-    Lt,
-    Lte,
-    Eq,
-    Ne,
-}
-
-/// 條件判斷
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Condition {
-    pub field: String,
-    pub operator: ConditionOperator,
-    pub value: serde_json::Value,
-}
-
-/// 條件運算子
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
-pub enum ConditionOperator {
-    Contains,
-    NotContains,
-    Equals,
-    NotEquals,
-    StartsWith,
-    EndsWith,
-    Matches,
-    GreaterThan,
-    LessThan,
-    In,
-    NotIn,
-}
-
 /// 動作定義
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -193,6 +159,12 @@ pub enum Action {
         #[serde(default = "default_timeout")]
         timeout_secs: u64,
     },
+    /// 發出內部事件
+    EmitEvent {
+        event_type: String,
+        #[serde(default)]
+        payload: serde_json::Value,
+    },
     /// HTTP 請求
     HttpRequest {
         method: HttpMethod,
@@ -233,7 +205,7 @@ pub struct RetryPolicy {
 }
 
 /// 去重配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DeduplicationConfig {
     pub key_template: String,
     pub window_secs: u64,
@@ -256,7 +228,7 @@ pub struct EngineConfig {
 }
 
 /// 事件總線訊息
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BusEvent {
     pub id: Uuid,
     pub source: EventSource,
@@ -331,6 +303,80 @@ fn default_true() -> bool {
     true
 }
 
+/// TriggerRuntime 配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggerRuntimeConfig {
+    #[serde(default = "default_check_interval")]
+    pub check_interval_secs: u64,
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent_triggers: usize,
+    #[serde(default = "default_event_buffer")]
+    pub event_buffer_size: usize,
+    #[serde(default = "default_true")]
+    pub enable_metrics: bool,
+    #[serde(default)]
+    pub scheduler_config: SchedulerConfig,
+    #[serde(default)]
+    pub event_bus_config: EventBusConfig,
+}
+
+impl Default for TriggerRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            check_interval_secs: 30,
+            max_concurrent_triggers: 10,
+            event_buffer_size: 1000,
+            enable_metrics: true,
+            scheduler_config: SchedulerConfig::default(),
+            event_bus_config: EventBusConfig::default(),
+        }
+    }
+}
+
+/// TriggerRuntime 健康狀態
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggerRuntimeHealth {
+    pub is_running: bool,
+    #[serde(default)]
+    pub running: bool,
+    pub registered_triggers: usize,
+    pub active_triggers: usize,
+    #[serde(default)]
+    pub trigger_count: usize,
+    pub last_check: DateTime<Utc>,
+    pub events_processed: u64,
+    pub errors_count: u64,
+    pub uptime_secs: u64,
+}
+/// TriggerRuntime 錯誤類型
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum TriggerRuntimeError {
+    #[error("Trigger already running")]
+    AlreadyRunning,
+    #[error("Trigger not running")]
+    NotRunning,
+    #[error("Invalid schedule: {0}")]
+    InvalidSchedule(String),
+    #[error("Trigger not found: {0}")]
+    TriggerNotFound(String),
+    #[error("Scheduler error: {0}")]
+    Scheduler(String),
+    #[error("Condition evaluation error: {0}")]
+    Condition(String),
+    #[error("Event bus error: {0}")]
+    EventBus(String),
+    #[error("Fact provider error: {0}")]
+    FactProvider(String),
+    #[error("Configuration error: {0}")]
+    Config(String),
+    #[error("Internal error: {0}")]
+    Internal(String),
+    #[error("Invalid trigger: {0}")]
+    InvalidTrigger(String),
+}
+
+/// 觸發器觸發事件
+
 impl Trigger {
     /// 建立新觸發器
     pub fn new(name: String, description: String, trigger_type: TriggerType) -> Self {
@@ -372,4 +418,15 @@ pub enum TriggerStatus {
     Error(String),
     /// 已完成（一次性觸發器）
     Completed,
+}
+
+/// 觸發器觸發事件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggerFiredEvent {
+    pub trigger_id: Uuid,
+    pub trigger_name: String,
+    pub fired_at: DateTime<Utc>,
+    pub condition_result: Option<bool>,
+    pub actions_executed: Vec<String>,
+    pub error: Option<String>,
 }
