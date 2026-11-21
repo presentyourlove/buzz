@@ -38,6 +38,7 @@ import 'features/pairing/pairing_page.dart';
 import 'features/pairing/pairing_provider.dart';
 import 'features/channels/agent_activity/observer_subscription.dart';
 import 'features/channels/channel_detail_page.dart';
+import 'features/channels/notification_reply.dart';
 import 'shared/widgets/app_route_observer.dart';
 import 'shared/widgets/root_page_route.dart';
 import 'features/profile/profile_provider.dart';
@@ -55,6 +56,7 @@ import 'shared/emoji/emoji_burst.dart';
 import 'shared/relay/relay.dart';
 import 'shared/theme/theme.dart';
 import 'shared/widgets/buzz_loading_indicator.dart';
+import 'shared/read_state/failed_clear_notice.dart';
 import 'shared/widgets/buzz_toast_host.dart';
 import 'shared/widgets/covered_route_keyboard_insets.dart';
 
@@ -406,6 +408,9 @@ class App extends HookConsumerWidget {
     // Start listening for buzz:// links immediately (even pre-auth) so a
     // cold-start link survives until the authenticated UI can dispatch it.
     ref.watch(pendingDeepLinkProvider);
+    // Unconditional: iOS may launch the app in the background only to send a
+    // notification reply, and no later frame may come to rebuild this.
+    ref.listen(notificationReplySenderProvider, (_, _) {});
 
     void applyBadge(UnreadBadgeState state) {
       if (state.highPriorityCount > 0) {
@@ -442,23 +447,25 @@ class App extends HookConsumerWidget {
         AuthStatus.authenticated => HostedAppGate(
           authenticated: true,
           child: CoveredRouteKeyboardInsets(
-            child: HomePage(
-              onAgents: showAgents,
-              defaultAgentBuilder: (context) => DefaultAgentLauncher(
-                onChooseAgent: () => showAgents(context, createOnOpen: true),
+            child: FailedClearNotice(
+              child: HomePage(
+                onAgents: showAgents,
+                defaultAgentBuilder: (context) => DefaultAgentLauncher(
+                  onChooseAgent: () => showAgents(context, createOnOpen: true),
+                ),
+                openBestieConversation: openBestieConversation,
+                mePageBuilder: (_, chat, workspace) => MePage(
+                  sliver: true,
+                  newChatAction: chat,
+                  newWorkspaceAction: workspace,
+                ),
+                backgroundHost: defaultTargetPlatform == TargetPlatform.iOS
+                    ? const QuickSendHost()
+                    : null,
+                settingsPageBuilder: _buildSettingsPage,
+                communityInvitePageBuilder: (_) => const CommunityInvitePage(),
+                communityAppearancePageBuilder: (_) => const ThemePickerPage(),
               ),
-              openBestieConversation: openBestieConversation,
-              mePageBuilder: (_, chat, workspace) => MePage(
-                sliver: true,
-                newChatAction: chat,
-                newWorkspaceAction: workspace,
-              ),
-              backgroundHost: defaultTargetPlatform == TargetPlatform.iOS
-                  ? const QuickSendHost()
-                  : null,
-              settingsPageBuilder: _buildSettingsPage,
-              communityInvitePageBuilder: (_) => const CommunityInvitePage(),
-              communityAppearancePageBuilder: (_) => const ThemePickerPage(),
             ),
           ),
         ),

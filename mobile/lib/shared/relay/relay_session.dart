@@ -12,6 +12,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../features/age_gate/age_signal_provider.dart';
 import '../auth/auth.dart';
+import '../diagnostics/diagnostic_reporter.dart';
 import '../hosted/hosted_relay_auth.dart';
 import '../hosted/builderlab_account.dart';
 import 'nostr_filters.dart';
@@ -32,6 +33,9 @@ import 'package:buzz/shared/crypto/event_signing.dart';
 export 'relay_session_types.dart';
 
 part 'relay_session_auth.dart';
+part 'relay_session_background.dart';
+part 'relay_session_delivery.dart';
+part 'relay_session_test_hooks.dart';
 part 'relay_session_subscriptions.dart';
 part 'relay_session_snapshot.dart';
 
@@ -105,6 +109,7 @@ class RelaySessionNotifier extends Notifier<SessionState> {
   Object _liveSubscriptionOwner = Object();
   final Map<Object, String> _visibleChannelsByOwner = {};
   final Map<Object, Future<void> Function()> _beforePauseCallbacks = {};
+  int _backgroundWorkHolds = 0;
   bool _socketConnected = false;
   bool _closedRetryReplayScheduled = false;
   String? _relayUrl;
@@ -121,10 +126,18 @@ class RelaySessionNotifier extends Notifier<SessionState> {
   @visibleForTesting
   set debugRelayUrl(String? value) => _relayUrl = value;
 
+  DiagnosticReporter _diagnostics = const NoopDiagnosticReporter();
+
   @override
   SessionState build() {
     final config = ref.watch(relayConfigProvider);
     _relayUrl = config.baseUrl;
+    // A switch names the next member before this session is rebuilt, so the
+    // old community's in-flight replies must not be filed under it.
+    _diagnostics = SignerDiagnosticReporter(
+      ref.read(diagnosticReporterProvider),
+      signer: pubkeyFromNsec(config.nsec),
+    );
     final auth = ref.watch(authProvider.select(_sessionAuthKey));
     _ageRestricted = ref.watch(ageSignalProvider) == AgeSignalState.restricted;
 
@@ -276,10 +289,15 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     final List<NostrEvent> events;
     try {
       events = await _queryDecoder(response);
-    } catch (_) {
+    } catch (error, stackTrace) {
       if (retired()) {
         throw StateError('Relay query belongs to a retired session');
       }
+      _diagnostics.reportError(
+        error,
+        stackTrace,
+        operation: DiagnosticOperation.relayQuery,
+      );
       rethrow;
     }
     if (retired()) {
@@ -310,8 +328,11 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     NostrFilter filter, {
     Duration timeout = const Duration(seconds: 8),
   }) async {
+    final generation = _contextGeneration;
     if (_rateLimitGate.isActive) await _rateLimitGate.wait();
-    if (_disposed) throw StateError('Relay session is disposed');
+    if (_disposed || generation != _contextGeneration) {
+      throw StateError('Relay history request belongs to a retired session');
+    }
     final subId = _nextSubId('h');
     final completer = Completer<List<NostrEvent>>();
 
@@ -431,20 +452,22 @@ class RelaySessionNotifier extends Notifier<SessionState> {
   Future<NostrEvent> publish(
     NostrEvent event, {
     Duration timeout = const Duration(seconds: 8),
+    Future<bool> Function()? mayPublish,
   }) async {
     final generation = _connectionGeneration;
     if (_rateLimitGate.isActive) await _rateLimitGate.wait();
-    if (!_isActiveConnection(generation) || !_socketConnected) {
-      throw StateError('Relay session is not connected');
+    bool connected() => _isActiveConnection(generation) && _socketConnected;
+    if (!connected()) throw RelayNotConnectedError();
+    if ((mayPublish != null && !await mayPublish()) || !connected()) {
+      throw StateError('Event no longer wanted');
     }
 
     final completer = Completer<NostrEvent>();
-
     final timer = Timer(timeout, () {
       final pending = _pendingEvents.remove(event.id);
       if (pending != null && !pending.completer.isCompleted) {
         pending.completer.completeError(
-          TimeoutException(
+          RelayAckTimeoutError(
             'Event ${event.id} not acknowledged within $timeout',
           ),
         );
@@ -485,35 +508,11 @@ class RelaySessionNotifier extends Notifier<SessionState> {
   void debugSupersedeConnection() => _connectionGeneration++;
 
   @visibleForTesting
-  void debugHandleDisconnected([Object? error]) {
-    _socketConnected = false;
-    _handleDisconnected(_connectionGeneration, error);
-  }
-
-  @visibleForTesting
-  void debugResetClosedRetriesForDisconnect() {
-    _socketConnected = false;
-    _resetAllClosedRetries();
-  }
-
-  @visibleForTesting
-  void debugSetSessionStatus(SessionStatus status) {
-    _socketConnected = status == SessionStatus.connected;
-  }
-
-  @visibleForTesting
   void debugPauseNow() => _pauseNow();
 
   @visibleForTesting
   void debugHandleSocketMessageForTest(List<dynamic> data) =>
       _handleMessage(data);
-
-  @visibleForTesting
-  void debugAttachSocketForTest(RelaySocket socket) {
-    _socket?.dispose();
-    _socket = socket;
-    _socketConnected = true;
-  }
 
   /// Registers a visible channel and returns an owner-scoped release callback.
   /// The most recently registered owner is prioritized during reconnect replay.
@@ -555,7 +554,7 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     } catch (error) {
       debugPrint('Background cleanup failed: $error');
     }
-    if (_backgroundedAt != null) _pauseNow();
+    if (_backgroundedAt != null && _backgroundWorkHolds == 0) _pauseNow();
   }
 
   void _pauseNow() {
@@ -568,6 +567,14 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     state = const SessionState(status: SessionStatus.disconnected);
   }
 
+  /// See [_RelaySessionBackgroundWork._holdForBackgroundWork].
+  void Function() holdForBackgroundWork(Duration maxHold) =>
+      _holdForBackgroundWork(maxHold);
+
+  /// See [_RelaySessionBackgroundWork._connectForBackgroundWork].
+  Future<bool> connectForBackgroundWork({required Duration timeout}) =>
+      _connectForBackgroundWork(timeout, state.status, ref);
+
   /// Called by the app lifecycle provider when the app returns to foreground.
   void onAppResumed() {
     _paused = false;
@@ -579,7 +586,9 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     final backgroundedLongEnoughToRequireReconnect =
         backgroundedAt != null &&
         _now().difference(backgroundedAt) >= _backgroundGraceDuration;
-    if (!backgroundedLongEnoughToRequireReconnect &&
+    // Keep a socket held open for background work: an OK may still come.
+    final heldOpen = _backgroundWorkHolds > 0 && _socketConnected;
+    if ((heldOpen || !backgroundedLongEnoughToRequireReconnect) &&
         state.status == SessionStatus.connected) {
       return;
     }
@@ -635,6 +644,7 @@ class RelaySessionNotifier extends Notifier<SessionState> {
         _handleDisconnected(generation, error, closeCode: socket.closeCode);
       },
     );
+    socket.diagnostics = _diagnostics;
     _socket = socket;
 
     try {
@@ -886,6 +896,7 @@ class RelaySessionNotifier extends Notifier<SessionState> {
         ? data[2] as String
         : 'subscription closed by relay';
     final closedClass = classifyRelayClosed(message);
+    _reportInvalidRequest(message);
 
     final historySub = _historySubscriptions.remove(subId);
     if (historySub != null) {
@@ -998,6 +1009,7 @@ class RelaySessionNotifier extends Notifier<SessionState> {
         ? data[3] as String
         : '';
 
+    if (!accepted) _reportInvalidRequest(message);
     final pending = _pendingEvents.remove(eventId);
     if (pending == null) return;
     pending.timeout.cancel();
@@ -1029,49 +1041,11 @@ class RelaySessionNotifier extends Notifier<SessionState> {
       }
       if (!pending.completer.isCompleted) {
         pending.completer.completeError(
-          Exception(message.isNotEmpty ? message : 'Event rejected'),
+          RelayEventRejectedException(
+            message.isNotEmpty ? message : 'Event rejected',
+          ),
         );
       }
-    }
-  }
-
-  void _scheduleFlush() {
-    _flushTimer ??= Timer(
-      const Duration(milliseconds: _eventBatchMs),
-      _flushEventBuffer,
-    );
-  }
-
-  void _flushBufferedEventsNow() {
-    _flushTimer?.cancel();
-    _flushTimer = null;
-    _flushEventBuffer();
-  }
-
-  void _flushEventBuffer() {
-    _flushTimer = null;
-    if (_eventBuffer.isEmpty) return;
-
-    final batch = List<_BufferedEvent>.from(_eventBuffer);
-    _eventBuffer.clear();
-
-    for (final buffered in batch) {
-      final sub = _liveSubscriptions[buffered.subId];
-      if (sub == null) continue;
-
-      // Deduplicate per subscription. The same relay event can legitimately
-      // match multiple live subscriptions, e.g. the channel list unread listener
-      // and the open channel message listener.
-      final deliveryKey = '${buffered.subId}:${buffered.event.id}';
-      if (_recentDeliveryKeys.contains(deliveryKey)) continue;
-
-      // Cap the dedup set to prevent unbounded memory growth.
-      if (_recentDeliveryKeys.length >= _maxRecentDeliveryKeys) {
-        _recentDeliveryKeys.clear();
-      }
-      _recentDeliveryKeys.add(deliveryKey);
-
-      sub.onEvent(buffered.event);
     }
   }
 
@@ -1158,7 +1132,7 @@ class RelaySessionNotifier extends Notifier<SessionState> {
     for (final entry in _pendingEvents.values) {
       entry.timeout.cancel();
       if (!entry.completer.isCompleted) {
-        entry.completer.completeError(error ?? Exception('Connection lost'));
+        entry.completer.completeError(RelayAckLostError(error));
       }
     }
     _pendingEvents.clear();

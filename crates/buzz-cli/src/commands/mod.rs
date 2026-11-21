@@ -21,6 +21,7 @@ pub mod patches;
 pub mod pr;
 pub mod project_channel;
 pub mod projects;
+pub mod raw;
 pub mod reactions;
 pub(crate) mod read_state;
 pub mod reminders;
@@ -35,6 +36,7 @@ mod sidebar_sync;
 pub mod social;
 pub mod upload;
 pub mod users;
+pub(crate) mod verified_profiles;
 pub mod workflows;
 
 use crate::{client::normalize_write_response, error::CliError};
