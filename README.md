@@ -1386,6 +1386,27 @@ just reset          # ⚠️  Wipe data + recreate
     - `Cargo.lock`：合流官方相依更新與自研版本鎖定。
     - `README.md`：記錄 Phase 62 官方 97 項提交無損升級與全量測試驗收結果。
 
+### [Phase 63] Web UI Dual-Track Recovery, Tasks API Adapter Fix & Live State Synchronization (2026-11-21)
+- **Web UI 斷線徹底復原與雙軌微服務自癒拉起**：
+  - **後台微服務重新編譯與啟動 (Port 8080)**：
+    - 完成 `proactive-trigger-orchestrator.exe` 二進位執行檔建置。
+    - 靜默守護拉起監聽 `http://127.0.0.1:8080`，驗證 `/health` (healthy)、`/api/v1/agents`、`/api/v1/tasks` 與 `/ws` WebSocket 正常在線。
+  - **前端資料適配器相容修復 (`dashboard/src/composables/useApi.ts`)**：
+    - 修復 `fetchTasks` 解析缺陷，支援後端直出 Array 與 Paginated Response 物件結構，徹底解決工單載入 `undefined` 導致降級為靜態預設值的問題。
+    - 執行 `npm run build` 重新產出生產環境 `dashboard/dist` 靜態資產。
+  - **前端預覽服務重啟 (Port 4173)**：
+    - 重新綁定並監聽 `http://localhost:4173`，無縫代理 API 與 WebSocket 連線。
+  - **特工即時心跳與真實任務全景數據同步 (`data/*.json`)**：
+    - `data/agents_runtime.json`：校準並更新 6 大特工即時活躍心跳時間戳。
+    - `data/tasks_runtime.json`：注入最新實施之 Phase 56~62 關鍵里程碑（Triple Gate 三閘發版防線、S3 量化哨兵、B2 每日進化任務生成引擎、B1 通訊守護、官方 97 項無損合流、DASH-004 實時遙測自癒），全量 12 筆工單完整渲染。
+- **檔案清單 (File Inventory)**：
+  - **修改 (Modified)**：
+    - `dashboard/src/composables/useApi.ts`：修復 tasks API 響應結構解構相容性。
+    - `dashboard/dist/*`：前端生產環境更新建置。
+    - `data/agents_runtime.json`：6 大特工即時心跳更新。
+    - `data/tasks_runtime.json`：新增 Phase 56~62 實體任務清單。
+    - `README.md`：記錄 Phase 63 服務自癒復原與狀態同步。
+
 ---
 
 <p align="center">

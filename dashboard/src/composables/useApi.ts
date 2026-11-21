@@ -92,9 +92,13 @@ async function fetchTasks(params?: { status?: TaskStatus; agentId?: string; limi
   if (params?.limit) query.set('limit', String(params.limit))
   const qs = query.toString() ? `?${query.toString()}` : ''
 
-  const response = await request<PaginatedResponse<Task>>(`/tasks${qs}`)
+  const response = await request<PaginatedResponse<Task> | Task[]>(`/tasks${qs}`)
   if (response.success && response.data) {
-    tasks.value = response.data.items
+    if (Array.isArray(response.data)) {
+      tasks.value = response.data
+    } else if (response.data && 'items' in (response.data as object)) {
+      tasks.value = (response.data as PaginatedResponse<Task>).items
+    }
   }
   return tasks.value
 }

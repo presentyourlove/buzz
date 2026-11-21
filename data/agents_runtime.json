@@ -7,7 +7,7 @@
     ],
     "displayName": "Fizz (秘書)",
     "id": "fizz",
-    "lastActiveAt": "2026-11-20T07:27:37.782354+00:00",
+    "lastActiveAt": "2026-11-21T06:49:42.109325+00:00",
     "metadata": {
       "department": "秘書處",
       "model": "gemini-3.1-flash-lite"
@@ -24,7 +24,7 @@
     ],
     "displayName": "Honey (大腦)",
     "id": "honey",
-    "lastActiveAt": "2026-11-20T15:00:00Z",
+    "lastActiveAt": "2026-11-21T06:46:25Z",
     "metadata": {
       "department": "資料研究部",
       "model": "gemini-3.5-flash-lite"
@@ -42,7 +42,7 @@
     ],
     "displayName": "Honey2 (架構企劃官)",
     "id": "honey2",
-    "lastActiveAt": "2026-11-20T07:27:37.782354+00:00",
+    "lastActiveAt": "2026-11-21T06:49:42.109325+00:00",
     "metadata": {
       "department": "技術開發部",
       "model": "nemotron-3-ultra-550b-a55b:free"
@@ -60,7 +60,7 @@
     ],
     "displayName": "Pollen (技術架構師)",
     "id": "pollen",
-    "lastActiveAt": "2026-11-20T07:27:37.782354+00:00",
+    "lastActiveAt": "2026-11-21T06:49:42.109325+00:00",
     "metadata": {
       "department": "技術開發部",
       "model": "nemotron-3-ultra-550b-a55b"
@@ -78,7 +78,7 @@
     ],
     "displayName": "Sentry (品質與資安總監)",
     "id": "sentry",
-    "lastActiveAt": "2026-11-20T07:27:37.782354+00:00",
+    "lastActiveAt": "2026-11-21T06:49:42.109325+00:00",
     "metadata": {
       "department": "品質監控部",
       "model": "nemotron-3.5-lightning:free"
@@ -96,7 +96,7 @@
     ],
     "displayName": "Wax (記憶整理員)",
     "id": "wax",
-    "lastActiveAt": "2026-11-20T07:27:37.782354+00:00",
+    "lastActiveAt": "2026-11-21T06:49:42.109325+00:00",
     "metadata": {
       "department": "記憶整理部",
       "model": "nemotron-3.5-super-vl:free"
